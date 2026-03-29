@@ -23,7 +23,7 @@ The recommended architectural position is:
 - **Airflow** is the orchestration and control-plane scheduler
 - **Firebolt Core** is an optional acceleration layer for interactive analytics over Iceberg-backed data
 
-The most important decision in this design is to make **Apache Iceberg the centre of gravity**. Without that, the platform degenerates into a file swamp. Apache Iceberg is explicitly designed as a high-performance table format for large analytic datasets and supports safe multi-engine access from engines including Spark and Flink. See the Iceberg documentation and multi-engine support references:
+The most important decision in this design is to make **Apache Iceberg the foundational abstraction**. Without that, the platform degenerates into a file swamp. Apache Iceberg is explicitly designed as a high-performance table format for large analytic datasets and supports safe multi-engine access from engines including Spark and Flink. See the Iceberg documentation and multi-engine support references:
 
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg overview: https://iceberg.apache.org/
