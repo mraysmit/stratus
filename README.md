@@ -7,32 +7,32 @@ The key design decision is that **Apache Iceberg is the foundational abstraction
 ## Architecture Overview
 
 ```text
-                         Users / Apps
-                  BI · SQL · APIs · ML · AI
-                            │
-               ┌────────────┴────────────┐
-               ▼                         ▼
-        Firebolt Core            Spark SQL / Notebook
-      (optional serving)        (engineering access)
-               └────────────┬────────────┘
-                            ▼
-                    Apache Iceberg Tables
-                   bronze / silver / gold
-                            │
-            ┌───────────────┼───────────────┐
-            ▼               ▼               ▼
-        Spark           Flink        Table Maintenance
-      batch ETL      streaming       compaction etc.
-            └───────────────┼───────────────┘
-                            ▼
-                  MinIO Object Storage
-              raw files + Iceberg data/meta
+                                                                         Users / Apps
+                                                      BI · SQL · APIs · ML · AI
+                                                                                    │
+                                           ┌────────────┴────────────┐
+                                           ▼                         ▼
+                        Firebolt Core            Spark SQL / Notebook
+                  (optional serving)        (engineering access)
+                                           └────────────┬────────────┘
+                                                                                    ▼
+                                                            Apache Iceberg Tables
+                                                       bronze / silver / gold
+                                                                                    │
+                                    ┌───────────────┼───────────────┐
+                                    ▼               ▼               ▼
+                        Spark           Flink        Table Maintenance
+                  batch ETL      streaming       compaction etc.
+                                    └───────────────┼───────────────┘
+                                                                                    ▼
+                                                      MinIO Object Storage
+                                          raw files + Iceberg data/meta
 
-  ┌──────────────────────────────────────────────────┐
-  │ Governance / Control Plane                       │
-  │ Atlas · glossary · lineage · classifications     │
-  │ Airflow · scheduling · dependencies · operations │
-  └──────────────────────────────────────────────────┘
+      ┌──────────────────────────────────────────────────┐
+      │ Governance / Control Plane                       │
+      │ Atlas · glossary · lineage · classifications     │
+      │ Airflow · scheduling · dependencies · operations │
+      └──────────────────────────────────────────────────┘
 ```
 
 ## Core Components
