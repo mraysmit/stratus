@@ -2,7 +2,7 @@
 
 An on-prem data fabric platform built on open standards, governed data lifecycle, and separated compute concerns.
 
-The central design decision is that **Apache Iceberg is the centre of gravity**. Every analytical dataset — bronze, silver, and gold — is an Iceberg table. Without that constraint the platform degenerates into a file swamp.
+The key design decision is that **Apache Iceberg is the foundational abstraction**. Every analytical dataset — bronze, silver, and gold — is an Iceberg table. Without that constraint the platform degenerates into a file swamp.
 
 ## Architecture Overview
 
