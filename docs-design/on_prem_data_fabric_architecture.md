@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This document defines a pragmatic on-prem data fabric architecture built around **MinIO (S3-compatible object storage)**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, **Apache Atlas**, **Apache Airflow**, and an optional **Firebolt Core** serving layer.
+This document defines a pragmatic on-prem data fabric architecture built around **MinIO (S3-compatible object storage)**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus optional **Firebolt Core** serving layer.
 
 The design goal is not to assemble a random list of fashionable tools. The goal is to create a governed, scalable, batch-and-streaming-capable platform that supports:
 
@@ -19,11 +19,15 @@ The recommended architectural position is:
 - **Iceberg** is the mandatory table abstraction and data contract
 - **Spark** is the primary batch compute engine
 - **Flink** is the primary streaming and real-time compute engine
+- **Kafka** is the recommended event backbone when the platform requires durable, replayable shared streaming and CDC ingestion
+- a **REST-oriented Iceberg catalog** is the default metadata control point for multi-engine interoperability
 - **Atlas** is the metadata and governance plane
+- **Ranger** is the policy enforcement layer for classification-driven access control
 - **Airflow** is the orchestration and control-plane scheduler
+- **Trino** is the default shared interactive SQL query plane over governed Iceberg datasets
 - **Firebolt Core** is an optional acceleration layer for interactive analytics over Iceberg-backed data
 
-The most important decision in this design is to make **Apache Iceberg the foundational abstraction**. Without that, the platform degenerates into a file swamp. Apache Iceberg is explicitly designed as a high-performance table format for large analytic datasets and supports safe multi-engine access from engines including Spark and Flink. See the Iceberg documentation and multi-engine support references:
+The most important decision in this design is to make **Apache Iceberg the foundational abstraction**. Without that, the platform degenerates into a file swamp. Apache Iceberg is explicitly designed as a high-performance table format for large analytic datasets and supports safe multi-engine access from engines including Spark and Flink. The catalog choice is also a first-order design decision, not a later implementation detail. This architecture standardizes on a centrally managed REST-oriented catalog to reduce cross-engine ambiguity. See the Iceberg documentation and multi-engine support references:
 
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg overview: https://iceberg.apache.org/
@@ -46,15 +50,15 @@ MinIO provides S3-compatible object storage for files. It is **not** the semanti
 Trying to force one engine to do both jobs badly is poor architecture.
 
 ### 2.4 Governance is a first-class platform capability
-A data fabric without cataloguing, ownership, lineage, and classification is just storage plus processing. Governance must be built in from day one via **Apache Atlas** and enforced naming, ownership, and metadata publication conventions.
+A data fabric without cataloguing, ownership, lineage, classification, and enforceable policy is just storage plus processing. Governance must be built in from day one via **Apache Atlas**, **Apache Ranger**, and enforced naming, ownership, metadata publication, and classification conventions.
 
 ### 2.5 Orchestration is not streaming
 **Airflow** should orchestrate finite, bounded workflows and platform operations. It should not be used as a streaming runtime or a pseudo event bus. Apache Airflow is explicitly a workflow platform for authoring, scheduling, and monitoring workflows as directed acyclic graphs of tasks:
 
 - Apache Airflow overview: https://airflow.apache.org/
 
-### 2.6 Query serving is optional and pluggable
-The serving/query layer should be replaceable. If deployed, **Firebolt Core** should sit northbound of curated Iceberg datasets as an acceleration and serving layer, not as the foundational storage or governance layer.
+### 2.6 Query serving is structured in two layers
+The default shared query plane should be **Trino over Iceberg** for open interactive SQL access. If deployed, **Firebolt Core** should sit northbound of curated Iceberg datasets as an optional acceleration and serving layer, not as the foundational storage or governance layer.
 
 ---
 
@@ -68,13 +72,13 @@ The serving/query layer should be replaceable. If deployed, **Firebolt Core** sh
                                       │
                      ┌────────────────┴────────────────┐
                      │                                 │
-                     ▼                                 ▼
-          ┌─────────────────────┐           ┌──────────────────────┐
-          │   Firebolt Core     │           │ Spark SQL / Notebook │
-          │ low-latency serving │           │ engineering access   │
-          └─────────────────────┘           └──────────────────────┘
-                     │                                 │
-                     └────────────────┬────────────────┘
+                     ▼                 ▼               ▼
+          ┌─────────────────────┐  ┌──────────────┐  ┌──────────────────────┐
+          │   Firebolt Core     │  │    Trino     │  │ Spark SQL / Notebook │
+          │ low-latency serving │  │ shared query │  │ engineering access   │
+          └─────────────────────┘  └──────────────┘  └──────────────────────┘
+                     │                 │               │
+                     └─────────────────┴───────────────┘
                                       ▼
                           ┌─────────────────────────┐
                           │   Apache Iceberg Tables │
@@ -89,6 +93,12 @@ The serving/query layer should be replaceable. If deployed, **Firebolt Core** sh
         │ Apache Spark     │  │ Apache Flink     │  │ Table Maintenance│
         │ batch ETL / ELT  │  │ streaming / CDC  │  │ compaction etc.  │
         └──────────────────┘  └──────────────────┘  └──────────────────┘
+                    ▲                 ▲
+                    │                 │
+            ┌──────────────┐  ┌────────────────────────────┐
+            │ REST Catalog │  │ Kafka / Event Backbone     │
+            │ metadata ctrl│  │ (when deployed — Phase 2+) │
+            └──────────────┘  └────────────────────────────┘
                     │                 │                 │
                     └─────────────────┴─────────────────┘
                                       │
@@ -100,7 +110,7 @@ The serving/query layer should be replaceable. If deployed, **Firebolt Core** sh
 
             ┌─────────────────────────────────────────────────────┐
             │ Governance / Control Plane                         │
-            │ Apache Atlas + glossary + lineage + classifications│
+            │ Apache Atlas + Ranger + lineage + classifications  │
             │ Airflow + scheduling + dependencies + operations   │
             └─────────────────────────────────────────────────────┘
 ```
@@ -222,10 +232,39 @@ Flink is built for bounded and unbounded streams and supports stateful stream pr
 - Flink should own real-time data movement and continuous pipelines
 - Flink should not be replaced by Airflow for event-driven processing
 - streaming write patterns into Iceberg should be tested carefully for commit cadence, compaction, and consumer freshness
+- in steady state, Flink should be the sole writer for streaming-owned tables rather than sharing write ownership casually with batch jobs
 
 ---
 
-## 4.5 Apache Atlas
+## 4.5 Apache Kafka
+
+### Role
+Kafka is the preferred event backbone when the platform requires durable, replayable shared streaming and CDC use cases.
+
+### Responsibilities
+- CDC event transport
+- business event ingestion
+- replayable streams for Flink consumption
+- buffering and back-pressure smoothing between producers and stream processors
+
+### When Kafka is justified
+- continuous CDC ingestion with replay requirements
+- multiple downstream consumers on the same event stream
+- bursty producers that need durable buffering
+- event-driven platform patterns beyond analytical table production
+
+### When Kafka is not required in the foundation
+- scheduled batch ingestion dominates the workload
+- source systems land files or bounded extracts in object storage
+- Spark-driven bounded processing is the primary operating model
+- near-real-time needs are modest and do not require a shared replayable event log
+
+### Design Position
+Kafka should not be treated as automatically mandatory just because Flink exists in the architecture. Kafka becomes a core component when the platform needs durable event retention, independent consumers, replay, back-pressure absorption, or CDC at meaningful scale. For batch-heavy or file-landed foundations, Kafka can remain a Phase 2 addition rather than a Phase 1 requirement.
+
+---
+
+## 4.6 Apache Atlas
 
 ### Role
 Atlas is the metadata and governance plane.
@@ -255,10 +294,27 @@ The hard part is not installing Atlas. The hard part is:
 - define mandatory metadata fields for every dataset
 - define ownership, data steward, SLA, sensitivity, and domain tags
 - integrate Atlas with data quality and promotion workflows where possible
+- treat lineage emission from Spark and Flink jobs as a delivery contract, not an aspiration
 
 ---
 
-## 4.6 Apache Airflow
+## 4.7 Apache Ranger
+
+### Role
+Ranger is the authorization and policy enforcement plane for data access controls.
+
+### Responsibilities
+- enforce role-based access by domain and environment
+- apply tag-based or classification-driven policies for sensitive datasets
+- align policy enforcement with Atlas classifications where possible
+- provide an auditable enforcement path instead of relying on naming conventions and process discipline alone
+
+### Design Position
+Atlas without an enforcement layer is incomplete for sensitive-data governance. The platform should pair Atlas metadata and classifications with Ranger policy enforcement so classifications can drive real access rules.
+
+---
+
+## 4.8 Apache Airflow
 
 ### Role
 Airflow is the workflow orchestration and control-plane scheduler.
@@ -291,7 +347,23 @@ Airflow should not be treated as:
 
 ---
 
-## 4.7 Firebolt Core
+## 4.9 Trino
+
+### Role
+Trino is the default open interactive SQL and shared query plane over governed Iceberg datasets.
+
+### Best-fit responsibilities
+- analyst and BI access to curated datasets
+- shared SQL access across domains
+- ad hoc query and federated read patterns where appropriate
+- open query access when Firebolt is not deployed
+
+### Design position
+Spark SQL and notebooks remain engineering tools. They should not be treated as the default enterprise interactive query plane.
+
+---
+
+## 4.10 Firebolt Core
 
 ### Role
 Firebolt Core is an optional high-performance serving engine for interactive SQL over external data and Iceberg datasets.
@@ -318,26 +390,26 @@ Firebolt should sit **northbound of Iceberg** and serve curated data products. I
 - when the platform has not yet stabilised its Iceberg and governance foundations
 - when cost or licensing complexity is unclear
 - when the operating model is already too heavy
+- when the platform has not yet proven a stable curated layer and a real low-latency concurrency requirement
 
 ---
 
-## 5. Recommended Additional Components
+## 5. Data Quality Subsystem
 
-The requested toolset is close, but one obvious omission is **Kafka or an equivalent event backbone**.
+The requested toolset is close, but one obvious omission is a concrete **data quality subsystem**.
 
-## 5.1 Kafka or equivalent message/event backbone
+## 5.1 Quality execution and promotion
 
 ### Why it matters
-If the platform needs genuine real-time ingestion and stream processing, Flink usually needs an event source that is not just polling files.
+Data quality is currently described as a principle. That is not sufficient. The platform needs a concrete quality execution pattern, stored quality outcomes, and promotion rules tied to those outcomes.
 
 ### Recommended use
-- CDC events
-- business event ingestion
-- decoupled producer/consumer patterns
-- replayable event streams
-- buffering and back-pressure smoothing
+- schema validation before write or promotion
+- freshness, completeness, uniqueness, and business-rule checks
+- promotion gates from bronze to silver and silver to gold
+- durable storage of quality outcomes and failure context
 
-Without an event backbone, Flink may still be usable, but the platform will be weaker for serious streaming use cases.
+Without a defined quality subsystem, the platform has governance language but weak delivery discipline.
 
 ---
 
@@ -394,6 +466,9 @@ Consumption-ready data products.
 ### Rule
 All three zones should be implemented as **Iceberg tables**, not folder conventions alone.
 
+### Write ownership rule
+For any given table, steady-state write ownership should be explicit and narrow. The platform should prefer a one-writer pattern per table where possible, with compaction ownership assigned deliberately and not left ambiguous across engines.
+
 ---
 
 ## 7. Control Planes
@@ -404,13 +479,17 @@ A clean design separates three planes.
 Contains:
 - MinIO object storage
 - Iceberg tables
+- REST catalog
 - Spark
 - Flink
+- Kafka or equivalent event backbone when required by the streaming use case
+- Trino
 - Firebolt serving access
 
 ## 7.2 Metadata and Governance Plane
 Contains:
 - Atlas
+- Ranger
 - glossary
 - lineage
 - classification
@@ -444,14 +523,19 @@ Common Iceberg catalog approaches include:
 Iceberg’s Flink docs explicitly call out catalog configuration options such as `hive`, `hadoop`, `rest`, `jdbc`, and others depending on implementation support:
 - Iceberg Flink catalog configuration: https://iceberg.apache.org/docs/latest/flink/
 
-### Recommendation
-For a serious multi-engine platform, use a catalog strategy that is:
-- centrally managed
-- compatible with Spark and Flink
-- supportable in your environment
-- decoupled enough to avoid engine-specific lock-in
+### Decision
+For this architecture, the default catalog decision is a **centrally managed REST-oriented Iceberg catalog**.
 
-For many enterprise designs, a **REST-oriented or centrally managed catalog approach** is strategically cleaner than scattering metadata into ad hoc engine-specific setups.
+### Why this is the default
+- it is compatible with the multi-engine direction of the platform
+- it keeps metadata control in a dedicated service boundary instead of scattering catalog behavior into engine-local configurations
+- it is a strategically cleaner fit for long-term interoperability and operational ownership
+
+### Alternative path
+If the platform later needs Git-like branching, tagging, and data-environment workflows at the catalog layer, **Nessie** is the main alternative worth evaluating. That should be treated as a deliberate platform change, not an implicit implementation detail.
+
+### Design rule
+Spark, Flink, Trino, and maintenance workflows should be designed against the same central catalog boundary.
 
 ---
 
@@ -479,7 +563,10 @@ Lineage should cover:
 - silver to gold materialisations
 - consuming marts and serving tables
 
-## 9.3 Domain ownership
+## 9.3 Lineage delivery contract
+Lineage quality will be poor unless metadata emission is standardized. Spark and Flink jobs should emit dataset, schema, run, and transformation metadata in a consistent format, and publication to Atlas should be part of deployment and job-completion contracts rather than a best-effort extra.
+
+## 9.4 Domain ownership
 The platform team should own the shared platform and conventions.
 Domain teams should own their data products.
 
@@ -513,6 +600,15 @@ The platform must schedule:
 
 If this is neglected, performance and reliability will degrade over time.
 
+## 10.4 Data quality and promotion
+Quality checks should run as explicit bounded tasks with durable outcomes and clear promotion consequences.
+
+The platform should define:
+- what executes quality checks
+- where quality results are stored
+- which failures block promotion
+- who can override failed promotions and under what conditions
+
 ---
 
 ## 11. Reference End-to-End Flow
@@ -527,7 +623,9 @@ If this is neglected, performance and reliability will degrade over time.
 7. Firebolt optionally serves curated gold datasets
 
 ### 11.2 Streaming flow
-1. source events or CDC changes land in Kafka or equivalent
+This flow applies when a streaming backbone such as Kafka is deployed (typically Phase 2+).
+
+1. source events or CDC changes land in Kafka or equivalent event backbone
 2. Flink ingests and enriches streams
 3. Flink writes bronze or silver Iceberg tables continuously
 4. downstream Spark or Flink jobs materialise higher-order views
@@ -561,6 +659,7 @@ A realistic on-prem deployment would separate infrastructure by concern.
 - identity and access integration
 - certificate and TLS management
 - observability stack
+- quality execution and results services where required by the chosen implementation
 
 ---
 
@@ -572,9 +671,15 @@ At minimum, the platform should support:
 - service-account-based job execution
 - encryption in transit and at rest
 - audited metadata changes and data access where possible
-- classification-driven policy attachment through governance tooling
+- classification-driven policy attachment through Atlas and Ranger integration
 
 Sensitive datasets should not rely on bucket naming and tribal process alone. Access control and classification must align.
+
+### Enforcement model
+The architecture should treat **Atlas + Ranger** as the default governance-and-enforcement pairing:
+- Atlas owns metadata, classifications, glossary, and lineage
+- Ranger enforces access policy, including classification-driven controls where supported
+- service identities and role mappings should be managed consistently across engines and environments
 
 ---
 
@@ -603,6 +708,8 @@ Data quality should be treated as part of the delivery pipeline, not a decorativ
 
 Quality gates should be applied before promotion from bronze to silver and from silver to gold where appropriate.
 
+The platform should define concrete quality contracts, execution ownership, and failure handling instead of leaving quality as a purely conceptual requirement.
+
 ---
 
 ## 15. Risks and Mitigations
@@ -615,12 +722,12 @@ Quality gates should be applied before promotion from bronze to silver and from 
 ## 15.2 Risk: Spark and Flink commit contention or ownership confusion
 **Cause:** multiple engines writing the same tables without clear rules.
 
-**Mitigation:** define ownership boundaries for layers, compaction, retention, and update patterns.
+**Mitigation:** define one-writer-per-table steady-state ownership where possible, assign compaction ownership explicitly, and separate streaming append patterns from batch-upsert or serving-table materialization patterns.
 
 ## 15.3 Risk: Atlas becomes shelfware
 **Cause:** no serious metadata ingestion, no ownership discipline, no lineage automation.
 
-**Mitigation:** make metadata publication mandatory in delivery pipelines and establish data stewardship roles.
+**Mitigation:** make metadata publication mandatory in delivery pipelines, standardize metadata emission from Spark and Flink jobs, and establish data stewardship roles.
 
 ## 15.4 Risk: Airflow becomes a platform dumping ground
 **Cause:** every dependency and runtime concern pushed into DAGs.
@@ -637,6 +744,11 @@ Quality gates should be applied before promotion from bronze to silver and from 
 
 **Mitigation:** deliver by domain use case, with measurable product outcomes and curated gold datasets.
 
+## 15.7 Risk: platform ambiguity at the seams
+**Cause:** catalog undecided, query plane undecided, authorization undecided, lineage automation assumed.
+
+**Mitigation:** treat catalog, query plane, authorization model, and lineage publication as named platform products with explicit owners and operating expectations.
+
 ---
 
 ## 16. Phased Roadmap
@@ -645,17 +757,22 @@ Quality gates should be applied before promotion from bronze to silver and from 
 Deliver:
 - MinIO object storage
 - Iceberg table standard
+- central REST-oriented catalog
 - Spark batch processing
+- Trino shared query layer
 - Airflow orchestration
-- Atlas basic metadata model
+- Atlas and Ranger baseline governance and policy model
 - bronze/silver/gold standards
 
 Primary outcome:
 - governed batch lakehouse foundation
 
+### Phase 1 scope note
+Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after MinIO, Iceberg, Spark, Airflow, and Atlas are stable.
+
 ## Phase 2 – Streaming and Operational Maturity
 Deliver:
-- Kafka or equivalent event backbone
+- Kafka event backbone
 - Flink streaming ingestion
 - CDC pipelines
 - lineage automation improvements
@@ -694,17 +811,24 @@ The recommended architecture is:
 - **Apache Iceberg** as the mandatory table abstraction and data contract
 - **Apache Spark** for heavy batch compute and historical transforms
 - **Apache Flink** for streaming and real-time computation
+- **Apache Kafka** as the preferred streaming and CDC event backbone when durable shared streaming is required
+- a **central REST-oriented catalog** as the multi-engine metadata control point
 - **Apache Atlas** for metadata, glossary, lineage, and governance
+- **Apache Ranger** for policy enforcement tied to classifications and access rules
 - **Apache Airflow** for batch orchestration and control-plane automation
+- **Trino** as the default open interactive SQL query plane
 - **Firebolt Core** as an optional serving/query acceleration layer over curated Iceberg datasets
 
 This is a credible and modern on-prem data fabric design.
 
 The blunt truth is that the hardest part is not installing the components. The hardest parts are:
 - enforcing Iceberg as the real contract
+- committing to a central catalog and query plane early
 - defining dataset ownership and metadata standards
+- pairing governance metadata with enforceable authorization
 - controlling multi-engine write semantics
 - maintaining table health over time
+- making lineage trustworthy through standardized publication
 - stopping orchestration and governance layers from becoming chaotic
 
 Get those parts right and the platform can work well.
@@ -721,4 +845,8 @@ Get them wrong and you will just have an expensive collection of tools.
 - Apache Iceberg Flink integration: https://iceberg.apache.org/docs/latest/flink/
 - Apache Airflow: https://airflow.apache.org/
 - Apache Atlas: https://atlas.apache.org/
+- Apache Ranger: https://ranger.apache.org/
+- Apache Kafka: https://kafka.apache.org/
+- Trino documentation: https://trino.io/docs/current/
+- Trino Iceberg connector: https://trino.io/docs/current/connector/iceberg.html
 - Firebolt external data and Iceberg: https://docs.firebolt.io/performance-and-observability/iceberg-and-external-data
