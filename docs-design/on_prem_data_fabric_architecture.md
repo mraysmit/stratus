@@ -593,10 +593,14 @@ That split is important. Otherwise the central team becomes a bottleneck and the
 Iceberg maintenance is not optional.
 
 The platform must schedule:
-- snapshot expiration
-- compaction / file rewrite
-- orphan file cleanup
-- metadata health checks
+- snapshot expiration — target cadence: daily for active tables, weekly for archival
+- compaction / file rewrite — target: keep file counts within 2× the optimal range for each table's typical query pattern
+- orphan file cleanup — run at least weekly; alert if orphan volume exceeds a configurable threshold
+- metadata health checks — verify manifest list depth and metadata.json file count; compact metadata when thresholds are breached
+
+**Ownership**: The platform / infrastructure team owns the maintenance jobs and their scheduling. Domain teams do not run ad-hoc maintenance. Compaction ownership must be explicitly assigned per table (normally the platform team); no table should be left without a designated maintenance owner.
+
+**Targets are starting points.** Adjust cadences based on observed table activity and query performance. The key discipline is that every table has a maintenance schedule and an owner — not the specific numbers.
 
 If this is neglected, performance and reliability will degrade over time.
 
@@ -839,6 +843,7 @@ Get them wrong and you will just have an expensive collection of tools.
 ## 18. Source References
 
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
+- Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Iceberg overview: https://iceberg.apache.org/
 - Apache Iceberg multi-engine support: https://iceberg.apache.org/multi-engine-support/
 - Apache Iceberg Spark quickstart: https://iceberg.apache.org/spark-quickstart/
