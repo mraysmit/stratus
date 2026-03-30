@@ -98,230 +98,582 @@ Metadata publication is part of pipeline completion, not a post-processing acces
 
 ---
 
-## 5. Planned Package Structure
+## 5. Project Structure
 
 The current single-class scaffold should be replaced with a structure under `dev.mars.stratus` that reflects actual platform responsibilities.
 
-Proposed package areas:
+Phase 1 remains a single Maven module. Multi-module layout is a Phase 2 concern — premature module splitting creates build complexity with no payoff while the service boundaries are still forming.
 
-- `dev.mars.stratus.core` for shared configuration, identifiers, exceptions, and foundational interfaces
-- `dev.mars.stratus.catalog` for Iceberg catalog abstractions and provider selection
-- `dev.mars.stratus.storage` for object-storage integration boundaries and storage configuration
-- `dev.mars.stratus.metadata` for dataset identity, zone, ownership, classification, retention, SLA, and validation models
-- `dev.mars.stratus.jobs.ingestion` for landing-to-bronze contracts
-- `dev.mars.stratus.jobs.transform` for bronze-to-silver and silver-to-gold workflow contracts
-- `dev.mars.stratus.jobs.maintenance` for snapshot expiry, compaction, orphan cleanup, and metadata health work
-- `dev.mars.stratus.governance` for Atlas-facing adapters, payload models, and lineage publication interfaces
-- `dev.mars.stratus.orchestration` for workflow entrypoint contracts, parameter objects, and job status models
-- `dev.mars.stratus.testing` for local fixtures and integration test support
+```text
+stratus/
+├── pom.xml
+├── README.md
+├── docs-design/
+│   ├── on_prem_data_fabric_architecture.md
+│   └── phase1_implementation_plan.md
+├── src/
+│   ├── main/java/dev/mars/stratus/
+│   │   ├── core/
+│   │   │   ├── StratusConfig.java              # root configuration record
+│   │   │   ├── StorageConfig.java              # MinIO / S3 connection settings
+│   │   │   ├── CatalogConfig.java              # catalog provider type, endpoint, namespace defaults
+│   │   │   ├── GovernanceConfig.java           # Atlas / Ranger endpoint and publication settings
+│   │   │   ├── MaintenanceConfig.java          # compaction cadence, snapshot expiry, thresholds
+│   │   │   ├── Zone.java                       # enum: BRONZE, SILVER, GOLD
+│   │   │   ├── DatasetId.java                  # value: namespace + table name + zone
+│   │   │   └── StratusException.java           # base checked exception hierarchy
+│   │   │
+│   │   ├── catalog/
+│   │   │   ├── CatalogProvider.java            # interface: create CatalogSession from config
+│   │   │   ├── CatalogSession.java             # interface: table ops — resolve, exists, properties, drop
+│   │   │   ├── TableReference.java             # value: resolved Iceberg table identity + location
+│   │   │   └── RestCatalogProvider.java        # default CatalogProvider for REST catalog
+│   │   │
+│   │   ├── storage/
+│   │   │   ├── StorageResolver.java            # interface: DatasetId → physical storage location
+│   │   │   ├── BucketLayout.java               # strategy: namespace/zone → bucket + prefix mapping
+│   │   │   └── MinioStorageResolver.java       # default StorageResolver for MinIO
+│   │   │
+│   │   ├── metadata/
+│   │   │   ├── DatasetDescriptor.java          # value: DatasetId + DatasetMetadata + schema ref
+│   │   │   ├── DatasetMetadata.java            # value: owner, steward, source, classification, SLA, retention, quality status
+│   │   │   ├── MetadataValidator.java          # enforces required-field and naming rules per zone
+│   │   │   └── DatasetRegistry.java            # interface: register, lookup, list dataset descriptors
+│   │   │
+│   │   ├── quality/
+│   │   │   ├── QualityRule.java                # interface: evaluate(DatasetDescriptor, context) → QualityOutcome
+│   │   │   ├── QualityOutcome.java             # value: pass/fail/warning + rule id + context + timestamp
+│   │   │   ├── QualityStore.java               # interface: persist and retrieve quality outcomes
+│   │   │   └── PromotionGate.java              # evaluates quality outcomes → promote / block / override decision
+│   │   │
+│   │   ├── governance/
+│   │   │   ├── GovernancePublisher.java         # interface: publish metadata + lineage payloads
+│   │   │   ├── MetadataPayload.java            # value: what goes to Atlas for a dataset registration/update
+│   │   │   ├── LineageEvent.java               # value: source → target + transformation context + run id
+│   │   │   └── AtlasGovernancePublisher.java   # Atlas-specific implementation of GovernancePublisher
+│   │   │
+│   │   ├── jobs/
+│   │   │   ├── Job.java                        # interface: run(JobContext) → JobResult
+│   │   │   ├── JobContext.java                 # value: config + catalog session + parameters + run metadata
+│   │   │   ├── JobResult.java                  # value: status + metrics + lineage events + quality outcomes
+│   │   │   ├── ingestion/
+│   │   │   │   └── IngestionJob.java           # landing-to-bronze: validates source, writes bronze, emits lineage
+│   │   │   ├── transform/
+│   │   │   │   └── TransformJob.java           # bronze-to-silver / silver-to-gold: validates input, transforms, emits lineage
+│   │   │   └── maintenance/
+│   │   │       └── MaintenanceJob.java         # snapshot expiry, compaction, orphan cleanup, metadata health
+│   │   │
+│   │   └── orchestration/
+│   │       ├── JobEntrypoint.java              # CLI/API surface: parse args → JobContext → run → report
+│   │       ├── JobRequest.java                 # value: job type + parameters + overrides
+│   │       └── JobResponse.java                # value: exit status + result summary + error context
+│   │
+│   └── test/java/dev/mars/stratus/
+│       ├── core/
+│       │   └── DatasetIdTest.java
+│       ├── metadata/
+│       │   ├── MetadataValidatorTest.java
+│       │   └── DatasetDescriptorTest.java
+│       ├── catalog/
+│       │   └── CatalogProviderTest.java
+│       ├── quality/
+│       │   ├── PromotionGateTest.java
+│       │   └── QualityRuleTest.java
+│       ├── governance/
+│       │   └── MetadataPayloadTest.java
+│       ├── jobs/
+│       │   ├── IngestionJobTest.java
+│       │   └── MaintenanceJobTest.java
+│       └── integration/
+│           └── BronzeSilverGoldFlowTest.java   # end-to-end: ingest → transform → promote with governance
+```
 
-This structure keeps orchestration concerns separate from job semantics and keeps governance as a first-class package rather than an afterthought.
+### 5.1 Non-obvious structural decisions
 
----
+**Why `quality` is a separate package from `metadata`.**
+Quality rules execute against datasets and produce durable outcomes. Those outcomes drive promotion gates. This is runtime behavior, not metadata modeling. Mixing them would conflate definition with execution.
 
-## 6. Implementation Workstreams
+**Why `orchestration` exists separately from `jobs`.**
+Jobs own business logic and produce results. Orchestration owns the external-facing surface (CLI args, exit codes, request/response shapes). Airflow interacts with orchestration. Jobs are unaware of Airflow.
 
-### 6.1 Workstream A: Build foundation project structure
-
-The current repository has a minimal Maven file and a placeholder main class. The first workstream is to replace that scaffold with a maintainable Java baseline.
-
-Primary tasks:
-
-- update Maven dependency and plugin management
-- establish the `dev.mars.stratus` package tree
-- remove or repurpose the placeholder entrypoint
-- add logging and test support suitable for iterative platform development
-
-Expected result:
-
-The project compiles as a real foundation module rather than an IDE starter project.
-
-### 6.2 Workstream B: Define configuration contracts
-
-The platform needs an explicit configuration layer rather than ad hoc strings scattered through jobs.
-
-Primary tasks:
-
-- define storage configuration for MinIO or S3-compatible endpoints
-- define catalog configuration for provider type, namespace defaults, and connection settings
-- define governance configuration for metadata publication and endpoint settings
-- define environment and maintenance settings for retention, compaction cadence, and health checks
-
-Expected result:
-
-The runtime can be parameterized consistently across local, test, and later deployed environments.
-
-### 6.3 Workstream C: Implement the dataset contract model
-
-This workstream encodes the architectural rule that bronze, silver, and gold are governed table contracts.
-
-Primary tasks:
-
-- define dataset identity and namespace objects
-- represent bronze, silver, and gold zones as explicit types or validated enums
-- encode owner, steward, source system, schema version, classification, SLA, retention, and quality status metadata
-- implement validation rules for required metadata and naming standards
-
-Expected result:
-
-The repository has a single authoritative model for dataset definition and governance requirements.
-
-### 6.4 Workstream D: Introduce catalog and storage abstractions
-
-The codebase should depend on interfaces and provider contracts rather than a single hardwired catalog implementation.
-
-Primary tasks:
-
-- define catalog provider and catalog session abstractions
-- define storage location and bucket or namespace mapping abstractions
-- align table identity and storage resolution with the dataset contract model
-- support REST-oriented catalog configuration as the default planning path
-
-Expected result:
-
-Later Spark, Flink, or maintenance components can interact with a stable platform abstraction layer instead of duplicating catalog logic.
-
-### 6.5 Workstream E: Create batch workflow skeletons
-
-Phase 1 should not claim to deliver every operational detail, but it should define clean entrypoints for bounded work.
-
-Primary tasks:
-
-- define landing-to-bronze job contract
-- define bronze-to-silver transformation contract
-- define silver-to-gold materialization contract
-- define maintenance job contract for snapshot expiry, compaction, orphan cleanup, and metadata health checks
-- define job parameter and status models for orchestration tools
-
-Expected result:
-
-Airflow can later orchestrate these jobs without those orchestration concerns being embedded in business logic.
-
-### 6.6 Workstream F: Add governance publication boundaries
-
-Atlas integration is likely to be one of the more integration-heavy parts of the platform. Phase 1 should start with stable contracts and payloads rather than trying to solve every environment-specific detail immediately.
-
-Primary tasks:
-
-- define Atlas publisher interfaces
-- define metadata payload models covering mandatory dataset fields
-- define lineage payload models for source-to-bronze, bronze-to-silver, and silver-to-gold transitions
-- require governance payload assembly as part of job completion flow
-
-Expected result:
-
-The codebase can evolve from mock adapters to live Atlas integration without rewriting core job semantics.
-
-### 6.7 Workstream G: Add local verification harness
-
-The architecture is not credible unless its core rules are testable locally.
-
-Primary tasks:
-
-- add unit tests for naming and metadata completeness rules
-- add tests for catalog provider selection and configuration validation
-- add an integration fixture representing a bronze-silver-gold path
-- verify governance payload generation for required metadata and lineage fields
-
-Expected result:
-
-The repository can prove the foundation rules before taking on heavier runtime integrations.
-
-### 6.8 Workstream H: Align documentation
-
-Repository documentation should explain what this codebase does and what it does not yet do.
-
-Primary tasks:
-
-- update the README with the implementation scope and module layout
-- link implementation work back to the architecture design
-- document the intended progression from Phase 1 to later phases
-
-Expected result:
-
-The codebase becomes understandable to contributors without relying on tribal memory.
+**Why there is no `testing` package under `main`.**
+Test fixtures live in `src/test`. If shared test support classes are needed across multiple test packages, they go in a `testing` package under `src/test`, not `src/main`. Production code should not carry test scaffolding.
 
 ---
 
-## 7. Suggested Delivery Order
+## 6. Services Design
 
-The work should proceed in an order that reduces rework and avoids inventing integration details before the contracts are stable.
+This section defines the key interfaces, their responsibilities, dependencies, and interaction patterns.
 
-### Step 1
+### 6.1 Core types
 
-Establish the Maven baseline and replace the placeholder project layout.
+These are value objects and configuration records. They have no dependencies on other packages.
 
-### Step 2
+| Type | Kind | Purpose |
+|---|---|---|
+| `StratusConfig` | record | Root config: aggregates StorageConfig, CatalogConfig, GovernanceConfig, MaintenanceConfig. Loaded once at startup. |
+| `StorageConfig` | record | MinIO endpoint, credentials reference, default bucket, TLS flag. |
+| `CatalogConfig` | record | Provider type (REST / JDBC / HIVE), endpoint, default namespace, connection properties. |
+| `GovernanceConfig` | record | Atlas endpoint, publication mode (sync / async / disabled), Ranger endpoint (optional for Phase 1). |
+| `MaintenanceConfig` | record | Snapshot expiry cadence, compaction thresholds, orphan cleanup schedule, metadata depth limits. |
+| `Zone` | enum | `BRONZE`, `SILVER`, `GOLD`. Carries naming prefix and metadata requirements per zone. |
+| `DatasetId` | value | Immutable: namespace + table name + zone. Validated on construction — rejects invalid names. |
+| `StratusException` | exception | Base checked exception. Subclassed by catalog, storage, governance, and validation failures. |
 
-Define configuration contracts and the dataset metadata model.
+### 6.2 Catalog service
 
-### Step 3
+```java
+public interface CatalogProvider {
+    CatalogSession openSession(CatalogConfig config);
+}
 
-Introduce catalog and storage abstractions on top of those models.
+public interface CatalogSession extends AutoCloseable {
+    TableReference resolveTable(DatasetId id);
+    boolean tableExists(DatasetId id);
+    Map<String, String> tableProperties(DatasetId id);
+    void createTable(DatasetId id, Schema schema, PartitionSpec spec);
+}
+```
 
-### Step 4
+**Dependency direction:** `catalog` depends on `core` only. No knowledge of jobs, governance, or orchestration.
 
-Create batch job entrypoints and maintenance workflow contracts.
+**Provider selection:** `CatalogProvider` implementations are selected by `CatalogConfig.providerType()`. Phase 1 ships `RestCatalogProvider`. JDBC and Hive providers are future additions — the interface exists so they can be added without restructuring.
 
-### Step 5
+**`TableReference`** wraps the resolved Iceberg table identity, catalog namespace path, and physical storage location. Downstream code uses `TableReference` rather than re-resolving from raw strings.
 
-Add governance payload models and publication interfaces.
+### 6.3 Storage service
 
-### Step 6
+```java
+public interface StorageResolver {
+    URI resolveLocation(DatasetId id);
+    URI resolveLandingZone(String sourceSystem);
+}
+```
 
-Build the local verification harness.
+**Dependency direction:** `storage` depends on `core` only.
 
-### Step 7
+**`BucketLayout`** encodes the mapping convention: `{bucket}/{zone}/{namespace}/{table}/`. This is a strategy object injected into `MinioStorageResolver`, not a hardcoded path pattern. Different environments or domains can use different layouts.
 
-Update README and supporting documentation to reflect the implemented foundation.
+### 6.4 Metadata model
+
+```java
+public record DatasetDescriptor(
+    DatasetId id,
+    DatasetMetadata metadata,
+    String schemaRef       // pointer to schema version — not the schema itself
+) { }
+
+public record DatasetMetadata(
+    String owner,
+    String steward,
+    String sourceSystem,
+    int schemaVersion,
+    String classification,  // e.g. "INTERNAL", "CONFIDENTIAL", "RESTRICTED"
+    String sla,
+    String retentionPolicy,
+    String qualityStatus    // e.g. "UNCHECKED", "PASSED", "FAILED", "OVERRIDDEN"
+) { }
+```
+
+**`MetadataValidator`** enforces per-zone rules:
+- Bronze: owner, sourceSystem, schemaVersion required. Classification defaults to INTERNAL.
+- Silver: all bronze fields plus steward, sla, and qualityStatus must be non-null.
+- Gold: all silver fields plus retentionPolicy and explicit classification.
+
+Validation fails fast with specific error messages, not silent defaults.
+
+**`DatasetRegistry`** is an interface, not an in-memory singleton. Phase 1 implementation may back it with a local store or delegate to catalog properties. The interface exists because the registry concern is distinct from catalog table resolution.
+
+```java
+public interface DatasetRegistry {
+    void register(DatasetDescriptor descriptor);
+    Optional<DatasetDescriptor> lookup(DatasetId id);
+    List<DatasetDescriptor> listByZone(Zone zone);
+    List<DatasetDescriptor> listByOwner(String owner);
+}
+```
+
+### 6.5 Quality service
+
+```java
+public interface QualityRule {
+    String ruleId();
+    QualityOutcome evaluate(DatasetDescriptor target, JobContext context);
+}
+
+public record QualityOutcome(
+    String ruleId,
+    Status status,           // PASS, FAIL, WARNING
+    String detail,
+    Instant evaluatedAt
+) {
+    public enum Status { PASS, FAIL, WARNING }
+}
+
+public interface QualityStore {
+    void record(DatasetId id, List<QualityOutcome> outcomes);
+    List<QualityOutcome> latest(DatasetId id);
+}
+```
+
+**`PromotionGate`** is not an interface — it is a concrete class with deterministic logic:
+- If any outcome is FAIL → block promotion.
+- If all outcomes are PASS → allow promotion.
+- WARNING outcomes are logged but do not block.
+- Override requires explicit `PromotionOverride` parameter with reason and principal.
+
+### 6.6 Governance service
+
+```java
+public interface GovernancePublisher {
+    void publishMetadata(MetadataPayload payload);
+    void publishLineage(LineageEvent event);
+}
+```
+
+**`MetadataPayload`** contains the full `DatasetDescriptor` plus operational context (pipeline run id, timestamp, environment). It is the serialization boundary — callers assemble a payload, the publisher sends it.
+
+**`LineageEvent`** contains:
+- source `DatasetId` (or external source identifier)
+- target `DatasetId`
+- transformation type (INGESTION, TRANSFORM, MATERIALIZATION, MAINTENANCE)
+- run id and timestamp
+- optional field-level mapping reference
+
+**`AtlasGovernancePublisher`** translates payloads to Atlas REST API calls. Phase 1 may ship with a `LoggingGovernancePublisher` for local development that writes payloads to structured log output.
+
+### 6.7 Job service
+
+```java
+public interface Job {
+    JobResult run(JobContext context);
+}
+
+public record JobContext(
+    StratusConfig config,
+    CatalogSession catalog,
+    GovernancePublisher governance,
+    QualityStore qualityStore,
+    Map<String, String> parameters
+) { }
+
+public record JobResult(
+    Status status,
+    Map<String, Object> metrics,
+    List<LineageEvent> lineageEvents,
+    List<QualityOutcome> qualityOutcomes
+) {
+    public enum Status { SUCCESS, FAILED, PARTIAL }
+}
+```
+
+**All concrete jobs implement `Job`.** The contract guarantees:
+1. A job receives everything it needs through `JobContext` — no service locator, no static state.
+2. A job returns a `JobResult` containing lineage events and quality outcomes — governance publication is not optional, it is structurally enforced by the caller.
+3. A job does not publish governance data itself. The orchestration layer publishes after the job completes. This keeps jobs testable without mocking Atlas.
+
+**`IngestionJob`** — landing-to-bronze:
+- resolves landing zone via `StorageResolver`
+- validates source files exist and meet schema expectations
+- writes bronze Iceberg table via `CatalogSession`
+- emits lineage: external source → bronze table
+- emits quality outcomes: schema validation results
+
+**`TransformJob`** — bronze-to-silver or silver-to-gold:
+- resolves source and target datasets via `DatasetRegistry` + `CatalogSession`
+- validates source dataset quality status (uses `PromotionGate` for zone transitions)
+- transforms and writes target Iceberg table
+- emits lineage: source zone → target zone
+- emits quality outcomes for output dataset
+
+**`MaintenanceJob`** — table health:
+- operates on a single table identified by `DatasetId`
+- executes one or more maintenance operations: snapshot expiry, compaction, orphan cleanup, metadata compaction
+- reports metrics: files removed, bytes reclaimed, new snapshot count
+- does not emit lineage (maintenance is operational, not data movement)
+
+### 6.8 Orchestration layer
+
+```java
+public class JobEntrypoint {
+    public JobResponse execute(JobRequest request, StratusConfig config);
+}
+
+public record JobRequest(
+    String jobType,          // "ingest", "transform", "maintenance"
+    Map<String, String> parameters,
+    Map<String, String> overrides
+) { }
+
+public record JobResponse(
+    int exitCode,
+    JobResult.Status status,
+    String summary,
+    List<String> errors
+) { }
+```
+
+**`JobEntrypoint`** is the boundary Airflow (or any external scheduler) interacts with.
+
+Execution flow:
+1. Parse `JobRequest` from CLI args or API call
+2. Build `StratusConfig` (from files / env / overrides)
+3. Open `CatalogSession` via `CatalogProvider`
+4. Instantiate the appropriate `Job` implementation
+5. Call `job.run(context)` → `JobResult`
+6. Publish lineage and metadata via `GovernancePublisher`
+7. Record quality outcomes via `QualityStore`
+8. Return `JobResponse` with exit code
+
+Step 6 happens here, not inside the job. This is deliberate — it means jobs are pure compute-and-report. Publication failures do not corrupt job state, and jobs can be tested without governance infrastructure.
+
+### 6.9 Dependency graph
+
+```text
+orchestration ──→ jobs ──→ metadata ──→ core
+      │             │         │
+      │             ├──→ catalog ───→ core
+      │             │
+      │             ├──→ quality ───→ core
+      │             │
+      │             └──→ governance → core
+      │                      │
+      └──→ catalog           └──→ metadata
+      └──→ governance
+      └──→ quality
+```
+
+**Rules:**
+- `core` depends on nothing inside `dev.mars.stratus`
+- `catalog`, `storage`, `metadata` depend only on `core`
+- `quality` depends on `core` and `metadata`
+- `governance` depends on `core` and `metadata`
+- `jobs` depends on `core`, `catalog`, `storage`, `metadata`, `quality`, `governance`
+- `orchestration` depends on everything — it is the composition root
+- No circular dependencies. No package depends on a package that depends on it.
+
+### 6.10 What is deliberately not designed here
+
+- **Spark/Flink job internals.** The `Job` interface defines the contract. How a Spark job actually reads and writes Iceberg tables is engine-specific implementation behind that interface. Phase 1 defines the contract; Phase 2 fills in engine-specific implementations.
+- **Atlas type definitions.** `AtlasGovernancePublisher` will need Atlas entity types and relationship definitions. Those are operational configuration, not platform code design.
+- **Airflow DAGs.** DAGs call `JobEntrypoint`. DAG structure is an Airflow concern, not a Java concern.
+- **Authentication and authorization internals.** Ranger integration is a deployment concern. The code provides clean boundaries where auth checks can be inserted.
+
+---
+
+## 7. Implementation Workstreams
+
+### 7.1 Workstream A: Build foundation project structure
+
+The current repository has a minimal Maven file and a placeholder main class. The first workstream is to replace that scaffold with the structure defined in §5.
+
+Primary tasks:
+
+- update `pom.xml` with dependency management (Iceberg, SLF4J, JUnit 5, AssertJ) and plugin configuration
+- create the package tree under `dev.mars.stratus` matching the §5 layout
+- remove the placeholder `Main.java`
+- add logging configuration and test support
+
+Expected result:
+
+The project compiles with the full package structure. All packages exist with at least a `package-info.java`.
+
+### 7.2 Workstream B: Implement core types and configuration
+
+Implement the types defined in §6.1.
+
+Primary tasks:
+
+- implement `StratusConfig`, `StorageConfig`, `CatalogConfig`, `GovernanceConfig`, `MaintenanceConfig` as Java records
+- implement `Zone` enum with per-zone naming prefix and metadata requirements
+- implement `DatasetId` as a validated value object — reject invalid names on construction
+- implement `StratusException` hierarchy
+- add unit tests for `DatasetId` validation and `Zone` behavior
+
+Expected result:
+
+All core types compile, are tested, and enforce their invariants.
+
+### 7.3 Workstream C: Implement dataset metadata model
+
+Implement the types defined in §6.4.
+
+Primary tasks:
+
+- implement `DatasetMetadata` record with all mandatory fields
+- implement `DatasetDescriptor` record composing `DatasetId` + `DatasetMetadata` + schema ref
+- implement `MetadataValidator` with per-zone required-field rules (bronze/silver/gold escalation)
+- define `DatasetRegistry` interface
+- add unit tests: validator rejects incomplete metadata per zone, accepts valid metadata
+
+Expected result:
+
+The repository has a single authoritative model for dataset definition. Validation fails fast with specific error messages.
+
+### 7.4 Workstream D: Implement catalog and storage abstractions
+
+Implement the interfaces defined in §6.2 and §6.3.
+
+Primary tasks:
+
+- implement `CatalogProvider` and `CatalogSession` interfaces
+- implement `TableReference` value object
+- implement `RestCatalogProvider` (initially against Iceberg's REST catalog client)
+- implement `StorageResolver` interface and `BucketLayout` strategy
+- implement `MinioStorageResolver`
+- add unit tests: provider selection from config, storage location resolution for each zone
+
+Expected result:
+
+Downstream code depends on `CatalogSession` and `StorageResolver`, not on REST catalog specifics.
+
+### 7.5 Workstream E: Implement quality subsystem
+
+Implement the types defined in §6.5.
+
+Primary tasks:
+
+- implement `QualityRule` interface and `QualityOutcome` record
+- implement `QualityStore` interface
+- implement `PromotionGate` with deterministic PASS/FAIL/WARNING logic and override support
+- add unit tests: promotion blocked on FAIL, allowed on PASS, warning logged, override requires reason
+
+Expected result:
+
+Quality outcomes drive promotion decisions with clear, tested rules.
+
+### 7.6 Workstream F: Implement job contracts and governance
+
+Implement the types defined in §6.6 and §6.7.
+
+Primary tasks:
+
+- implement `Job` interface, `JobContext` record, `JobResult` record
+- implement `GovernancePublisher` interface, `MetadataPayload`, `LineageEvent`
+- implement `LoggingGovernancePublisher` for local development
+- implement `IngestionJob`, `TransformJob`, `MaintenanceJob` skeletons conforming to the `Job` contract
+- verify that jobs return lineage events and quality outcomes — structurally, not optionally
+- add unit tests: job produces expected `JobResult` shape, lineage events present for each job type
+
+Expected result:
+
+Job contracts are executable, testable, and structurally enforce governance output.
+
+### 7.7 Workstream G: Implement orchestration layer and verification harness
+
+Implement the types defined in §6.8 and prove the end-to-end flow.
+
+Primary tasks:
+
+- implement `JobEntrypoint`, `JobRequest`, `JobResponse`
+- implement the 8-step execution flow from §6.8 in `JobEntrypoint.execute()`
+- add `BronzeSilverGoldFlowTest`: ingest → validate → transform → promote → publish, verifying governance payloads and quality outcomes at each step
+- add tests for `MetadataValidator` rejection paths and `PromotionGate` blocking paths
+
+Expected result:
+
+A local integration test proves the full contract chain from job request through governance publication.
+
+### 7.8 Workstream H: Align documentation
+
+Primary tasks:
+
+- update README with implementation scope, module layout, and build instructions
+- link README to architecture doc and implementation plan
+- document what Phase 1 delivers and what it does not
+
+Expected result:
+
+The codebase is understandable to contributors without tribal knowledge.
+
+---
+
+## 8. Suggested Delivery Order
+
+The work should proceed in dependency order. Each step builds on verified output from the previous step.
+
+### Step 1 — Project scaffold (Workstream A, §7.1)
+
+Establish Maven baseline, create full package tree from §5, remove placeholder code. Gate: project compiles clean.
+
+### Step 2 — Core types and configuration (Workstream B, §7.2)
+
+Implement `StratusConfig`, `Zone`, `DatasetId`, `StratusException` from §6.1. Gate: unit tests pass for `DatasetId` validation and `Zone` behavior.
+
+### Step 3 — Dataset metadata model (Workstream C, §7.3)
+
+Implement `DatasetMetadata`, `DatasetDescriptor`, `MetadataValidator`, `DatasetRegistry` from §6.4. Gate: per-zone validation rules tested and enforced.
+
+### Step 4 — Catalog and storage (Workstream D, §7.4)
+
+Implement `CatalogProvider`, `CatalogSession`, `StorageResolver`, `BucketLayout` from §6.2–§6.3. Gate: provider selection and storage resolution tested.
+
+### Step 5 — Quality subsystem (Workstream E, §7.5)
+
+Implement `QualityRule`, `QualityOutcome`, `QualityStore`, `PromotionGate` from §6.5. Gate: promotion gate logic tested.
+
+### Step 6 — Jobs and governance (Workstream F, §7.6)
+
+Implement `Job`, `JobContext`, `JobResult`, `GovernancePublisher`, `LineageEvent`, concrete job types from §6.6–§6.7. Gate: jobs produce correct `JobResult` shapes with lineage events.
+
+### Step 7 — Orchestration and integration tests (Workstream G, §7.7)
+
+Implement `JobEntrypoint` and the end-to-end `BronzeSilverGoldFlowTest`. Gate: full chain from job request through governance publication passes.
+
+### Step 8 — Documentation (Workstream H, §7.8)
+
+Update README and linking. Gate: a new contributor can understand the codebase from docs alone.
 
 This sequence keeps the most stable concepts at the bottom of the stack and delays environment-heavy integrations until the project has a coherent internal design.
 
 ---
 
-## 8. Validation Strategy
+## 9. Validation Strategy
 
 Validation for Phase 1 should prove that the repository enforces the architecture rather than merely restating it.
 
 The following checks should exist by the end of the first implementation increment:
 
-1. The project compiles cleanly after the package restructure and dependency updates.
-2. Dataset definitions fail fast when required metadata is missing.
-3. Naming and namespace validation reject invalid bronze, silver, and gold dataset identifiers.
-4. Catalog provider selection behaves predictably for supported configuration combinations.
-5. A local integration path demonstrates dataset progression through bronze, silver, and gold contract stages.
-6. Governance payloads include owner, steward, source system, schema version, classification, SLA, retention, and quality status.
-7. Job contracts exist for snapshot expiry, compaction, orphan cleanup, and metadata health checks.
+1. The project compiles cleanly with the full package structure from §5.
+2. `DatasetId` rejects invalid namespace/table/zone combinations on construction.
+3. `MetadataValidator` rejects incomplete metadata per zone (bronze < silver < gold escalation).
+4. `CatalogProvider` selection from `CatalogConfig` resolves to `RestCatalogProvider` by default.
+5. `StorageResolver` maps each `DatasetId` to the correct bucket/prefix per `BucketLayout`.
+6. `PromotionGate` blocks on FAIL, allows on PASS, logs WARNING, requires override with reason.
+7. `IngestionJob`, `TransformJob`, `MaintenanceJob` all return `JobResult` with lineage events populated.
+8. `GovernancePublisher.publishMetadata()` receives payloads containing all mandatory fields from §6.4.
+9. `BronzeSilverGoldFlowTest` executes the full chain: ingest → validate → transform → quality check → promote → publish governance.
+10. `JobEntrypoint.execute()` follows the 8-step flow from §6.8 end to end.
 
 The point is not to simulate an entire production platform in tests. The point is to verify the rules that make the platform architecture defensible.
 
 ---
 
-## 9. Risks and Controls During Phase 1
+## 10. Risks and Controls During Phase 1
 
 ### Risk: the repo becomes only a diagram in code form
 
 Control:
 
-Implement actual configuration, metadata, validation, and workflow entrypoint code rather than placeholder classes with no behavior.
+Every type in §6 must have behavior, not just fields. `MetadataValidator` enforces rules. `PromotionGate` blocks on failure. `JobEntrypoint` executes the 8-step flow. If a class has no tested behavior, it should not exist yet.
 
 ### Risk: early coupling to one catalog implementation
 
 Control:
 
-Use a provider abstraction and keep the REST-oriented catalog assumption at the configuration layer rather than in every downstream class.
+All downstream code depends on `CatalogSession` (§6.2), never on `RestCatalogProvider` directly. Provider selection is a `CatalogConfig` concern.
 
 ### Risk: governance is deferred until too late
 
 Control:
 
-Treat metadata payload assembly as part of the core job contract from the beginning.
+`JobResult` structurally requires `List<LineageEvent>` (§6.7). The orchestration layer publishes after every job. There is no code path that completes a governed job without assembling governance output.
 
 ### Risk: Airflow semantics leak into business code
 
 Control:
 
-Expose workflow-friendly entrypoints and statuses, but keep orchestration external.
+Jobs depend on `JobContext`, not on Airflow APIs. `JobEntrypoint` (§6.8) is the only Airflow-facing surface. Job implementations are unaware of scheduling.
 
 ### Risk: the foundation overreaches into deployment engineering
 
@@ -331,7 +683,7 @@ Keep production infrastructure and cluster automation out of the first implement
 
 ---
 
-## 10. Phase 2 Handoff
+## 11. Phase 2 Handoff
 
 Once Phase 1 is stable, the next major implementation wave should address runtime expansion rather than reworking the foundation.
 
@@ -347,6 +699,6 @@ Those capabilities should build on the contracts introduced in Phase 1 rather th
 
 ---
 
-## 11. Immediate Next Action
+## 12. Immediate Next Action
 
-The immediate next engineering task should be to replace the placeholder Maven and Java scaffold with the `dev.mars.stratus` foundation layout, then implement the configuration and dataset metadata contract layers first.
+The immediate next engineering task should be Workstream A (§7.1): replace the placeholder Maven and Java scaffold with the `dev.mars.stratus` package structure from §5, then implement the core types from §6.1.
