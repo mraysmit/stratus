@@ -82,7 +82,7 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 - Polaris connected to MinIO as its underlying storage location
 - A bronze Iceberg table created via Polaris to verify the end-to-end table creation path
 - A silver Iceberg table and a gold Iceberg table created to verify namespace isolation
-- `platform.quality.check_results` Iceberg table created in the platform namespace (schema per architecture §5.3)
+- `platform.quality_check_results` Iceberg table created in the platform namespace (schema per architecture §5.3)
 - Iceberg table maintenance operations verified via the Iceberg Java API: snapshot expiry, file compaction, orphan cleanup
 
 ### Verification
@@ -99,7 +99,7 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 | Snapshot expiry | Expired snapshots are removed; data files for expired snapshots are eligible for cleanup |
 | Compaction | Small files in a table can be rewritten into fewer larger files |
 | Orphan cleanup | Orphaned files not referenced by any snapshot are identified and removed |
-| `check_results` table | `platform.quality.check_results` exists with the correct schema and accepts a written record |
+| `check_results` table | `platform.quality_check_results` exists with the correct schema and accepts a written record |
 
 ### Demonstrated outcome
 Iceberg tables exist in MinIO, managed by Polaris. A parquet file written via the Iceberg API can be read back via the same API. The platform has a real table layer, not just storage.
@@ -123,8 +123,8 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 - A transformation job: reads from bronze, applies type normalisation and deduplication, writes to `stratus-silver`
 - A materialisation job: reads from silver, aggregates, writes a summary table to `stratus-gold`
 - A maintenance job: runs snapshot expiry and compaction on a target table using Spark actions
-- A data quality job: runs schema conformance, completeness, and uniqueness checks on a dataset; writes results to `platform.quality.check_results`
-- A promotion gate: reads quality outcomes from `platform.quality.check_results` for a dataset run; blocks promotion if any blocking check failed
+- A data quality job: runs schema conformance, completeness, and uniqueness checks on a dataset; writes results to `platform.quality_check_results`
+- A promotion gate: reads quality outcomes from `platform.quality_check_results` for a dataset run; blocks promotion if any blocking check failed
 
 ### Verification
 
@@ -135,7 +135,7 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 | Ingestion job | Source file in landing zone produces a bronze Iceberg table with correct row count and schema |
 | Transform job | Bronze table produces a silver table with deduplication applied; row counts match expectations |
 | Materialisation job | Silver table produces a gold summary table with correct aggregates |
-| Quality job — pass | A clean dataset produces PASS outcomes in `platform.quality.check_results` |
+| Quality job — pass | A clean dataset produces PASS outcomes in `platform.quality_check_results` |
 | Quality job — fail | A dataset with nulls in a mandatory column produces a FAIL outcome with correct detail |
 | Promotion gate — pass | Dataset with all PASS outcomes is promoted |
 | Promotion gate — block | Dataset with a FAIL blocking outcome is not promoted; failure reason is recorded |
@@ -199,20 +199,23 @@ Data now exists in curated Iceberg tables, orchestrated by Airflow. Before gover
 - Trino cluster deployed and configured with the Iceberg connector pointing at Apache Polaris
 - Trino configured to read from MinIO using service account credentials
 - Bronze, silver, and gold datasets queryable via Trino SQL
-- `platform.quality.check_results` queryable via Trino
-- Trino query latency and row count verified against known dataset sizes
+- `platform.quality_check_results` queryable via Trino
+- Trino query latency, row counts, schema visibility, and aggregates verified against Spark-produced outputs
+- Java JDBC verification suite created for Trino query behavior
 
 ### Verification
 
 | Test | Pass condition |
 |---|---|
 | Trino connects to Polaris | Trino resolves Iceberg tables via the Polaris REST catalog |
-| Bronze query | `SELECT count(*) FROM bronze.namespace.table` returns correct row count |
+| Namespace discovery | Bronze, silver, gold, and platform schemas are visible through the `stratus` catalog |
+| Bronze query | `SELECT count(*) FROM stratus.bronze.<table>` returns the Spark-produced bronze row count |
 | Silver query | Silver table queryable; deduplicated row count matches Spark output |
 | Gold query | Gold summary table queryable; aggregates match Spark output |
-| Quality results query | `SELECT * FROM platform.quality.check_results WHERE status = 'FAILED'` returns correct rows |
+| Quality results query | `SELECT * FROM stratus.platform.quality_check_results WHERE status = 'failed'` returns correct rows |
 | Schema enforcement | Query against a column that does not exist fails with a clear error |
 | Cross-namespace query | A query joining bronze and silver tables returns correct results |
+| JDBC verification | `TrinoQueryVerificationTest` passes against the live Trino cluster |
 
 ### Demonstrated outcome
 An analyst can run SQL against curated Iceberg datasets via Trino without touching Spark or any file system. The query layer is operational and returns correct results.
@@ -337,3 +340,9 @@ The following are explicitly deferred and belong to later increments:
 ## 12. Design Documents
 
 - [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
+- [increment1_minio.md](increment1_minio.md) — Increment 1 storage foundation implementation plan
+- [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) — Increment 2 table and catalog implementation plan
+- [increment3_spark.md](increment3_spark.md) — Increment 3 batch compute implementation plan
+- [increment4_airflow.md](increment4_airflow.md) — Increment 4 orchestration implementation plan
+- [increment5_trino.md](increment5_trino.md) — Increment 5 interactive query implementation plan
+- [increment6_atlas_ranger.md](increment6_atlas_ranger.md) — Increment 6 metadata and governance implementation plan

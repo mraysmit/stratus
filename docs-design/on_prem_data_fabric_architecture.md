@@ -60,6 +60,9 @@ A data fabric without cataloguing, ownership, lineage, classification, and enfor
 ### 2.6 Query serving is structured in two layers
 The default shared query plane should be **Trino over Iceberg** for open interactive SQL access. If deployed, **Firebolt Core** should sit northbound of curated Iceberg datasets as an optional acceleration and serving layer, not as the foundational storage or governance layer.
 
+### 2.7 Platform behavior must be verified by contracts
+Every platform layer should expose a small set of explicit contracts that can be verified automatically: storage buckets and policies, catalog namespaces, table schemas, Spark job outcomes, Airflow DAG behavior, quality gate decisions, query results, lineage publication, and access control. The platform is not considered healthy because services are running; it is healthy when those contracts pass against the live stack.
+
 ---
 
 ## 3. Logical Architecture
@@ -158,6 +161,31 @@ That is a bad pattern because:
 - consumers couple themselves to physical file layout
 
 The contract must be **Iceberg tables**, not folders and filenames.
+
+### Bucket and object layout
+The foundation uses a small number of platform buckets rather than one bucket per dataset:
+
+| Bucket | Purpose |
+|---|---|
+| `stratus-landing` | raw source files and bounded external extracts before table ingestion |
+| `stratus-bronze` | bronze Iceberg data and metadata |
+| `stratus-silver` | silver Iceberg data and metadata |
+| `stratus-gold` | gold Iceberg data and metadata |
+| `stratus-platform` | platform-internal data such as quality results, Spark event logs, audit extracts, and maintenance metadata |
+
+Landing-zone object keys should be predictable and source-oriented:
+
+```text
+s3://stratus-landing/<source-system>/<dataset>/<ingest-date>/<file-name>
+```
+
+For example:
+
+```text
+s3://stratus-landing/crm/customers/2026-07-04/customers.csv
+```
+
+Landing files are transient inputs to governed table creation. Retention should be long enough to support replay and audit, but consumers should not query landing files directly.
 
 ---
 
@@ -405,6 +433,15 @@ Airflow should not be treated as:
 - keep DAGs readable and domain-oriented
 - avoid building all platform logic into Airflow itself
 - use Airflow to orchestrate engines, not replace them
+- keep transformation, quality, and maintenance logic in versioned Spark jobs or platform libraries
+- make promotion gates explicit tasks that fail closed
+- include a stable `run_id` in every DAG run, Spark job, quality record, and lineage event
+- treat DAG import errors as platform incidents, not harmless UI noise
+
+### Deployment posture
+The initial deployment uses one Airflow webserver, one scheduler, PostgreSQL for metadata, and `LocalExecutor`. That is sufficient for the first governed batch workflows and keeps the operational surface small. If task concurrency, isolation, or worker placement becomes a real constraint, move to CeleryExecutor or KubernetesExecutor as a deliberate scaling step.
+
+Airflow's metadata database is part of the control plane and must be backed up. Losing it means losing run history, task state, retry state, and operational audit context.
 
 ---
 
@@ -421,6 +458,27 @@ Trino is the default open interactive SQL and shared query plane over governed I
 
 ### Design position
 Spark SQL and notebooks remain engineering tools. They should not be treated as the default enterprise interactive query plane.
+
+### Design rules
+- Trino must use the central Apache Polaris REST catalog for Iceberg table discovery.
+- Trino must query Iceberg tables, not raw MinIO object paths.
+- Trino is the shared read/query plane, not the primary ETL engine for bronze-to-silver or silver-to-gold processing.
+- Trino query validation should compare row counts, aggregates, schemas, and quality-result visibility against Spark-produced outputs.
+- Trino access should initially be constrained to internal platform validation, then integrated with Ranger and Keycloak/FreeIPA as the governance and identity increments land.
+- Trino must expose `platform.quality_check_results` so operators and analysts can inspect quality outcomes without Spark access.
+
+### Query contract
+Increment 5 should prove that Trino can answer the same business questions as Spark over the same Iceberg snapshots. The minimum query contract is:
+
+| Query class | Expected behavior |
+|---|---|
+| Discovery | `SHOW SCHEMAS` and `SHOW TABLES` expose Polaris namespaces and tables |
+| Bronze validation | raw row counts match Spark ingestion output |
+| Silver validation | deduplicated row counts and schema match Spark transform output |
+| Gold validation | aggregate results match Spark materialisation output |
+| Quality visibility | `stratus.platform.quality_check_results` is queryable |
+| Error behavior | invalid columns and missing tables fail with clear SQL errors |
+| Cross-zone query | joins across bronze, silver, and gold work where policy permits |
 
 ---
 
@@ -506,7 +564,7 @@ Blocking checks must pass before promotion proceeds. Warning checks are recorded
 Every check run writes a result record to a dedicated platform Iceberg table:
 
 ```
-platform.quality.check_results
+platform.quality_check_results
 ```
 
 ### Result record schema
@@ -554,14 +612,14 @@ Airflow gate task — query check_results for this run_id
 promote   halt pipeline / alert / await override
 ```
 
-The Airflow gate task queries `platform.quality.check_results` for the current `run_id`, asserts that all blocking checks have status `passed`, and only then triggers the downstream promotion or materialisation task.
+The Airflow gate task queries `platform.quality_check_results` for the current `run_id`, asserts that all blocking checks have status `passed`, and only then triggers the downstream promotion or materialisation task.
 
 ### Override model
 
 A failed blocking check halts the pipeline. Manual override requires:
 - an explicit Airflow task approval by a named data steward or platform operator
 - an override reason recorded in the pipeline run metadata
-- the override event written to `platform.quality.check_results` as a separate audit record with status `overridden`
+- the override event written to `platform.quality_check_results` as a separate audit record with status `overridden`
 
 Overrides are auditable. They do not silently suppress the failure record.
 
@@ -573,7 +631,7 @@ On completion of each check run, the pipeline publishes quality status back to A
 
 - `quality_status`: `passed` / `failed` / `warning`
 - `quality_last_checked`: timestamp of the most recent check run
-- `quality_run_id`: link to the check run in `platform.quality.check_results`
+- `quality_run_id`: link to the check run in `platform.quality_check_results`
 - `quality_blocking_failures`: count of blocking check failures in the last run
 
 This means Atlas dataset entries reflect current quality state and consumers can discover whether a dataset is in a passing or failing quality condition without querying the results table directly.
@@ -590,7 +648,7 @@ Ranger policies can be applied to restrict read access to datasets in a failing 
 
 ### 5.7 Ownership
 
-- **Platform team** owns the `platform.quality.check_results` table, its schema, retention policy, and Iceberg maintenance schedule
+- **Platform team** owns the `platform.quality_check_results` table, its schema, retention policy, and Iceberg maintenance schedule
 - **Domain pipeline owners** define and maintain check configurations for their datasets
 - **Data stewards** hold override authority for their domain's blocking failures
 - **No check run should complete without a result record** — silent quality execution is not permitted
@@ -652,6 +710,33 @@ All three zones should be implemented as **Iceberg tables**, not folder conventi
 
 ### Write ownership rule
 For any given table, steady-state write ownership should be explicit and narrow. The platform should prefer a one-writer pattern per table where possible, with compaction ownership assigned deliberately and not left ambiguous across engines.
+
+### Dataset naming convention
+Dataset names should be stable, lowercase, and domain-oriented:
+
+```text
+<catalog>.<zone>.<domain>_<dataset>
+```
+
+Examples:
+
+```text
+stratus.bronze.crm_customers
+stratus.silver.crm_customers
+stratus.gold.sales_customer_summary
+```
+
+Small verification tables may use simple names such as `verification_customers`, but production datasets should include a domain prefix. Naming should make ownership and lifecycle obvious without encoding sensitive classifications into names.
+
+### Schema and partition governance
+Schema evolution is allowed, but it must be governed:
+- additive nullable columns are normally safe
+- type widening must be reviewed
+- dropping or renaming columns requires compatibility analysis and consumer notification
+- partition evolution must be justified by query patterns, not guessed up front
+- every table should have an owner-approved retention and maintenance policy before production use
+
+Hidden partitioning should be preferred over exposing physical partition assumptions to consumers. Consumers should query tables, not construct paths.
 
 ---
 
@@ -784,6 +869,31 @@ That split is important. Otherwise the central team becomes a bottleneck and the
 - periodic compaction windows
 - snapshot retention enforcement
 
+Airflow DAGs should be structured around platform outcomes, not individual shell commands. A typical DAG should read as:
+
+```text
+detect input → run Spark job → run quality checks → evaluate promotion → publish metadata → notify
+```
+
+Each task should emit structured log fields:
+
+| Field | Purpose |
+|---|---|
+| `run_id` | stable pipeline run identifier shared across Airflow, Spark, quality, and lineage |
+| `dataset` | fully qualified Iceberg table name |
+| `zone` | bronze / silver / gold / platform |
+| `spark_application_id` | Spark application id for debugging |
+| `quality_status` | passed / failed / warning / overridden |
+| `promotion_decision` | promote / block / overridden |
+
+### 10.1.1 DAG ownership and source control
+All DAGs should be version-controlled with the application code and reviewed like production code. DAG owners must be named explicitly. A DAG without a clear owner, retry policy, alert route, and expected runtime should not be promoted to production.
+
+### 10.1.2 Retry and backfill semantics
+Retries are for transient infrastructure or source availability failures. They must not hide deterministic data failures such as schema incompatibility, failed quality checks, or authorization denial.
+
+Backfills must be idempotent. Re-running a DAG for a historical date should either produce the same target table state or create a clearly versioned replacement snapshot. Backfills should not silently append duplicate business records.
+
 ### 10.2 Flink should execute continuously
 - streaming jobs remain long-running where appropriate
 - operational lifecycle for Flink jobs should be separate from normal Airflow-style task semantics
@@ -805,6 +915,20 @@ If this is neglected, performance and reliability will degrade over time.
 
 ### 10.4 Data quality and promotion
 Quality check execution, result storage, promotion gates, override handling, and ownership are fully specified in **§5 Data Quality Subsystem**.
+
+### 10.5 Control-plane state
+The following are control-plane state and must be protected by backup, restore, and change-control procedures:
+
+| Component | State to protect |
+|---|---|
+| Airflow | metadata database, DAG code, connection definitions, variables, task logs |
+| Polaris | catalog metadata store and principal/role configuration |
+| Atlas | graph store, search index, type definitions, glossary, classifications |
+| Ranger | policies, tag policies, audit configuration, usersync configuration |
+| FreeIPA | Kerberos principals, LDAP users/groups, DNS, PKI material |
+| Keycloak | realms, clients, identity mappings, token configuration |
+
+If control-plane state is not backed up, the platform is not recoverable even if the data files in MinIO survive.
 
 ---
 
@@ -847,19 +971,29 @@ A realistic on-prem deployment would separate infrastructure by concern.
 - Firebolt Core nodes if deployed
 
 ### 12.3 Control tier
-- Airflow scheduler, webserver, workers, and metadata DB (PostgreSQL)
+- Airflow scheduler, webserver, workers or local executor, and metadata DB (PostgreSQL)
 - Apache Atlas with embedded JanusGraph (BerkeleyDB) and embedded Solr — single deployable service in Phase 1
 - FreeIPA identity services (Kerberos KDC, LDAP, DNS, PKI)
 - Keycloak OIDC broker
 - Apache Ranger admin server and usersync service
 - monitoring and logging stack
 
+### 12.3.1 Control-tier availability posture
+Phase 1 may run single instances of Polaris, Atlas, Ranger, Airflow, and Keycloak for lab and early platform validation. Production must define recovery objectives for each control-plane service before onboarding critical datasets.
+
+Minimum production posture should include:
+- PostgreSQL backup and restore testing for Airflow and any catalog or governance metadata stores that use PostgreSQL
+- exported Keycloak realm configuration and FreeIPA backup procedures
+- documented rebuild path for every Podman image and systemd unit
+- persistent volumes outside container writable layers
+- restore drills before sensitive or business-critical datasets are onboarded
+
 ### 12.4 Platform services
 - Apache Polaris REST catalog service
 - FreeIPA identity services (Kerberos KDC, LDAP, DNS, PKI)
 - Keycloak OIDC broker
 - secrets management
-- `platform.quality.check_results` Iceberg table (owned by platform team)
+- `platform.quality_check_results` Iceberg table (owned by platform team)
 - observability stack (see §14.1)
 - certificate and TLS management via FreeIPA Dogtag PKI
 
@@ -908,6 +1042,17 @@ Reference:
 
 ### Service account model
 Every pipeline component runs as a named Linux service account registered in FreeIPA. No shared credentials. No human credentials used for job execution. Keytabs are managed centrally and rotated on a defined schedule.
+
+### Secrets handling
+Service credentials must not be committed to source control or embedded directly in DAG code, Spark code, Dockerfiles, or documentation examples used as live configuration. Early increments may use environment files on secured hosts, but the target model is:
+
+- credentials stored in a dedicated secrets manager or equivalent secured platform service
+- Airflow reads credentials through a secrets backend or protected connections
+- Spark and Flink jobs receive short-lived or centrally rotated service credentials
+- MinIO access keys, Polaris client secrets, Keycloak client secrets, and Kerberos keytabs have named owners and rotation schedules
+- every secret has a documented consumer list and emergency rotation procedure
+
+Plaintext environment files are acceptable only as a lab bootstrap mechanism and must be treated as temporary.
 
 ---
 
@@ -1018,11 +1163,30 @@ References:
 - Flink job lag and checkpoint health (Flink metrics exposed via Prometheus reporter)
 - Spark job duration and failure causes (Spark metrics sink to Prometheus)
 - Iceberg metadata growth — manifest list depth and metadata file count per table
-- file-count explosion and compaction debt (query `platform.quality.check_results` and Iceberg table metrics)
+- file-count explosion and compaction debt (query `platform.quality_check_results` and Iceberg table metrics)
 - Kafka consumer lag for Flink source topics (Kafka exporter to Prometheus)
 - serving-layer query latency (Trino JMX metrics via Prometheus)
 - metadata publication freshness in Atlas
 - Ranger audit log volume and policy evaluation latency
+- DAG import errors and scheduler heartbeat freshness
+- promotion gate block rate and override frequency
+- MinIO bucket growth by zone and dataset
+- Polaris catalog request latency and authentication failures
+- control-plane backup age and last restore-test status
+
+### 14.1.1 Logging contract
+Task logs and service logs should be structured enough to correlate a platform run across Airflow, Spark, Polaris, MinIO, and Atlas.
+
+At minimum, logs emitted by pipeline jobs should include:
+- `run_id`
+- `dag_id` or job name
+- source dataset and target dataset
+- Iceberg snapshot id after write
+- Spark application id where applicable
+- quality status and promotion decision
+- exception class and failure category on error
+
+Logs should avoid printing secrets, tokens, access keys, or full connection strings.
 
 ### 14.2 Reliability disciplines
 - explicit retry policies
@@ -1030,9 +1194,76 @@ References:
 - replay procedures for bronze data
 - change management for schema evolution
 - controlled promotion between environments
+- backup and restore procedures for control-plane metadata
+- idempotent job design for scheduled and manually retried workflows
+- documented incident response for failed quality gates, stale datasets, and table maintenance failures
+
+### 14.2.1 Recovery expectations
+The platform should define recovery expectations separately for data and control-plane state:
+
+| Area | Recovery expectation |
+|---|---|
+| MinIO data | recover from node or drive loss according to erasure coding policy |
+| Iceberg tables | recover through snapshots, rollback, and retained metadata |
+| Airflow | restore metadata DB and DAG code sufficiently to resume scheduling with run history |
+| Polaris | restore catalog metadata so table identifiers continue resolving to the same locations |
+| Atlas and Ranger | restore lineage, classifications, policies, and audit configuration |
+| Identity | restore FreeIPA and Keycloak without changing service identities unexpectedly |
+
+Recovery drills should verify that restored services can run an end-to-end bronze-to-gold workflow, not merely start containers.
 
 ### 14.3 Data quality
-Quality execution, result storage, promotion gates, and override handling are fully specified in **§5 Data Quality Subsystem**. Operationally, monitor the `platform.quality.check_results` Iceberg table for failure trends, override frequency, and check coverage per domain.
+Quality execution, result storage, promotion gates, and override handling are fully specified in **§5 Data Quality Subsystem**. Operationally, monitor the `platform.quality_check_results` Iceberg table for failure trends, override frequency, and check coverage per domain.
+
+### 14.4 Cross-increment QA traceability
+Each implementation increment must leave behind verified platform capability that the next increment consumes. Verification should therefore test both the new component and the inherited contracts from previous increments.
+
+| Increment | Produces | Consumed by | Cross-check required |
+|---|---|---|---|
+| 1 — MinIO | TLS S3 endpoint, five platform buckets, service accounts, bucket policies | Polaris, Spark, Airflow, Trino | bucket existence, path-style S3 access, credential isolation, HTTPS-only access |
+| 2 — Iceberg and Polaris | `stratus` catalog, bronze/silver/gold/platform namespaces, `platform.quality_check_results` | Spark, Airflow, Trino, quality subsystem | namespace resolution, table creation, table reads/writes, quality table schema |
+| 3 — Spark | ingestion, transform, materialisation, quality, promotion, and maintenance jobs | Airflow orchestration and Trino result validation | Spark can read/write via Polaris and MinIO; quality records are written with run IDs and snapshot IDs |
+| 4 — Airflow | scheduled DAGs, retries, alerts, promotion gates, maintenance orchestration | Trino query validation and operational monitoring | DAGs submit Spark jobs, failed blocking checks halt downstream tasks, maintenance runs on schedule |
+| 5 — Trino | shared SQL query plane over governed Iceberg tables | analysts, BI, governance validation | SQL results match Spark outputs; Trino resolves tables through Polaris and does not bypass the catalog |
+
+This traceability prevents each increment from becoming a local installation exercise. For example, Increment 5 should not merely prove that Trino starts. It should prove that Trino can query the exact Iceberg tables produced by Spark, orchestrated by Airflow, registered in Polaris, and stored in MinIO.
+
+### 14.5 End-to-end functional assertions
+The platform should maintain a small permanent verification dataset that can be recreated safely in every environment. It should exercise the full batch path:
+
+```text
+landing file → Spark ingestion → bronze table → quality checks → Airflow gate
+             → silver table → quality checks → Airflow gate
+             → gold table → Trino query
+```
+
+The following assertions should be stable across increments:
+
+| Assertion | Why it matters |
+|---|---|
+| landing file is readable only by intended service accounts | validates MinIO bucket policies from Increment 1 |
+| bronze table preserves raw row count, including intentional duplicate | validates ingestion fidelity from Increment 3 |
+| quality check records both warning and blocking outcomes | validates the quality result contract from Increment 2 and 3 |
+| Airflow blocks promotion on a failed blocking check | validates orchestration behavior from Increment 4 |
+| silver table contains deduplicated rows only after the gate permits promotion | validates promotion sequencing and transform correctness |
+| gold aggregate matches expected grouped output | validates materialisation correctness |
+| Trino returns the same counts and aggregates as Spark | validates Increment 5 as an independent query plane |
+| query against a nonexistent column fails clearly | validates schema enforcement and user-facing error behavior |
+
+### 14.6 QA ownership
+QA for the platform is not a separate after-the-fact activity. Each platform layer owns its verification contract:
+
+| Area | Owner | Verification mechanism |
+|---|---|---|
+| Storage | platform infrastructure | S3 SDK tests and MinIO operational checks |
+| Catalog and tables | platform data architecture | Iceberg Java API tests and Polaris API checks |
+| Batch compute | data engineering platform | Spark verification jobs and table assertions |
+| Orchestration | platform operations | Airflow REST API tests and DAG-state assertions |
+| Query | analytics platform | Trino JDBC tests and SQL result checks |
+| Governance | data governance | Atlas entity checks and Ranger policy tests |
+| Identity | platform security | Kerberos/OIDC authentication and authorization tests |
+
+Every completion gate should have an automated verification suite where practical and an operational checklist for conditions that cannot be fully automated in the lab.
 
 ---
 

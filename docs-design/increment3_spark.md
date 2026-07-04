@@ -8,7 +8,7 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 
 **Prerequisites:**
 - Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
-- Increment 2 complete — Polaris running, all namespaces and the `platform.quality.check_results` table created, all Increment 2 gate tests passing
+- Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 
 ---
 
