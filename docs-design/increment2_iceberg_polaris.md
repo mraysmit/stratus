@@ -4,7 +4,7 @@
 
 This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
 
-Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the MinIO storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality.check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
+Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the MinIO storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
 
 **Prerequisite:** Increment 1 must be complete. All five MinIO buckets must exist and all Increment 1 gate tests must pass before starting this increment.
 
@@ -255,7 +255,7 @@ Assign catalog roles granting appropriate namespace access to each principal. Fu
 
 With Polaris configured, create the initial platform Iceberg tables. These tables define the schema contracts that all engines write to and read from.
 
-### `platform.quality.check_results`
+### `platform.quality_check_results`
 
 This table is defined in the architecture document (§5.3). Create it via the Iceberg Java API in the verification module (§9) or via a setup script using the Iceberg REST client.
 
@@ -749,7 +749,7 @@ Increment 2 is complete when all of the following are true:
 - [ ] `stratus` catalog created in Polaris
 - [ ] Four namespaces exist: `bronze`, `silver`, `gold`, `platform`
 - [ ] `svc-spark` and `svc-trino` principals created in Polaris with correct roles
-- [ ] `platform.quality.check_results` Iceberg table created with correct schema
+- [ ] `platform.quality_check_results` Iceberg table created with correct schema
 - [ ] `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
 - [ ] Iceberg metadata files visible in MinIO buckets via `mc ls`
 - [ ] Polaris logs show no errors during the verification test run
