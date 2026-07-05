@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 6 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 6 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classification plane, and Apache Ranger as the access policy and audit plane. When this increment is complete, Iceberg datasets created by Spark and queried through Trino have Atlas entities with ownership, schema, zone, quality status, and lineage. Ranger policies enforce zone and classification-based access through Trino. A Java verification suite confirms that governance is not decorative: metadata is searchable, lineage exists, classifications can be applied, Trino allow/deny behavior follows Ranger policy, and Ranger audit logs record the decisions.
 
@@ -122,6 +122,14 @@ mkdir -p docker/ranger-usersync
 ```
 
 The exact image build should be pinned to approved Apache release artifacts and checked into the repository before implementation begins. Do not use `latest` tags for governance services.
+
+### Reference documentation audit
+
+Reference baseline: 2026-07-05.
+
+Apache Atlas and Apache Ranger do not provide the same single, turnkey official container path as Trino or Airflow. Stratus therefore treats the Atlas and Ranger images as platform-maintained artifacts built from approved Apache releases. The build scripts, base images, Java versions, database drivers, and plugin versions must be versioned in the repository before implementation.
+
+The Trino Ranger access-control properties in §12 are aligned with the current Trino Ranger documentation for release 482. Keep the Ranger plugin configuration aligned with the selected Trino release, and rerun the Increment 5 and 6 verification suites after any Trino or Ranger upgrade.
 
 ---
 
@@ -958,7 +966,8 @@ When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardeni
 - Apache Ranger: https://ranger.apache.org/
 - Trino Ranger access control: https://trino.io/docs/current/security/ranger-access-control.html
 - Trino Iceberg connector: https://trino.io/docs/current/connector/iceberg.html
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Trino documentation: https://trino.io/docs/current/
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

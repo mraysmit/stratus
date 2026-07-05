@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the MinIO storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
 
@@ -18,6 +18,14 @@ Increment 2 delivers Apache Polaris as the central REST catalog and Apache Icebe
 - JDK 21+ and Maven 3.9+ installed on the verification host
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
 - `svc-polaris` MinIO credentials from Increment 1 are available
+
+### Reference documentation audit
+
+Reference baseline: 2026-07-05.
+
+The current Apache Polaris documentation line lists Polaris 1.5.0. This increment therefore uses a pinned Polaris 1.5.0 image and Iceberg 1.11.0 Java dependencies, aligned with the Spark 4.1 target in Increment 3. Before implementation, verify the exact Polaris, Iceberg, Spark, and Trino versions together and update all increment documents as a set if any upstream release changes the compatibility matrix.
+
+Polaris quickstart-style examples are lab bootstrap guidance, not a production deployment pattern. Production-like deployment must use an external metadata store, hardened credentials, TLS trusted by all engines, and pinned artifacts.
 
 ---
 
@@ -123,10 +131,12 @@ podman run -d \
   -v /data/polaris:/data/polaris:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  apache/polaris:latest \
+  apache/polaris:1.5.0 \
     --tls-certificate /etc/stratus/certs/polaris.crt \
     --tls-key /etc/stratus/certs/polaris.key
 ```
+
+If a different Polaris release is approved, update this image tag and the Iceberg dependency versions in §9 together. Do not use `latest`.
 
 ### Verify the container started
 
@@ -239,7 +249,7 @@ curl -sk -X POST \
   -H "Content-Type: application/json" \
   -d '{"name": "svc-spark", "type": "SERVICE"}'
 
-# Create principal for Trino (read-only to silver and gold)
+# Create principal for Trino (read-only to queryable namespaces)
 curl -sk -X POST \
   https://polaris.stratus.local:8181/api/management/v1/principals \
   -H "Authorization: Bearer $TOKEN" \
@@ -247,7 +257,7 @@ curl -sk -X POST \
   -d '{"name": "svc-trino", "type": "SERVICE"}'
 ```
 
-Assign catalog roles granting appropriate namespace access to each principal. Full role management details are in the Polaris documentation.
+Assign catalog roles granting appropriate namespace access to each principal. `svc-trino` requires read access to `silver`, `gold`, and `platform` for normal query serving and quality visibility. It also needs controlled read access to `bronze` for the Increment 5 verification dataset unless the verification suite uses a separate internal platform principal. Full role management details are in the Polaris documentation.
 
 ---
 
@@ -295,21 +305,21 @@ Add to `pom.xml`:
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-core</artifactId>
-    <version>1.5.2</version>
+    <version>1.11.0</version>
 </dependency>
 
 <!-- Iceberg REST catalog client — connects to Polaris -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-rest-catalog</artifactId>
-    <version>1.5.2</version>
+    <version>1.11.0</version>
 </dependency>
 
 <!-- Parquet support for reading and writing data files -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-parquet</artifactId>
-    <version>1.5.2</version>
+    <version>1.11.0</version>
 </dependency>
 <dependency>
     <groupId>org.apache.parquet</groupId>
@@ -321,7 +331,7 @@ Add to `pom.xml`:
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-aws</artifactId>
-    <version>1.5.2</version>
+    <version>1.11.0</version>
 </dependency>
 <dependency>
     <groupId>software.amazon.awssdk</groupId>
@@ -800,10 +810,11 @@ Common causes:
 
 - Apache Polaris documentation: https://polaris.apache.org/
 - Apache Polaris GitHub: https://github.com/apache/polaris
+- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
 - Apache Iceberg Java API: https://iceberg.apache.org/docs/latest/java-api-quickstart/
 - Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
 - MinIO S3 compatibility: https://min.io/docs/minio/linux/reference/s3-api-compatibility.html
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)

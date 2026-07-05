@@ -439,7 +439,7 @@ Airflow should not be treated as:
 - treat DAG import errors as platform incidents, not harmless UI noise
 
 ### Deployment posture
-The initial deployment uses one Airflow webserver, one scheduler, PostgreSQL for metadata, and `LocalExecutor`. That is sufficient for the first governed batch workflows and keeps the operational surface small. If task concurrency, isolation, or worker placement becomes a real constraint, move to CeleryExecutor or KubernetesExecutor as a deliberate scaling step.
+The initial deployment uses Airflow 3.x with one API server, one DAG processor, one scheduler, one triggerer, PostgreSQL for metadata, and `LocalExecutor`. That is sufficient for the first governed batch workflows and keeps the operational surface small. If task concurrency, isolation, or worker placement becomes a real constraint, move to CeleryExecutor or KubernetesExecutor as a deliberate scaling step.
 
 Airflow's metadata database is part of the control plane and must be backed up. Losing it means losing run history, task state, retry state, and operational audit context.
 
@@ -971,7 +971,7 @@ A realistic on-prem deployment would separate infrastructure by concern.
 - Firebolt Core nodes if deployed
 
 ### 12.3 Control tier
-- Airflow scheduler, webserver, workers or local executor, and metadata DB (PostgreSQL)
+- Airflow API server, DAG processor, scheduler, triggerer, local executor, and metadata DB (PostgreSQL)
 - Apache Atlas with embedded JanusGraph (BerkeleyDB) and embedded Solr — single deployable service in Phase 1
 - FreeIPA identity services (Kerberos KDC, LDAP, DNS, PKI)
 - Keycloak OIDC broker
@@ -1030,15 +1030,52 @@ Reference:
 
 | Component | Authentication mechanism |
 |---|---|
-| Spark jobs | Kerberos service account (keytab on compute node) |
-| Flink jobs | Kerberos service account (keytab on compute node) |
-| Airflow workers | Kerberos service account for job submission |
-| Apache Polaris | OIDC token via Keycloak |
-| Trino | Kerberos for internal cluster; OIDC via Keycloak for client access |
-| Atlas | LDAP via FreeIPA for user authentication; Kerberos for internal service calls |
-| Ranger | LDAP via FreeIPA for user/group sync; Kerberos for plugin-to-server communication |
+| Spark jobs | approved service identity; Kerberos keytab where the selected runtime integration uses Kerberos |
+| Flink jobs | future service identity; Kerberos keytab where the selected runtime integration uses Kerberos |
+| Airflow workers | approved service identity for job submission |
+| Apache Polaris | OIDC token via Keycloak where supported by the selected Polaris release |
+| Trino | HTTPS and OIDC via Keycloak for client access; internal trust via the selected Trino secure-communication model |
+| Atlas | LDAP via FreeIPA for user authentication |
+| Ranger | LDAP via FreeIPA for user/group sync; HTTPS policy download to engine plugins |
 | MinIO | service accounts with access/secret key pairs; TLS enforced |
 | Airflow web UI | OIDC via Keycloak |
+
+### 13.2.1 Service and protocol interaction model
+
+Security in Stratus is not one mechanism. Each protocol has a specific job:
+
+| Protocol | Platform role |
+|---|---|
+| DNS | stable service identity, certificate SAN alignment, and Kerberos host canonicalization |
+| Kerberos | Linux and service principal authentication where ticket-based service identity is implemented |
+| LDAP / LDAPS | FreeIPA user and group lookup for Keycloak, Ranger usersync, Atlas, and SSSD |
+| OIDC / OAuth2 | browser, CLI, and REST-facing service authentication through Keycloak |
+| HTTPS / TLS | transport encryption and server identity for every platform endpoint |
+| S3 API over HTTPS | object access to MinIO for Spark, Trino, Polaris, Airflow, and verification tools |
+| Iceberg REST catalog over HTTPS | table and namespace resolution through Polaris |
+| Ranger policy REST | policy download from Ranger Admin to the Trino Ranger plugin |
+| JDBC over HTTPS | analyst, BI, and verification access through Trino |
+
+The core identity chain is:
+
+```text
+FreeIPA users/groups
+      ├── LDAPS ──► Keycloak ──OIDC tokens──► Trino / Airflow / Polaris where supported
+      ├── LDAPS ──► Ranger usersync ──policies──► Trino Ranger plugin
+      ├── LDAPS ──► Atlas authentication
+      └── SSSD/Kerberos ──► Linux host and service identities
+```
+
+The core data access chain is:
+
+```text
+User / BI tool ──OIDC/JDBC──► Trino
+Trino ──Ranger policy check──► Ranger
+Trino ──Iceberg REST──► Polaris
+Trino ──S3 API──► MinIO
+```
+
+Ranger governs what an authenticated user can query through Trino. Polaris governs catalog, namespace, and table metadata resolution. MinIO governs service-account object access. These layers are complementary and must not be collapsed into a single bucket policy or a single OIDC login check.
 
 ### Service account model
 Every pipeline component runs as a named Linux service account registered in FreeIPA. No shared credentials. No human credentials used for job execution. Keytabs are managed centrally and rotated on a defined schedule.
@@ -1225,6 +1262,8 @@ Each implementation increment must leave behind verified platform capability tha
 | 3 — Spark | ingestion, transform, materialisation, quality, promotion, and maintenance jobs | Airflow orchestration and Trino result validation | Spark can read/write via Polaris and MinIO; quality records are written with run IDs and snapshot IDs |
 | 4 — Airflow | scheduled DAGs, retries, alerts, promotion gates, maintenance orchestration | Trino query validation and operational monitoring | DAGs submit Spark jobs, failed blocking checks halt downstream tasks, maintenance runs on schedule |
 | 5 — Trino | shared SQL query plane over governed Iceberg tables | analysts, BI, governance validation | SQL results match Spark outputs; Trino resolves tables through Polaris and does not bypass the catalog |
+| 6 — Atlas and Ranger | metadata entities, lineage, classifications, policies, and audit | identity hardening and secure operations | Atlas metadata is searchable; Ranger allow/deny behavior works through Trino |
+| 7 — FreeIPA and Keycloak | identity, OIDC, Kerberos, LDAP groups, trusted certificates | secure platform operations | earlier increment behavior still passes after replacing lab users, self-signed certificates, and bootstrap credentials |
 
 This traceability prevents each increment from becoming a local installation exercise. For example, Increment 5 should not merely prove that Trino starts. It should prove that Trino can query the exact Iceberg tables produced by Spark, orchestrated by Airflow, registered in Polaris, and stored in MinIO.
 
@@ -1264,6 +1303,50 @@ QA for the platform is not a separate after-the-fact activity. Each platform lay
 | Identity | platform security | Kerberos/OIDC authentication and authorization tests |
 
 Every completion gate should have an automated verification suite where practical and an operational checklist for conditions that cannot be fully automated in the lab.
+
+Phase 1 operational acceptance is captured in [phase1_operational_readiness.md](phase1_operational_readiness.md). That document is the closeout gate for Increments 1 through 7: it verifies integrated function, recovery, observability, runbooks, security posture, governance controls, quality gates, and operational ownership before production dataset onboarding or Phase 2 work begins.
+
+### 14.7 Upstream reference audit and version discipline
+
+Reference baseline: 2026-07-05.
+
+The platform depends on fast-moving open source projects. Each implementation increment must start by checking current upstream documentation and release notes for the selected versions, then recording the approved version matrix in the increment runbook. A design document may intentionally pin an older version for compatibility, but that pin must be explicit and verified.
+
+Minimum version matrix to maintain:
+
+| Component | Version discipline |
+|---|---|
+| MinIO / AIStor | choose a supported object-storage distribution and pin the image; do not use `latest` |
+| Apache Polaris | pin the catalog release and validate REST catalog behavior against Iceberg clients |
+| Apache Iceberg | align Java API, Spark runtime, Flink runtime, and Trino connector expectations |
+| Apache Spark | align Spark major version, Scala version, and Iceberg Spark runtime artifact |
+| Apache Airflow | standardize on Airflow 3.x and keep API server, DAG processor, scheduler, triggerer, provider packages, and auth-manager behavior aligned |
+| Trino | keep coordinator, workers, JDBC driver, Iceberg connector behavior, and Ranger plugin config on the same release line |
+| Apache Atlas / Ranger | build pinned platform images from approved Apache releases and record Java/database/plugin compatibility |
+| Kafka / Kafka Connect / Debezium | align Kafka broker/KRaft mode, Connect worker version, and Debezium connector series |
+| Apache Flink | align Flink major version, Java support, connectors, checkpointing, and Iceberg runtime |
+| FreeIPA / Keycloak | use current identity-provider documentation for LDAP/Kerberos/OIDC integration and avoid stale user-guide assumptions |
+
+Current Phase 1 target baseline as of 2026-07-05:
+
+| Component | Target |
+|---|---|
+| Apache Polaris | 1.5.0 |
+| Apache Iceberg | 1.11.0 |
+| Apache Spark | 4.1.2 with Scala 2.13 |
+| Apache Airflow | 3.2.2 |
+| Airflow Spark provider | 6.2.0 |
+| Airflow Amazon provider | 9.31.0 |
+| boto3 | 1.43.40 |
+| Trino | 482 |
+| Keycloak | 26.6.4 |
+| MinIO / AIStor | latest supported release approved for the environment, pinned by image digest |
+| Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
+| FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
+
+Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
+
+No implementation increment should be signed off with floating container tags, unverified compatibility assumptions, or examples copied from quickstarts without adapting them to the Stratus security and QA model.
 
 ---
 
@@ -1321,6 +1404,9 @@ Deliver:
 
 Primary outcome:
 - governed batch lakehouse foundation
+
+Phase 1 acceptance:
+- completed through the operational readiness gate in [phase1_operational_readiness.md](phase1_operational_readiness.md), which validates integrated function, recovery, observability, security, governance, quality, and runbook ownership
 
 ### Phase 1 scope note
 Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after MinIO, Iceberg, Spark, Airflow, and Atlas are stable.
@@ -1418,12 +1504,14 @@ Get them wrong and you will just have an expensive collection of tools.
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
+- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
 - Apache Polaris GitHub: https://github.com/apache/polaris
 - Apache Iceberg overview: https://iceberg.apache.org/
 - Apache Iceberg multi-engine support: https://iceberg.apache.org/multi-engine-support/
 - Apache Iceberg Spark quickstart: https://iceberg.apache.org/spark-quickstart/
 - Apache Iceberg Flink integration: https://iceberg.apache.org/docs/latest/flink/
 - Apache Airflow: https://airflow.apache.org/
+- Apache Airflow Docker guide: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html
 - Apache Atlas: https://atlas.apache.org/
 - Apache Ranger: https://ranger.apache.org/
 - Apache Kafka: https://kafka.apache.org/

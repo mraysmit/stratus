@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 1 delivers a multi-node distributed MinIO object storage cluster running on Podman containers across a lab cluster. When this increment is complete, all five platform buckets exist, TLS is enforced, service account credentials are isolated, and a Java verification suite confirms the storage layer is ready for Iceberg and Polaris in Increment 2.
 
@@ -16,6 +16,17 @@ Increment 1 delivers a multi-node distributed MinIO object storage cluster runni
 - Nodes can reach each other on the ports defined in §4
 - Sudo access on each node for initial setup
 - The Java verification module requires JDK 21+ and Maven 3.9+
+
+### Reference documentation audit
+
+Reference baseline: 2026-07-05.
+
+The current MinIO documentation now presents the Linux/container deployment path under MinIO AIStor, and the Apache Polaris MinIO guide explicitly warns that MinIO OSS is in maintenance mode and intended only for local or test use in that context. This increment can still use MinIO-compatible S3 semantics for a lab foundation, but implementation must make an explicit product/support decision before any production-like deployment:
+
+- use a pinned, approved MinIO/AIStor image or internally mirrored artifact
+- do not use a floating `latest` tag
+- verify current distributed deployment, container, TLS, and access policy commands against the selected release documentation
+- record whether the deployment is lab-only MinIO OSS or a supported production object-storage target
 
 ---
 
@@ -150,11 +161,13 @@ podman run -d \
   -v /data/minio:/data/minio:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  quay.io/minio/minio:latest server \
+  quay.io/minio/minio:<approved-version> server \
     --certs-dir /etc/stratus/certs \
     --console-address ":9001" \
     ${MINIO_VOLUMES}
 ```
+
+Replace `<approved-version>` with the specific MinIO or AIStor image tag approved for the environment. The tag must be recorded in the implementation runbook and kept consistent across all MinIO nodes.
 
 `--network host` is used here so MinIO nodes can communicate with each other directly by hostname without Podman network address translation complexity. For environments where host networking is restricted, a Podman network with DNS can be configured instead.
 
@@ -232,7 +245,7 @@ mc admin user add stratus svc-polaris $(openssl rand -base64 32)
 # Airflow service account — read landing zone only (job triggering)
 mc admin user add stratus svc-airflow $(openssl rand -base64 32)
 
-# Trino service account — read silver and gold only
+# Trino service account — read queryable Iceberg zones and platform quality metadata
 mc admin user add stratus svc-trino $(openssl rand -base64 32)
 ```
 
@@ -290,7 +303,9 @@ EOF
 mc admin policy create stratus policy-airflow /tmp/policy-airflow.json
 mc admin policy attach stratus policy-airflow --user svc-airflow
 
-# svc-trino: read silver and gold
+# svc-trino: read bronze for internal verification, silver/gold for query serving,
+# and platform for quality result visibility. Analyst access is still enforced
+# through Trino/Ranger in later increments.
 cat > /tmp/policy-trino.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -299,10 +314,14 @@ cat > /tmp/policy-trino.json <<'EOF'
       "Effect": "Allow",
       "Action": ["s3:GetObject","s3:ListBucket"],
       "Resource": [
+        "arn:aws:s3:::stratus-bronze/*",
+        "arn:aws:s3:::stratus-bronze",
         "arn:aws:s3:::stratus-silver/*",
         "arn:aws:s3:::stratus-silver",
         "arn:aws:s3:::stratus-gold/*",
-        "arn:aws:s3:::stratus-gold"
+        "arn:aws:s3:::stratus-gold",
+        "arn:aws:s3:::stratus-platform/*",
+        "arn:aws:s3:::stratus-platform"
       ]
     }
   ]
@@ -610,6 +629,7 @@ When all gates are checked, Increment 2 (Iceberg and Polaris) can begin.
 - MinIO distributed deployment: https://min.io/docs/minio/linux/operations/install-deploy-manage/deploy-minio-multi-node-multi-drive.html
 - MinIO Podman deployment: https://min.io/docs/minio/container/index.html
 - MinIO access policy reference: https://min.io/docs/minio/linux/administration/identity-access-management/policy-based-access-control.html
+- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
 - AWS S3 SDK for Java: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)

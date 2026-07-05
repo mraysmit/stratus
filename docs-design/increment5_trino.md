@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 5 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 5 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 5 delivers Trino as the shared interactive SQL query plane over Polaris-managed Apache Iceberg tables stored in MinIO. When this increment is complete, users and platform operators can discover bronze, silver, gold, and platform tables through Trino, query Spark-produced datasets without touching Spark or MinIO paths, inspect `platform.quality_check_results`, and verify SQL results against the outputs produced and orchestrated by Increments 3 and 4. A Java JDBC verification suite confirms Trino works as an independent query surface over the same table contracts.
 
@@ -28,7 +28,7 @@ Increment 5 delivers Trino as the shared interactive SQL query plane over Polari
   - MinIO on port 9000
   - Airflow on port 8088 for operational cross-checks
 - `svc-trino` MinIO credentials from Increment 1 are available
-- `svc-trino` Polaris principal from Increment 2 exists and has read access to silver, gold, and platform namespaces
+- `svc-trino` Polaris principal from Increment 2 exists and has read access to silver, gold, and platform namespaces, plus controlled bronze access for verification where required
 - Verification datasets from Increment 3 or Airflow DAG outputs from Increment 4 are available
 
 ---
@@ -232,7 +232,7 @@ iceberg.rest-catalog.oauth2.credential=svc-trino:<svc-trino Polaris client secre
 iceberg.rest-catalog.oauth2.scope=PRINCIPAL_ROLE:ALL
 
 # Increment 5 is a read/query increment.
-iceberg.security=read_only
+iceberg.security=READ_ONLY
 
 # MinIO object storage
 fs.s3.enabled=true
@@ -249,6 +249,8 @@ iceberg.metadata-cache.enabled=true
 ```
 
 If Polaris uses a self-signed CA from Increment 1, the CA must be trusted by the JVM inside the Trino container. For a lab-only shortcut, a temporary truststore can be added to the image or mounted and referenced through JVM options. The target state is to replace lab certificates with FreeIPA Dogtag-issued certificates in Increment 7.
+
+Reference audit note: Trino 482 documentation confirms the REST catalog, OAuth2 credential, native S3, and Ranger access-control properties used by this design. The Iceberg connector security mode is written as the documented `READ_ONLY` enum value here. If a selected Trino release accepts only lowercase values in a specific catalog example, record that release-specific behavior in the implementation runbook and keep the verification suite as the deciding contract.
 
 ### Access scope
 
@@ -812,8 +814,7 @@ Common causes:
 
 ### `Access Denied` from MinIO
 
-- Confirm the `svc-trino` MinIO policy includes read and list access for silver, gold, and platform buckets
-- If bronze verification is enabled, confirm temporary read access to `stratus-bronze`
+- Confirm the `svc-trino` MinIO policy includes read and list access for silver, gold, platform, and the bronze verification bucket scope used by this increment
 - Confirm the secret in `stratus.properties` matches the active MinIO service account secret
 
 ### Invalid column test does not fail
@@ -832,7 +833,7 @@ Common causes:
 - Trino JDBC driver: https://trino.io/docs/current/client/jdbc.html
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
