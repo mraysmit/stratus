@@ -1,10 +1,10 @@
-# Stratus Implementation Plan
+# Stratus Implementation Plan - Phase 1
 
 ## 1. Purpose
 
-This document defines how the Stratus data fabric platform is built and verified, increment by increment.
+This document defines how Stratus Phase 1 is built and verified, increment by increment.
 
-The architecture document defines what the platform is and why each component exists. This document defines the order in which the platform is assembled, what each increment delivers, and how each increment is verified before the next begins.
+The architecture document defines what the platform is and why each component exists. This Phase 1 plan defines the order in which the governed batch lakehouse foundation is assembled, what each increment delivers, and how each increment is verified before the next begins.
 
 The guiding principle is simple: **build the stack from the bottom up**. Storage before tables. Tables before compute. Compute before orchestration. Query before governance. Identity last, hardening what already works. Each increment should leave the platform in a working, demonstrable state.
 
@@ -28,6 +28,8 @@ Layer 1 — Storage                    MinIO
 
 Implementation proceeds layer by layer. No layer is considered complete until its verification tests pass and the functional outcome is demonstrated.
 
+After Layer 7, Phase 1 closes with an operational acceptance and production-readiness review. That review is not a new platform layer; it proves that the integrated stack is supportable before production dataset onboarding or Phase 2 work begins.
+
 ---
 
 ## 3. Increment 1 — Storage Foundation
@@ -48,7 +50,7 @@ Every other component in the stack writes to or reads from object storage. Nothi
   - `stratus-gold` — curated Iceberg data
   - `stratus-platform` — platform-internal tables (quality results, audit, maintenance metadata)
 - TLS enabled on MinIO endpoints
-- Service account credentials created for platform services (Spark, Polaris, Airflow)
+- Service account credentials created for platform services (Spark, Polaris, Airflow, Trino)
 - MinIO Console accessible for operational visibility
 
 ### Verification
@@ -165,7 +167,7 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
   - **Silver-to-gold DAG** — run materialisation job → run quality checks → promote to gold
   - **Maintenance DAG** — daily: snapshot expiry + compaction for active tables; weekly: orphan file cleanup
 - Each DAG emits structured success/failure events
-- Airflow alerts configured for job failure and SLA breach
+- Airflow alerts configured for job failure and Deadline Alert breach
 
 ### Verification
 
@@ -179,7 +181,7 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
 | Maintenance DAG | Snapshot count reduced on active tables after run |
 | Retry behaviour | A transiently failed task retries and succeeds on second attempt |
 | Alert | A permanently failed task triggers an alert |
-| SLA | A DAG that exceeds its defined SLA duration triggers an SLA miss alert |
+| Deadline Alert | A DAG that exceeds its defined timing expectation triggers a Deadline Alert |
 
 ### Demonstrated outcome
 The batch pipeline runs on a schedule without manual intervention. Quality gates are enforced automatically. A failed job alerts rather than silently producing bad data.
@@ -233,8 +235,8 @@ The data is flowing and queryable. Now it needs to be governed. Atlas provides t
 ### What is delivered
 
 - Apache Atlas deployed with embedded JanusGraph (BerkeleyDB) and embedded Solr
-- Atlas configured with FreeIPA LDAP for user authentication (placeholder — full FreeIPA in Increment 7)
-- Apache Ranger deployed with usersync pointed at a local user store (placeholder — full FreeIPA in Increment 7)
+- Atlas configured with lab-local authentication; FreeIPA LDAP migration follows in Increment 7
+- Apache Ranger deployed with usersync pointed at a local user store; FreeIPA LDAP migration follows in Increment 7
 - Atlas entity types registered for Iceberg datasets, namespaces, and pipeline runs
 - Spark jobs updated to publish metadata and lineage payloads to Atlas on completion:
   - dataset registration on first write
@@ -243,7 +245,7 @@ The data is flowing and queryable. Now it needs to be governed. Atlas provides t
 - Ranger policies created for bronze, silver, and gold zones:
   - platform engineers: read/write all zones
   - domain analysts: read silver and gold for their domain only
-  - service accounts (Spark, Flink, Airflow): write access to assigned zones
+  - implemented service accounts, such as Spark and Airflow, receive access appropriate to their assigned zones
 - Atlas classifications applied to sensitive test datasets: `PII`, `CONFIDENTIAL`
 - Ranger tag-based policies verified: a user without PII access is denied a query on a PII-classified table
 
@@ -256,7 +258,7 @@ The data is flowing and queryable. Now it needs to be governed. Atlas provides t
 | Lineage — ingest | Atlas shows lineage from external source to bronze table |
 | Lineage — transform | Atlas shows lineage from bronze to silver |
 | Lineage — materialise | Atlas shows lineage from silver to gold |
-| Quality status | Atlas entity for a dataset reflects `quality_status = PASSED` after a passing quality run |
+| Quality status | Atlas entity for a dataset reflects `qualityStatus = passed` after a passing quality run |
 | Ranger policy — allow | A user in `analysts-<domain>` can query silver and gold tables for their domain via Trino |
 | Ranger policy — deny | A user in `analysts-<domain>` cannot query bronze tables |
 | Classification policy | A user without PII access is denied a Trino query on a PII-classified table |
@@ -278,7 +280,8 @@ Identity integration touches every component. Hardening it last means each compo
 ### What is delivered
 
 - FreeIPA deployed: Kerberos KDC, LDAP directory, Dogtag PKI, DNS
-- Platform service accounts registered in FreeIPA: `svc-spark`, `svc-flink`, `svc-airflow`, `svc-polaris`, `svc-trino`
+- Platform service accounts registered in FreeIPA: `svc-spark`, `svc-airflow`, `svc-polaris`, `svc-trino`, `svc-atlas`, `svc-ranger`
+- `svc-flink` reserved in FreeIPA if Flink is still deferred
 - FreeIPA groups created per the architecture group model: `platform-admins`, `platform-engineers`, `data-stewards-<domain>`, `analysts-<domain>`, `consumers-gold`
 - MIT Kerberos clients installed and configured on all compute nodes
 - SSSD configured on all Linux hosts for FreeIPA integration
@@ -287,8 +290,9 @@ Identity integration touches every component. Hardening it last means each compo
 - Airflow web UI configured to authenticate via Keycloak
 - Ranger usersync pointed at FreeIPA LDAP; groups imported; policies migrated to group-based
 - Atlas configured to use FreeIPA LDAP for user authentication
-- All Spark and Flink jobs use Kerberos keytabs for service authentication
-- Trino configured with Kerberos for internal cluster auth; OIDC via Keycloak for client access
+- Spark job submission uses the approved service identity and keytab pattern where Kerberos is part of the selected runtime integration
+- Flink service identity is prepared but not a completion dependency unless Flink has already been implemented
+- Trino configured with HTTPS and Keycloak/OIDC for client access; internal trust uses the selected Trino release's supported secure-communication model
 - TLS certificates replaced with FreeIPA Dogtag-issued certificates across all services
 - MinIO server-side encryption enabled for `stratus-gold` and `stratus-platform` buckets
 
@@ -301,7 +305,7 @@ Identity integration touches every component. Hardening it last means each compo
 | Keycloak OIDC | A Keycloak token can be obtained for a service principal and used to authenticate to Polaris |
 | Polaris auth | A request to Polaris without a valid OIDC token is rejected with 401 |
 | Airflow UI auth | Airflow web UI redirects unauthenticated users to Keycloak login |
-| Spark Kerberos | A Spark job submitted with a valid keytab runs successfully; a job with no keytab is rejected |
+| Spark service identity | A Spark job submitted with the approved service identity runs successfully; unauthenticated submission is rejected where Kerberos enforcement is enabled |
 | Ranger group policy | A user added to `analysts-<domain>` in FreeIPA gains silver/gold read access within minutes of group sync |
 | TLS everywhere | All inter-service connections use TLS with FreeIPA-issued certificates; connections without TLS are rejected |
 | Encryption at rest | A file written to `stratus-gold` is stored encrypted; direct file access without a valid key returns ciphertext |
@@ -332,8 +336,10 @@ The following are explicitly deferred and belong to later increments:
 
 - **Streaming and CDC** — Kafka, Kafka Connect, Debezium, and Flink are not part of this plan. They are the next major wave after the batch and governance foundation is stable and proven.
 - **Firebolt Core** — optional serving acceleration. Not considered until the Iceberg and governance foundations are verified in production.
-- **Multi-environment promotion** — development, staging, and production environment separation is a operational maturity concern for after the single-environment foundation works.
+- **Multi-environment promotion** — development, staging, and production environment separation is an operational maturity concern for after the single-environment foundation works.
 - **Self-service data discovery** — policy-driven glossary workflows and self-service onboarding follow after Atlas and Ranger are operating reliably.
+
+Operational production-readiness signoff is covered by [phase1_operational_readiness.md](phase1_operational_readiness.md). It is not a separate platform increment because it validates Increments 1 through 7 rather than adding a new capability.
 
 ---
 
@@ -346,3 +352,7 @@ The following are explicitly deferred and belong to later increments:
 - [increment4_airflow.md](increment4_airflow.md) — Increment 4 orchestration implementation plan
 - [increment5_trino.md](increment5_trino.md) — Increment 5 interactive query implementation plan
 - [increment6_atlas_ranger.md](increment6_atlas_ranger.md) — Increment 6 metadata and governance implementation plan
+- [increment7_identity_security.md](increment7_identity_security.md) — Increment 7 identity and security hardening implementation plan
+- [phase1_operational_readiness.md](phase1_operational_readiness.md) — Phase 1 operational acceptance and production readiness checklist
+- [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) — Phase 2 streaming and operational maturity implementation plan
+- [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) — Phase 3 query acceleration and data products implementation plan

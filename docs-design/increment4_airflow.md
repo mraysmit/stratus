@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 4 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 4 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 4 delivers Apache Airflow as the orchestration and control-plane layer for the batch platform created in Increment 3. Airflow schedules and coordinates Spark jobs, data quality checks, promotion gates, and Iceberg table maintenance. When this increment is complete, the bronze, silver, and gold pipeline runs as managed DAGs with retries, failure visibility, structured run metadata, and deterministic promotion blocking. A Java verification suite uses the Airflow REST API and the table layer to confirm the orchestration layer works end to end.
 
@@ -28,20 +28,35 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 - `svc-spark` MinIO credentials and Polaris principal credentials from Increment 3 are available
 - The Stratus application fat JAR from Increment 3 is available to the Airflow runtime
 
+### Reference documentation audit
+
+Reference baseline: 2026-07-05.
+
+The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.2.2 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. The custom image also targets the current stable Spark 4.1 client and current Airflow provider lines used by this design. This avoids carrying an obsolete Airflow 2.x webserver topology or stale Spark 3.x client into the design.
+
+Airflow's official Docker Compose quickstart is not a production deployment recommendation. The Podman commands here are a lab topology and must be hardened before production use.
+
 ---
 
 ## 3. Topology
 
-Airflow runs on a dedicated host using Podman containers. PostgreSQL is used as the Airflow metadata database. For Increment 4, Airflow uses `LocalExecutor` with one scheduler and one webserver. A distributed Celery or Kubernetes executor is deferred until operational scale requires it.
+Airflow runs on a dedicated host using Podman containers. PostgreSQL is used as the Airflow metadata database. For Increment 4, Airflow uses `LocalExecutor` with one API server, one DAG processor, one scheduler, and one triggerer. A distributed Celery or Kubernetes executor is deferred until operational scale requires it.
 
 ```text
 airflow.stratus.local
 ┌──────────────────────────────────────────────┐
-│  Podman: airflow-webserver                   │
+│  Podman: airflow-api-server                  │
 │  Airflow UI / REST API :8088                 │
 ├──────────────────────────────────────────────┤
+│  Podman: airflow-dag-processor               │
+│  DAG parsing                                 │
+├──────────────────────────────────────────────┤
 │  Podman: airflow-scheduler                   │
-│  DAG parsing, scheduling, task execution     │
+│  Scheduling and task execution               │
+├──────────────────────────────────────────────┤
+│  Podman: airflow-triggerer                   │
+│  Deferrable task triggers                    │
+├──────────────────────────────────────────────┤
 ├──────────────────────────────────────────────┤
 │  Podman: airflow-postgres                    │
 │  Airflow metadata database :5432             │
@@ -63,7 +78,7 @@ Airflow is not a compute engine. DAG tasks submit Spark jobs, run lightweight co
 
 | Port | Service | Purpose |
 |---|---|---|
-| 8088 | Airflow webserver | Airflow UI and REST API |
+| 8088 | Airflow API server | Airflow UI and REST API |
 | 5432 | PostgreSQL | Airflow metadata database, local host access only where possible |
 
 The Airflow host must also be able to reach the ports from previous increments:
@@ -88,7 +103,7 @@ The official Airflow image is used as the base. A custom image adds Java, Spark 
 Create `docker/airflow/Dockerfile` in the Stratus repository:
 
 ```dockerfile
-FROM apache/airflow:2.9.3-python3.11
+FROM apache/airflow:3.2.2-python3.11
 
 USER root
 
@@ -96,10 +111,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
        ca-certificates \
-       openjdk-17-jre-headless \
+       openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-ARG SPARK_VERSION=3.5.1
+ARG SPARK_VERSION=4.1.2
 ARG HADOOP_VERSION=3
 
 RUN curl -fsSL \
@@ -111,21 +126,21 @@ RUN curl -fsSL \
 
 ENV SPARK_HOME=/opt/spark
 ENV PATH="${SPARK_HOME}/bin:${PATH}"
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 
 USER airflow
 
 RUN pip install --no-cache-dir \
-    apache-airflow-providers-apache-spark==4.9.0 \
-    apache-airflow-providers-amazon==8.25.0 \
-    boto3==1.34.131
+    apache-airflow-providers-apache-spark==6.2.0 \
+    apache-airflow-providers-amazon==9.31.0 \
+    boto3==1.43.40
 ```
 
 ### Build and tag the image
 
 ```bash
 cd docker/airflow
-podman build -t stratus/airflow:2.9.3 .
+podman build -t stratus/airflow:3.2.2 .
 ```
 
 ---
@@ -176,10 +191,10 @@ AIRFLOW__CORE__LOAD_EXAMPLES=False
 AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
 AIRFLOW__CORE__DEFAULT_TIMEZONE=UTC
 AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
-AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8088
+AIRFLOW__API__BASE_URL=http://airflow.stratus.local:8088
 
-# Bootstrap UI user for Increment 4 lab use only
+# Bootstrap UI/API user for Increment 4 lab use only.
+# Increment 7 replaces this with Keycloak-backed authentication.
 _AIRFLOW_WWW_USER_USERNAME=admin
 _AIRFLOW_WWW_USER_PASSWORD=change-me-before-use
 _AIRFLOW_WWW_USER_FIRSTNAME=Stratus
@@ -262,7 +277,7 @@ podman run --rm \
   -v /data/airflow/logs:/opt/airflow/logs:z \
   -v /data/airflow/plugins:/opt/airflow/plugins:z \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  stratus/airflow:2.9.3 \
+  stratus/airflow:3.2.2 \
   bash -c 'airflow db migrate && airflow users create \
     --username "$_AIRFLOW_WWW_USER_USERNAME" \
     --password "$_AIRFLOW_WWW_USER_PASSWORD" \
@@ -272,11 +287,11 @@ podman run --rm \
     --email "$_AIRFLOW_WWW_USER_EMAIL"'
 ```
 
-### Start the webserver
+### Start the API server
 
 ```bash
 podman run -d \
-  --name airflow-webserver \
+  --name airflow-api-server \
   --hostname airflow.stratus.local \
   --network host \
   --env-file /etc/stratus/airflow.env \
@@ -286,8 +301,26 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:2.9.3 \
-  airflow webserver
+  stratus/airflow:3.2.2 \
+  airflow api-server --port 8088
+```
+
+### Start the DAG processor
+
+```bash
+podman run -d \
+  --name airflow-dag-processor \
+  --hostname airflow-dag-processor.stratus.local \
+  --network host \
+  --env-file /etc/stratus/airflow.env \
+  -v /data/airflow/dags:/opt/airflow/dags:z \
+  -v /data/airflow/logs:/opt/airflow/logs:z \
+  -v /data/airflow/plugins:/opt/airflow/plugins:z \
+  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
+  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
+  --restart unless-stopped \
+  stratus/airflow:3.2.2 \
+  airflow dag-processor
 ```
 
 ### Start the scheduler
@@ -304,16 +337,36 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:2.9.3 \
+  stratus/airflow:3.2.2 \
   airflow scheduler
+```
+
+### Start the triggerer
+
+```bash
+podman run -d \
+  --name airflow-triggerer \
+  --hostname airflow-triggerer.stratus.local \
+  --network host \
+  --env-file /etc/stratus/airflow.env \
+  -v /data/airflow/dags:/opt/airflow/dags:z \
+  -v /data/airflow/logs:/opt/airflow/logs:z \
+  -v /data/airflow/plugins:/opt/airflow/plugins:z \
+  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
+  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
+  --restart unless-stopped \
+  stratus/airflow:3.2.2 \
+  airflow triggerer
 ```
 
 ### Verify the containers
 
 ```bash
 podman ps | grep airflow
-podman logs airflow-webserver | tail -30
+podman logs airflow-api-server | tail -30
+podman logs airflow-dag-processor | tail -30
 podman logs airflow-scheduler | tail -30
+podman logs airflow-triggerer | tail -30
 ```
 
 Open `http://airflow.stratus.local:8088` in a browser and log in with the bootstrap admin user.
@@ -326,16 +379,24 @@ Generate systemd units for each running container:
 podman generate systemd --new --name airflow-postgres \
   | sudo tee /etc/systemd/system/stratus-airflow-postgres.service
 
-podman generate systemd --new --name airflow-webserver \
-  | sudo tee /etc/systemd/system/stratus-airflow-webserver.service
+podman generate systemd --new --name airflow-api-server \
+  | sudo tee /etc/systemd/system/stratus-airflow-api-server.service
+
+podman generate systemd --new --name airflow-dag-processor \
+  | sudo tee /etc/systemd/system/stratus-airflow-dag-processor.service
 
 podman generate systemd --new --name airflow-scheduler \
   | sudo tee /etc/systemd/system/stratus-airflow-scheduler.service
 
+podman generate systemd --new --name airflow-triggerer \
+  | sudo tee /etc/systemd/system/stratus-airflow-triggerer.service
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now stratus-airflow-postgres.service
-sudo systemctl enable --now stratus-airflow-webserver.service
+sudo systemctl enable --now stratus-airflow-api-server.service
+sudo systemctl enable --now stratus-airflow-dag-processor.service
 sudo systemctl enable --now stratus-airflow-scheduler.service
+sudo systemctl enable --now stratus-airflow-triggerer.service
 ```
 
 ---
@@ -465,7 +526,7 @@ with DAG(
     dag_id="stratus_landing_to_bronze",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule_interval="*/15 * * * *",
+    schedule="*/15 * * * *",
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "ingestion", "bronze"],
@@ -531,7 +592,7 @@ with DAG(
     dag_id="stratus_bronze_to_silver",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule_interval="@hourly",
+    schedule="@hourly",
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "transform", "silver"],
@@ -596,7 +657,7 @@ with DAG(
     dag_id="stratus_silver_to_gold",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule_interval="@daily",
+    schedule="@daily",
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "materialisation", "gold"],
@@ -666,7 +727,7 @@ with DAG(
     dag_id="stratus_table_maintenance",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule_interval="@daily",
+    schedule="@daily",
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "maintenance", "iceberg"],
@@ -724,14 +785,14 @@ No downstream transform or materialisation task should run after a blocking qual
 
 ## 12. Alerting
 
-Increment 4 uses Airflow's built-in task failure behavior and a simple SMTP or webhook callback. Full observability integration with Prometheus and Grafana follows the operational model in the architecture document and can be expanded after the core orchestration behavior is proven.
+Increment 4 uses Airflow's built-in task failure behavior, Deadline Alerts where timing guarantees are required, and a simple SMTP or webhook callback. Full observability integration with Prometheus and Grafana follows the operational model in the architecture document and can be expanded after the core orchestration behavior is proven.
 
 ### Minimum alert events
 
 - DAG failure
 - task failure after all retries are exhausted
 - promotion gate blocked
-- SLA miss for ingestion or materialisation DAGs
+- Deadline Alert for ingestion or materialisation DAGs
 - maintenance DAG failure
 
 ### Failure callback contract
@@ -804,31 +865,50 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Base64;
 
 public class AirflowTestClient {
 
     private final HttpClient http = HttpClient.newHttpClient();
     private final ObjectMapper mapper = new ObjectMapper();
     private final String baseUrl;
-    private final String authHeader;
+    private final String bearerToken;
 
-    public AirflowTestClient() {
+    public AirflowTestClient() throws Exception {
         this.baseUrl = System.getenv("STRATUS_AIRFLOW_BASE_URL");
         String username = System.getenv("STRATUS_AIRFLOW_USERNAME");
         String password = System.getenv("STRATUS_AIRFLOW_PASSWORD");
-        String token = Base64.getEncoder().encodeToString(
-            (username + ":" + password).getBytes(StandardCharsets.UTF_8));
-        this.authHeader = "Basic " + token;
+        this.bearerToken = fetchToken(username, password);
+    }
+
+    private String fetchToken(String username, String password) throws Exception {
+        String body = """
+            {
+              "username": "%s",
+              "password": "%s"
+            }
+            """.formatted(username, password);
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/auth/token"))
+            .timeout(Duration.ofSeconds(30))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build();
+
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("Airflow token request failed: "
+                + response.statusCode() + " " + response.body());
+        }
+        return mapper.readTree(response.body()).get("access_token").asText();
     }
 
     public JsonNode get(String path) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + path))
             .timeout(Duration.ofSeconds(30))
-            .header("Authorization", authHeader)
+            .header("Authorization", "Bearer " + bearerToken)
             .GET()
             .build();
 
@@ -850,9 +930,9 @@ public class AirflowTestClient {
             """.formatted(runId);
 
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/api/v1/dags/" + dagId + "/dagRuns"))
+            .uri(URI.create(baseUrl + "/api/v2/dags/" + dagId + "/dagRuns"))
             .timeout(Duration.ofSeconds(30))
-            .header("Authorization", authHeader)
+            .header("Authorization", "Bearer " + bearerToken)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
@@ -865,7 +945,7 @@ public class AirflowTestClient {
     }
 
     public String dagRunState(String dagId, String runId) throws Exception {
-        JsonNode response = get("/api/v1/dags/" + dagId + "/dagRuns/" + runId);
+        JsonNode response = get("/api/v2/dags/" + dagId + "/dagRuns/" + runId);
         return response.get("state").asText();
     }
 }
@@ -900,7 +980,7 @@ class AirflowOrchestrationVerificationTest {
     );
 
     @BeforeAll
-    static void connect() {
+    static void connect() throws Exception {
         assertThat(System.getenv("STRATUS_AIRFLOW_BASE_URL"))
             .as("STRATUS_AIRFLOW_BASE_URL must be set").isNotBlank();
         airflow = new AirflowTestClient();
@@ -911,13 +991,13 @@ class AirflowOrchestrationVerificationTest {
     void airflowReachable() {
         assertThatNoException()
             .as("Airflow REST API must be reachable")
-            .isThrownBy(() -> airflow.get("/api/v1/health"));
+            .isThrownBy(() -> airflow.get("/api/v2/monitor/health"));
     }
 
     @Test
     @Order(2)
     void allRequiredDagsExistAndAreUnpaused() throws Exception {
-        var dags = airflow.get("/api/v1/dags?limit=100");
+        var dags = airflow.get("/api/v2/dags?limit=100");
         List<String> dagIds = dags.get("dags").findValuesAsText("dag_id");
 
         assertThat(dagIds)
@@ -1068,8 +1148,10 @@ After the maintenance DAG runs, inspect the target tables:
 Increment 4 is complete when all of the following are true:
 
 - [ ] PostgreSQL metadata database running and managed by systemd on `airflow.stratus.local`
-- [ ] Airflow webserver running and managed by systemd on `airflow.stratus.local`
+- [ ] Airflow API server running and managed by systemd on `airflow.stratus.local`
+- [ ] Airflow DAG processor running and managed by systemd
 - [ ] Airflow scheduler running and managed by systemd on `airflow.stratus.local`
+- [ ] Airflow triggerer running and managed by systemd
 - [ ] Airflow UI and REST API reachable on port 8088
 - [ ] Airflow DAG import check reports no errors
 - [ ] All four DAGs exist: `stratus_landing_to_bronze`, `stratus_bronze_to_silver`, `stratus_silver_to_gold`, `stratus_table_maintenance`
@@ -1089,10 +1171,10 @@ When all gates are checked, Increment 5 (Trino interactive query) can begin.
 
 ## 16. Troubleshooting
 
-### Airflow webserver cannot connect to metadata database
+### Airflow API server cannot connect to metadata database
 
 ```bash
-podman logs airflow-webserver
+podman logs airflow-api-server
 podman logs airflow-postgres
 ```
 
@@ -1154,17 +1236,31 @@ mc ls stratus/stratus-landing/customers/$(date +%F)/customers.csv
 - Confirm the task exits with a non-zero code on failure
 - Check the task instance history in the Airflow UI
 
+### DAG processor is not parsing DAGs
+
+```bash
+podman logs airflow-dag-processor | tail -50
+podman exec airflow-scheduler airflow dags list-import-errors
+```
+
+Common causes:
+- DAG directory is not mounted into the DAG processor container
+- provider package missing from the Airflow image
+- Python import error in a DAG file
+- scheduler and DAG processor are not using the same Airflow image and mounted plugin paths
+
 ---
 
 ## 17. References
 
 - Apache Airflow documentation: https://airflow.apache.org/docs/
+- Airflow Docker deployment guide: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html
 - Airflow REST API: https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html
 - Airflow Spark provider: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/
 - Airflow Amazon provider: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
 - Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

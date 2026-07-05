@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document is the technical implementation plan for Increment 3 of the Stratus platform as defined in [stratus_implementation_plan.md](stratus_implementation_plan.md).
+This document is the technical implementation plan for Increment 3 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 3 delivers an Apache Spark standalone cluster running on Podman containers. Spark is configured to use Apache Polaris as its Iceberg catalog and MinIO as object storage. When this increment is complete, data flows from a raw source file in the landing zone through bronze, silver, and gold Iceberg tables. Quality checks run against each dataset and gate promotion between zones. A Java verification suite submits real Spark jobs and confirms the full batch compute pipeline works end to end.
 
@@ -20,6 +20,14 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
 - Nodes can reach MinIO on port 9000 and Polaris on port 8181
 - `svc-spark` MinIO credentials and Polaris principal credentials from earlier increments are available
+
+### Reference documentation audit
+
+Reference baseline: 2026-07-05.
+
+The current Apache Spark release line includes Spark 4.1.2 as the latest stable 4.1 maintenance release, while Spark 4.2.0 is still a preview release. This increment therefore targets Spark 4.1.2 with Scala 2.13 and Iceberg 1.11.0's Spark 4.1 runtime artifact. Do not fall back to the older Spark 3.5 / Scala 2.12 examples unless the platform records an explicit compatibility exception.
+
+Before implementation, confirm the exact container image tags and Maven artifacts still match the latest stable upstream releases. Do not mix a newer Spark major version with older Iceberg runtime artifacts without verifying the upstream compatibility notes and running the Increment 2 and 3 verification suites.
 
 ---
 
@@ -76,24 +84,21 @@ The official Apache Spark Docker image is used as the base. A custom image adds 
 Create `docker/spark/Dockerfile` in the Stratus repository:
 
 ```dockerfile
-FROM apache/spark:3.5.1-scala2.12-java17-python3-ubuntu
+FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
 
 USER root
 
 # Iceberg Spark runtime — includes Iceberg core, Spark integration, and REST catalog client
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.5.2/iceberg-spark-runtime-3.5_2.12-1.5.2.jar \
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar \
     /opt/spark/jars/
 
 # AWS bundle — provides S3FileIO for MinIO connectivity
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.5.2/iceberg-aws-bundle-1.5.2.jar \
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar \
     /opt/spark/jars/
 
-# Hadoop AWS — required for S3A filesystem support
-ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
-    /opt/spark/jars/
-
-ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar \
-    /opt/spark/jars/
+# Hadoop AWS is required only if Spark internals use s3a:// paths outside Iceberg S3FileIO.
+# If enabled, pin hadoop-aws and its AWS SDK dependencies to the Hadoop version bundled in
+# the selected Spark image; do not copy Hadoop 3.3.x jars into a Spark 4.1 image.
 
 USER spark
 ```
@@ -102,13 +107,13 @@ USER spark
 
 ```bash
 cd docker/spark
-podman build -t stratus/spark:3.5.1 .
+podman build -t stratus/spark:4.1.2 .
 ```
 
 Distribute the image to all three Spark nodes. For a lab without a registry, save and load:
 
 ```bash
-podman save stratus/spark:3.5.1 | gzip > stratus-spark.tar.gz
+podman save stratus/spark:4.1.2 | gzip > stratus-spark.tar.gz
 scp stratus-spark.tar.gz spark-worker1.stratus.local:~
 scp stratus-spark.tar.gz spark-worker2.stratus.local:~
 
@@ -149,9 +154,10 @@ spark.hadoop.fs.s3a.secret.key                  <svc-spark secret>
 spark.hadoop.fs.s3a.path.style.access           true
 spark.hadoop.fs.s3a.connection.ssl.enabled      true
 
-# Event log — write to MinIO for job history
+# Event log — write to a mounted local path for job history.
+# If this is changed to s3a://, add hadoop-aws dependencies that match the Spark-bundled Hadoop version.
 spark.eventLog.enabled                          true
-spark.eventLog.dir                              s3a://stratus-platform/spark-event-logs
+spark.eventLog.dir                              file:///data/spark-events
 
 # Serialization
 spark.serializer                                org.apache.spark.serializer.KryoSerializer
@@ -184,7 +190,7 @@ podman run -d \
   -v /etc/stratus/spark-defaults.conf:/etc/stratus/spark-defaults.conf:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/spark:3.5.1 \
+  stratus/spark:4.1.2 \
   /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master \
     --host spark-master.stratus.local \
     --port 7077 \
@@ -204,7 +210,7 @@ podman run -d \
   -v /etc/stratus/spark-defaults.conf:/etc/stratus/spark-defaults.conf:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/spark:3.5.1 \
+  stratus/spark:4.1.2 \
   /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker \
     --webui-port 8081 \
     spark://spark-master.stratus.local:7077
@@ -223,7 +229,7 @@ podman run -d \
   -v /etc/stratus/spark-defaults.conf:/etc/stratus/spark-defaults.conf:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/spark:3.5.1 \
+  stratus/spark:4.1.2 \
   /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker \
     --webui-port 8081 \
     spark://spark-master.stratus.local:7077
@@ -374,14 +380,14 @@ The verification suite submits real Spark jobs to the live cluster and confirms 
 ```xml
 <dependency>
     <groupId>org.apache.spark</groupId>
-    <artifactId>spark-sql_2.12</artifactId>
-    <version>3.5.1</version>
+    <artifactId>spark-sql_2.13</artifactId>
+    <version>4.1.2</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.apache.iceberg</groupId>
-    <artifactId>iceberg-spark-runtime-3.5_2.12</artifactId>
-    <version>1.5.2</version>
+    <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
+    <version>1.11.0</version>
     <scope>provided</scope>
 </dependency>
 ```
@@ -772,11 +778,13 @@ Open `http://spark-master.stratus.local:8080`. Confirm:
 
 ### Event log access
 
-Spark event logs are written to `s3a://stratus-platform/spark-event-logs`. Confirm they are visible:
+Spark event logs are written to the mounted local path `/data/spark-events`. Confirm they are visible on the Spark hosts:
 
 ```bash
-mc ls stratus/stratus-platform/spark-event-logs/
+sudo ls -lah /data/spark-events
 ```
+
+Expected: application event log files exist after the test run. If the environment changes this path to `s3a://`, the Spark image must include `hadoop-aws` and AWS SDK dependencies that match the Hadoop version bundled in the selected Spark image.
 
 ### Submit a test job via spark-submit
 
@@ -787,7 +795,7 @@ podman exec spark-master \
   /opt/spark/bin/spark-submit \
     --master spark://spark-master.stratus.local:7077 \
     --class org.apache.spark.examples.SparkPi \
-    /opt/spark/examples/jars/spark-examples_2.12-3.5.1.jar \
+    /opt/spark/examples/jars/spark-examples_2.13-4.1.2.jar \
     100
 ```
 
@@ -868,7 +876,7 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 - Iceberg Spark procedures (maintenance): https://iceberg.apache.org/docs/latest/spark-procedures/
 - Iceberg Spark SQL extensions: https://iceberg.apache.org/docs/latest/spark-ddl/
 - Apache Spark Docker images: https://hub.docker.com/r/apache/spark
-- Stratus implementation plan: [stratus_implementation_plan.md](stratus_implementation_plan.md)
+- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
