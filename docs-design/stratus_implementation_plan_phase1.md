@@ -23,7 +23,7 @@ Layer 5 — Orchestration              Apache Airflow
 Layer 4 — Query                      Trino
 Layer 3 — Compute                    Apache Spark
 Layer 2 — Tables and Catalog         Apache Iceberg · Apache Polaris
-Layer 1 — Storage                    MinIO
+Layer 1 — Storage                    Ceph RGW object storage
 ```
 
 Implementation proceeds layer by layer. No layer is considered complete until its verification tests pass and the functional outcome is demonstrated.
@@ -35,44 +35,50 @@ After Layer 7, Phase 1 closes with an operational acceptance and production-read
 ## 3. Increment 1 — Storage Foundation
 
 ### What we are building
-MinIO object storage — the persistence substrate for all platform data.
+Ceph Object Gateway (RGW) backed by a Ceph storage cluster — the production on-prem object-storage substrate for all platform data.
 
 ### Why this is first
-Every other component in the stack writes to or reads from object storage. Nothing else can be verified without it. MinIO must be running, accessible, and correctly structured before Iceberg, Polaris, Spark, or anything else is touched.
+Every other component in the stack writes to or reads from object storage. Nothing else can be verified without it. Ceph RGW must expose a working HTTPS S3-compatible endpoint, backed by healthy Ceph storage, before Iceberg, Polaris, Spark, or anything else is touched.
 
 ### What is delivered
 
-- MinIO cluster deployed on-prem (single node for development; multi-node erasure-coded for production)
+- Storage due-diligence record completed before implementation begins, including Ceph RGW vs Apache Ozone requirements fit
+- Ceph cluster deployed on-prem with monitor, manager, OSD, and RGW services sized for the target environment
+- RGW S3 endpoint exposed as `https://object-store.stratus.local`
 - Bucket structure created per the architecture domain and lifecycle zone model:
   - `stratus-landing` — raw source file ingestion zone
   - `stratus-bronze` — raw Iceberg data
   - `stratus-silver` — conformed Iceberg data
   - `stratus-gold` — curated Iceberg data
   - `stratus-platform` — platform-internal tables (quality results, audit, maintenance metadata)
-- TLS enabled on MinIO endpoints
-- Service account credentials created for platform services (Spark, Polaris, Airflow, Trino)
-- MinIO Console accessible for operational visibility
+- TLS enabled on the RGW S3 endpoint
+- Service identities and scoped S3 credentials created for platform services (Spark, Polaris, Airflow, Trino)
+- Ceph Dashboard enabled for operational visibility
+- Ceph pool, CRUSH, placement group, and failure-domain assumptions documented for the deployment
 
 ### Verification
 
 | Test | Pass condition |
 |---|---|
+| Storage decision gate | Ceph RGW is accepted against the documented Stratus storage requirements, with Apache Ozone evaluated as the control candidate |
 | Bucket creation | All five buckets exist and are accessible |
-| Write test | A test file can be written to each bucket using service account credentials |
+| Write test | A test file can be written to each bucket using approved service credentials |
 | Read test | A written file can be read back and content verified |
 | TLS | All connections enforce TLS; plaintext connection is rejected |
-| Credential isolation | Service account A cannot read or write to a bucket it has no policy for |
-| Console | MinIO Console is accessible and shows correct bucket state |
+| Credential isolation | Service identity A cannot read or write to a bucket it has no policy for |
+| RGW compatibility | Required S3 operations for Iceberg, Spark, Polaris, Airflow, and Trino are verified against the RGW endpoint |
+| Ceph health | `ceph status` reports a healthy cluster and RGW service health is visible |
+| Dashboard | Ceph Dashboard is accessible and shows expected cluster, pool, bucket, and daemon state |
 
 ### Demonstrated outcome
-Object storage is operational. A file written to `stratus-landing` can be read back. Service accounts are isolated. The storage foundation is ready for Iceberg.
+Object storage is operational. A file written to `stratus-landing` through Ceph RGW can be read back. Service identities are isolated. Ceph health and storage placement are visible. The storage foundation is ready for Iceberg.
 
 ---
 
 ## 4. Increment 2 — Tables and Catalog
 
 ### What we are building
-Apache Iceberg table format and Apache Polaris REST catalog — the semantic layer that turns MinIO object storage into a governed, multi-engine table platform.
+Apache Iceberg table format and Apache Polaris REST catalog — the semantic layer that turns Ceph-backed object storage into a governed, multi-engine table platform.
 
 ### Why this comes second
 Without Iceberg and a catalog, the storage layer is just buckets and files. Polaris is the single metadata control point that all compute engines (Spark, Trino, Flink) will use to discover and access tables. It must be stable before any engine is added.
@@ -81,7 +87,7 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 
 - Apache Polaris deployed and reachable
 - Polaris configured with namespaces matching the bronze / silver / gold / platform zone structure
-- Polaris connected to MinIO as its underlying storage location
+- Polaris connected to the Ceph RGW S3 endpoint as its underlying storage location
 - A bronze Iceberg table created via Polaris to verify the end-to-end table creation path
 - A silver Iceberg table and a gold Iceberg table created to verify namespace isolation
 - `platform.quality_check_results` Iceberg table created in the platform namespace (schema per architecture §5.3)
@@ -94,7 +100,7 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 | Polaris reachable | Polaris REST API responds on configured endpoint |
 | Namespace creation | Bronze, silver, gold, and platform namespaces exist in Polaris |
 | Table creation | An Iceberg table can be created in each namespace via the Polaris REST API |
-| Table resolution | A created table can be resolved by name and its location in MinIO confirmed |
+| Table resolution | A created table can be resolved by name and its location in Ceph-backed object storage confirmed |
 | Data write | A parquet data file can be written to a table location and the Iceberg snapshot updated |
 | Data read | Written data can be read back via the Iceberg Java API using the table's current snapshot |
 | Schema enforcement | Writing a record that violates the table schema is rejected |
@@ -104,7 +110,7 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 | `check_results` table | `platform.quality_check_results` exists with the correct schema and accepts a written record |
 
 ### Demonstrated outcome
-Iceberg tables exist in MinIO, managed by Polaris. A parquet file written via the Iceberg API can be read back via the same API. The platform has a real table layer, not just storage.
+Iceberg tables exist in Ceph-backed object storage, managed by Polaris. A parquet file written via the Iceberg API can be read back via the same API. The platform has a real table layer, not just storage.
 
 ---
 
@@ -114,13 +120,13 @@ Iceberg tables exist in MinIO, managed by Polaris. A parquet file written via th
 Apache Spark — the primary batch ETL and transformation engine.
 
 ### Why this comes third
-Spark is the engine that populates and transforms Iceberg tables. It depends on both MinIO (storage) and Polaris (catalog) being operational. Spark jobs are meaningless without a stable table layer to write to.
+Spark is the engine that populates and transforms Iceberg tables. It depends on both the Ceph RGW object-storage endpoint and Polaris being operational. Spark jobs are meaningless without a stable table layer to write to.
 
 ### What is delivered
 
 - Apache Spark cluster deployed (standalone or YARN mode for initial deployment)
 - Spark configured to use Apache Polaris as its Iceberg catalog
-- Spark configured to read and write to MinIO using service account credentials
+- Spark configured to read and write to Ceph RGW using approved `svc-spark` S3 credentials
 - An ingestion job: reads a CSV or JSON file from `stratus-landing`, writes it as an Iceberg table in `stratus-bronze`
 - A transformation job: reads from bronze, applies type normalisation and deduplication, writes to `stratus-silver`
 - A materialisation job: reads from silver, aggregates, writes a summary table to `stratus-gold`
@@ -133,7 +139,7 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 | Test | Pass condition |
 |---|---|
 | Spark connects to Polaris | Spark session resolves tables via the Polaris REST catalog |
-| Spark connects to MinIO | Spark can read and write parquet files in MinIO buckets |
+| Spark connects to object storage | Spark can read and write parquet files through Ceph RGW |
 | Ingestion job | Source file in landing zone produces a bronze Iceberg table with correct row count and schema |
 | Transform job | Bronze table produces a silver table with deduplication applied; row counts match expectations |
 | Materialisation job | Silver table produces a gold summary table with correct aggregates |
@@ -199,7 +205,7 @@ Data now exists in curated Iceberg tables, orchestrated by Airflow. Before gover
 ### What is delivered
 
 - Trino cluster deployed and configured with the Iceberg connector pointing at Apache Polaris
-- Trino configured to read from MinIO using service account credentials
+- Trino configured to read from Ceph RGW using approved service credentials
 - Bronze, silver, and gold datasets queryable via Trino SQL
 - `platform.quality_check_results` queryable via Trino
 - Trino query latency, row counts, schema visibility, and aggregates verified against Spark-produced outputs
@@ -294,7 +300,7 @@ Identity integration touches every component. Hardening it last means each compo
 - Flink service identity is prepared but not a completion dependency unless Flink has already been implemented
 - Trino configured with HTTPS and Keycloak/OIDC for client access; internal trust uses the selected Trino release's supported secure-communication model
 - TLS certificates replaced with FreeIPA Dogtag-issued certificates across all services
-- MinIO server-side encryption enabled for `stratus-gold` and `stratus-platform` buckets
+- Ceph/RGW encryption-at-rest model enabled for `stratus-gold` and `stratus-platform` according to the approved Ceph security design
 
 ### Verification
 
@@ -308,7 +314,7 @@ Identity integration touches every component. Hardening it last means each compo
 | Spark service identity | A Spark job submitted with the approved service identity runs successfully; unauthenticated submission is rejected where Kerberos enforcement is enabled |
 | Ranger group policy | A user added to `analysts-<domain>` in FreeIPA gains silver/gold read access within minutes of group sync |
 | TLS everywhere | All inter-service connections use TLS with FreeIPA-issued certificates; connections without TLS are rejected |
-| Encryption at rest | A file written to `stratus-gold` is stored encrypted; direct file access without a valid key returns ciphertext |
+| Encryption at rest | A file written to `stratus-gold` is protected by the approved Ceph/RGW encryption-at-rest model |
 | No shared credentials | No service uses a shared password; every service authenticates via keytab or OIDC token |
 
 ### Demonstrated outcome
@@ -320,7 +326,7 @@ The platform is fully secured. Every service authenticates via FreeIPA Kerberos 
 
 | Increment | Builds | Demonstrated outcome |
 |---|---|---|
-| **1 — Storage** | MinIO | Files written and read; buckets isolated; TLS enforced |
+| **1 — Storage** | Ceph RGW | Files written and read through S3; buckets isolated; TLS enforced; Ceph health visible |
 | **2 — Tables and Catalog** | Iceberg + Polaris | Iceberg tables created, written, and read via Polaris; maintenance operations work |
 | **3 — Batch Compute** | Spark | Data flows from landing to bronze to silver to gold; quality gates enforced |
 | **4 — Orchestration** | Airflow | Batch pipeline runs on schedule; failures alert; quality gates halt bad promotions |
@@ -346,7 +352,7 @@ Operational production-readiness signoff is covered by [phase1_operational_readi
 ## 12. Design Documents
 
 - [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
-- [increment1_minio.md](increment1_minio.md) — Increment 1 storage foundation implementation plan
+- [increment1_ceph.md](increment1_ceph.md) — Increment 1 Ceph object storage foundation implementation plan
 - [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) — Increment 2 table and catalog implementation plan
 - [increment3_spark.md](increment3_spark.md) — Increment 3 batch compute implementation plan
 - [increment4_airflow.md](increment4_airflow.md) — Increment 4 orchestration implementation plan
