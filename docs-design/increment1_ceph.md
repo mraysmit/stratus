@@ -23,11 +23,132 @@ This document intentionally separates:
 
 ---
 
-## 2. Storage Decision
+## 2. What Ceph Provides
+
+Ceph is an open-source, software-defined distributed storage platform. It can provide object storage, block storage, and file storage from the same underlying storage cluster, but Stratus uses it specifically for **object storage** through **Ceph Object Gateway**, also called **RADOS Gateway** or **RGW**.
+
+At the storage layer, Ceph stores data in **RADOS**, a distributed object store made of Object Storage Daemons (OSDs). Ceph uses the **CRUSH** placement algorithm to distribute data across disks, hosts, racks, or other failure domains without relying on a central lookup table. This gives the platform explicit control over durability, placement, rebalancing, and recovery behavior.
+
+For Stratus clients, RGW exposes Ceph as an **S3-compatible HTTPS endpoint**. Polaris, Iceberg, Spark, Airflow, Trino, and the Java verification suite interact with RGW using normal S3 client behavior: buckets, objects, access keys, endpoint overrides, path-style access, and object read/write/list/delete operations.
+
+Ceph offers the capabilities Stratus needs from a production object-storage foundation:
+
+- **On-prem control:** runs on Linux servers and local disks under platform ownership.
+- **Open-source production storage:** keeps the object-storage layer self-hosted and open source while using a platform designed for production distributed storage.
+- **S3 compatibility:** exposes RGW for standard S3 clients and table engines.
+- **Durability controls:** supports replicated pools and erasure-coded pools.
+- **Failure-domain awareness:** CRUSH can place data across hosts, racks, or zones.
+- **Operational maturity:** provides Ceph CLI, dashboard, health checks, orchestration, and Prometheus/Grafana integration.
+- **Security controls:** supports TLS, RGW users/access keys, bucket policies or equivalent controls, and encryption options.
+- **Scalability:** can add OSD hosts and disks without changing the Stratus S3 client contract.
+- **Recovery model:** has explicit health, backfill, rebalance, and degraded-state behavior that can be tested before production onboarding.
+
+Ceph is suitable for Stratus because the platform needs more than a local S3-compatible API. It needs a production storage substrate for Iceberg table data and metadata, with operational visibility, failure handling, capacity growth, and a real recovery model. Ceph RGW provides the S3 surface needed by the lakehouse engines while Ceph itself provides the distributed storage machinery behind that API.
+
+The main tradeoff is operational complexity. Ceph is a real storage platform, not a single binary. It requires deliberate design for MON quorum, MGR availability, OSD layout, CRUSH rules, pool strategy, RGW high availability, TLS, identity, monitoring, and recovery. This document treats that complexity as part of the design rather than hiding it behind a generic "S3-compatible" label.
+
+---
+
+## 3. Storage Decision
+
+### Decision gate
+
+The storage decision is not approved merely because Ceph RGW is named in this document. Before implementation starts, the storage target must pass the due-diligence gates below and the evidence must be attached to the Increment 1 acceptance record.
+
+The decision process is:
+
+1. Confirm the Stratus storage requirements.
+2. Screen plausible open-source, on-prem storage candidates.
+3. Compare the viable candidates against the requirements.
+4. Run a proof-of-fit against the selected release and configuration.
+5. Record any gaps, mitigations, and disqualifying risks.
+6. Only then proceed into the implementation runbook.
+
+This section exists because "S3-compatible" is not specific enough for a production data-fabric storage decision. Stratus needs a storage platform that works with Iceberg, Polaris, Spark, Airflow, Trino, and future Flink workloads, and that can be operated on premises with a real production recovery model.
+
+### Stratus storage requirements
+
+| Requirement | Why it matters | Acceptance evidence |
+|---|---|---|
+| Open-source on-prem deployment | Stratus must not depend on a proprietary managed object store for the foundation layer. | License and deployment model recorded for the selected release. |
+| Production distributed storage | The storage layer must survive node/disk failure and support capacity growth. | HA topology, failure-domain design, and recovery drills documented. |
+| S3-compatible client contract | Polaris, Iceberg, Spark, Trino, Airflow, and Java verification use an S3-style object API. | Required S3 operations pass through the verification suite. |
+| Iceberg table safety | Iceberg writes metadata and data files and relies on predictable read-after-write/list behavior. | Iceberg create/write/read/snapshot/maintenance tests pass through Polaris and Spark. |
+| Multipart upload behavior | Iceberg and Spark may use multipart upload for larger parquet files. | Multipart create, complete, abort, list parts, and retry behavior verified. |
+| Path-style endpoint support | Internal DNS and lab deployments often use endpoint overrides rather than AWS-style virtual-hosted buckets. | Spark, Trino, Java SDK, and Polaris configs work with `STRATUS_S3_PATH_STYLE_ACCESS=true`. |
+| Service identity isolation | Platform services must not share one storage credential. | `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino` access tests pass and cross-bucket denies are proven. |
+| TLS and CA trust | Production traffic must not rely on insecure TLS bypass. | HTTPS endpoint works with trusted CA; plaintext and untrusted connections fail. |
+| Encryption-at-rest path | Gold/platform data require an approved at-rest protection model. | Storage encryption design is selected and tested for the chosen target. |
+| Operational observability | Operators need health, capacity, request/error, and recovery visibility. | Dashboard/CLI/metrics checks are part of acceptance. |
+| Backup, recovery, and failure drills | Production readiness requires proof that loss and recovery procedures work. | Disk/node/RGW failure drills and restore tests complete successfully. |
+| Upgrade and lifecycle model | The storage platform will need patching and upgrades after Phase 1. | Release pinning, upgrade path, and rollback constraints are documented. |
+| Governance integration path | Increment 6 adds Ranger/Atlas; storage must not block identity and policy integration. | Authz boundary is defined: storage service credentials at layer 1; analytical user policy through Polaris/Trino/Ranger later. |
+
+### Candidate screen
+
+The initial open-source on-prem candidate set is:
+
+| Candidate | Advanced to detailed fit? | Reason |
+|---|---|---|
+| Ceph RGW | Yes | Mature open-source distributed storage platform with S3-compatible RGW, replication/erasure coding, dashboard, health model, and broad object-store operations. |
+| Apache Ozone | Yes | Strong open-source on-prem object-storage candidate with Ozone Manager/SCM/Datanodes, S3 Gateway, Kerberos/Ranger integration options, Recon, replication, and erasure coding. |
+| OpenStack Swift | No for Increment 1 baseline | Mature object store, but its native API and operational ecosystem are less directly aligned to the Iceberg/Spark/Trino S3-first contract chosen for Stratus Phase 1. It can be revisited if Swift is already an enterprise standard. |
+| SeaweedFS | No for production baseline | Useful lightweight distributed file/object system, but not selected as the primary governed lakehouse storage substrate without deeper evidence for Iceberg/Polaris/Spark/Trino production behavior, security, and operations. |
+| DAOS | No for Increment 1 baseline | Strong HPC-oriented object storage, but the Stratus Phase 1 contract is S3 lakehouse compatibility and general on-prem platform operations, not a specialized HPC storage interface. |
+
+Only Ceph RGW and Apache Ozone advance to detailed comparison because both plausibly satisfy the Stratus requirement for open-source, production-capable, on-prem object storage with an S3 access path.
+
+### Ceph RGW vs Apache Ozone requirements fit
+
+Scoring scale:
+
+- `5` = strong fit with low validation risk
+- `4` = good fit with normal release/configuration validation required
+- `3` = viable, but material proof-of-fit required before approval
+- `2` = weak fit or requires an architectural change
+- `1` = poor fit for the stated requirement
+- `0` = does not satisfy the requirement
+
+| Requirement | Ceph RGW fit | Ceph score | Apache Ozone fit | Ozone score | Decision implication |
+|---|---|---:|---|---:|---|
+| On-prem open-source production storage | Strong. Ceph is a production distributed storage platform with MON/MGR/OSD/RGW services. | 5 | Strong. Ozone is an Apache distributed object store with OM/SCM/Datanodes and production deployment patterns. | 5 | Both remain viable. |
+| S3 API coverage for lakehouse engines | Strong baseline. Ceph documents S3-compatible object access and support for core bucket/object/multipart operations. Must still test the exact release. | 5 | Viable but must be proven. Ozone S3 Gateway provides S3 access, but the design must verify the subset needed by Iceberg/Polaris/Spark/Trino. | 3 | Ceph has the lower S3-compatibility risk for an S3-first contract. |
+| Iceberg/Spark/Trino fit | Strong if S3FileIO, Spark S3 client, and Trino endpoint/path-style settings pass against RGW. | 4 | Viable if the selected Ozone S3 Gateway release passes the same Iceberg/Spark/Trino endpoint and path-style tests. | 3 | Ceph has the lower assumed compatibility risk, but both must be proven. |
+| Kerberos/Ranger alignment | Possible through adjacent identity/policy integrations, but not the native center of the object-store contract. | 3 | Stronger integration options if Stratus later requires storage-layer Ranger/Kerberos enforcement. | 4 | Ozone gains weight only if storage-layer policy enforcement becomes an explicit requirement. |
+| Analytical user authorization model | Storage layer uses service credentials; analytical user policy is enforced later through Polaris/Trino/Ranger. | 4 | Can support stronger storage-layer authorization, but that is not required by the current Phase 1 storage contract. | 4 | Both are acceptable if user-facing authorization stays above storage. |
+| Operational model | Strong but complex. Ceph has mature health, dashboard, metrics, CRUSH placement, recovery, and cephadm lifecycle management. | 4 | Strong but also complex. Ozone has OM/SCM HA, Recon, Datanodes, security, and object-store operational patterns. | 4 | Team skill set matters; both require real operators. |
+| Failure-domain and recovery controls | Strong. CRUSH, pools, OSD health, backfill/recovery behavior are central Ceph concepts. | 5 | Strong. Ozone has replication/erasure coding and service HA patterns. | 4 | Both viable; prove via drills. |
+| Encryption and key management | Supported through Ceph/RGW encryption options and storage-layer controls; exact mode must be release-validated. | 4 | Supported through Ozone/KMS/transparent data encryption path; exact mode must be release-validated. | 4 | Both viable; neither should be assumed from AWS S3 semantics. |
+| Future multi-protocol storage | Strong if Stratus later needs object plus block/file from one storage substrate. | 5 | Strong for object storage; less relevant if Stratus later needs block/file from the same storage substrate. | 3 | Ceph has broader infrastructure-storage optionality. |
+| **Total** |  | **39 / 45** |  | **35 / 45** | Ceph scores higher under the current Stratus requirements because the comparison now scores only stated storage, S3 compatibility, security, operations, and recovery needs. |
+
+The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is treated as the lower-risk S3 API target for the selected Iceberg/Spark/Trino/Polaris path, while Ozone remains viable if its S3 Gateway passes the same proof-of-fit and its security or operational model is preferred.
+
+### Required proof-of-fit before implementation
+
+Ceph RGW can remain the baseline only after the following evidence exists:
+
+- Official release and deployment method selected and pinned.
+- RGW endpoint created with HTTPS and trusted CA.
+- Java S3 verification suite passes for create bucket, put, get, head, list, delete, multipart upload, abort multipart upload, and credential-deny cases.
+- Iceberg `S3FileIO` can create, write, read, update, expire snapshots, compact, and remove orphan files against RGW.
+- Spark can read from landing and write Iceberg tables through Polaris using the RGW endpoint.
+- Trino can query Iceberg tables using the same object-store endpoint and path-style configuration.
+- Service credentials prove least privilege across `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino`.
+- TLS, encryption-at-rest, logging, metrics, backup, restore, and failure drills pass in a production-like topology.
+- Apache Ozone is either rejected with specific evidence or retained as an alternate with explicit trigger conditions.
+
+If any of these fail, the storage decision must stop and produce a short ADR comparing Ceph RGW and Apache Ozone against the failed requirement before the implementation proceeds.
+
+### Decision summary
+
+Ceph RGW is the current candidate baseline because Stratus Phase 1 depends on the exact S3 behavior required by Iceberg, Spark, Trino, Polaris, Airflow, and the Java verification suite. Apache Ozone also exposes an S3-compatible API, so the distinction is not S3 versus non-S3. The distinction is that Ceph RGW is being treated as the lower-risk S3 API target for this client mix, while Ozone remains viable only if its S3 Gateway passes the same proof-of-fit and its operational or security model is preferred.
+
+Apache Ozone remains the control candidate, not a footnote. Ozone may become the better choice if the requirements shift toward storage-layer Ranger/Kerberos enforcement or Ozone's volume/bucket namespace as the primary platform abstraction. That change would require revising the storage contract and the downstream Increment 2/3/5 engine configuration, not just swapping an endpoint URL.
 
 ### Baseline production target
 
-The baseline production storage target for this version of Stratus Phase 1 is **Ceph Object Gateway (RGW)** on a production Ceph cluster.
+The candidate baseline production storage target for this version of Stratus Phase 1 is **Ceph Object Gateway (RGW)** on a production Ceph cluster, subject to the due-diligence gates above.
 
 | Decision area | Baseline choice |
 |---|---|
@@ -43,7 +164,7 @@ The baseline production storage target for this version of Stratus Phase 1 is **
 
 ### Why Ceph RGW
 
-Ceph RGW is a strong fit when Stratus needs a mature open-source on-prem object store with broad S3 compatibility and proven operational patterns. It is a better production target than MinIO OSS because it is designed as a full distributed storage platform, not merely a developer-compatible S3 endpoint.
+Ceph RGW is a strong fit when Stratus needs a mature open-source on-prem object store with broad S3 compatibility and proven operational patterns. It provides a full distributed storage platform behind the S3 endpoint, including placement, durability, recovery, and operational controls.
 
 Relevant strengths:
 
@@ -60,16 +181,16 @@ Relevant strengths:
 
 ### Control candidate: Apache Ozone
 
-Apache Ozone is the control candidate for this decision. It may be a better fit if the platform optimizes for Hadoop-native integration, Kerberos/Ranger alignment, and Ozone's volume/bucket namespace model.
+Apache Ozone is the control candidate for this decision and is evaluated in the requirements-fit matrix above. It is not rejected by default. It remains the alternate production path if the proof-of-fit shows that Ozone's S3 Gateway, storage-layer security options, operational model, or volume/bucket namespace model better satisfy the stated Stratus requirements.
 
-Ceph remains the baseline for this document unless validation proves one of the following:
+Ceph remains the candidate baseline for this document unless validation proves one of the following:
 
 - Ceph RGW cannot satisfy Polaris/Iceberg/Spark/Trino requirements.
 - Ceph operational complexity is unacceptable for the target team.
-- Required Hadoop-native or Ranger/Kerberos behavior is materially better served by Ozone.
+- Required Ranger/Kerberos behavior at the storage layer is materially better served by Ozone.
 - Security, recovery, or performance testing identifies a blocker.
 
-If Ceph fails, create a storage ADR comparing Ceph RGW and Apache Ozone before replacing this increment plan.
+If Ceph fails any mandatory requirement, create a storage ADR comparing Ceph RGW and Apache Ozone against the failed requirement before replacing this increment plan.
 
 ### Known Ceph RGW caveat
 
@@ -84,7 +205,7 @@ For Stratus, this is acceptable if:
 
 ---
 
-## 3. Stratus Storage Contract
+## 4. Stratus Storage Contract
 
 Every storage target for Increment 1 must satisfy this contract. For this document, the target is Ceph RGW.
 
@@ -152,7 +273,7 @@ Production-like Ceph must define:
 
 ---
 
-## 4. Ceph Production Architecture
+## 5. Ceph Production Architecture
 
 ### Core services
 
@@ -213,7 +334,7 @@ For a smaller lab, roles may be co-located, but the lab must be clearly marked n
 
 ---
 
-## 5. Assumptions and Prerequisites
+## 6. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - dedicated disks or block devices for OSDs
@@ -239,7 +360,7 @@ Do not copy commands from a different Ceph release without checking compatibilit
 
 ---
 
-## 6. Ports
+## 7. Ports
 
 Confirm exact ports against the selected Ceph release and deployment runbook. Common Ceph service ports include:
 
@@ -260,7 +381,7 @@ Production exposure:
 
 ---
 
-## 7. TLS, Identity, Policy, and Encryption
+## 8. TLS, Identity, Policy, and Encryption
 
 ### TLS
 
@@ -304,7 +425,7 @@ Do not assume AWS KMS semantics unless they are verified against the selected Ce
 
 ---
 
-## 8. Ceph Installation Plan
+## 9. Ceph Installation Plan
 
 Use the official Ceph deployment documentation for the selected release. This section defines the Stratus deployment shape and required configuration areas; exact commands belong in the release-pinned runbook.
 
@@ -363,9 +484,9 @@ The RGW layer must define:
 
 ---
 
-## 9. Podman and Docker Lab Deployment
+## 10. Podman and Docker Lab Deployment
 
-This section provides a containerized lab deployment pattern for Ceph. It is not a replacement for the production topology in §4. It is intended to prove RGW, S3 client behavior, bucket setup, and Java verification before building the full production-like cluster.
+This section provides a containerized lab deployment pattern for Ceph. It is not a replacement for the production topology in §5. It is intended to prove RGW, S3 client behavior, bucket setup, and Java verification before building the full production-like cluster.
 
 ### Podman-based cephadm lab
 
@@ -499,9 +620,9 @@ Do not use a single-host lab to prove failure tolerance, CRUSH design, OSD recov
 
 ---
 
-## 10. Docker Compose Developer Harness
+## 11. Docker Compose Developer Harness
 
-Docker Compose is not the Ceph cluster deployment mechanism for Stratus. A real Ceph lab should use cephadm with Podman or Docker as described in §9.
+Docker Compose is not the Ceph cluster deployment mechanism for Stratus. A real Ceph lab should use cephadm with Podman or Docker as described in §10.
 
 Compose is useful as a **developer client harness** that runs tools against an existing RGW endpoint. It keeps S3 smoke-test commands repeatable without pretending to orchestrate MON/MGR/OSD/RGW.
 
@@ -601,7 +722,7 @@ The Compose harness does not validate:
 
 ---
 
-## 11. Developer and Lab Topology
+## 12. Developer and Lab Topology
 
 ### Developer topology
 
@@ -611,7 +732,7 @@ Use either:
 - a cephadm-managed lab cluster
 - the Docker Compose client harness against an existing RGW endpoint
 
-Do not use MinIO as the developer topology for this Ceph path.
+Do not substitute an unrelated S3-compatible service for the developer topology; developer validation should exercise Ceph RGW or a Ceph-managed lab endpoint.
 
 Developer validation should prove:
 
@@ -637,7 +758,7 @@ If the lab cannot run quorum and OSD failure-domain behavior, label the limitati
 
 ---
 
-## 12. Bucket and Identity Setup
+## 13. Bucket and Identity Setup
 
 ### Create buckets
 
@@ -703,7 +824,7 @@ Do not assume this exact JSON is sufficient until RGW policy behavior is tested 
 
 ---
 
-## 13. Polaris and Iceberg Compatibility Requirements
+## 14. Polaris and Iceberg Compatibility Requirements
 
 Increment 2 depends on this storage layer. Before Increment 2 starts, prove that Ceph RGW works with:
 
@@ -724,11 +845,11 @@ s3.path-style-access = true
 warehouse / base locations = s3://stratus-bronze, s3://stratus-silver, s3://stratus-gold, s3://stratus-platform
 ```
 
-Increment 2 must be updated to refer to Ceph/object storage rather than MinIO.
+Increment 2 must be updated to refer to Ceph/object storage and the `STRATUS_S3_*` configuration contract.
 
 ---
 
-## 14. Java Verification Module
+## 15. Java Verification Module
 
 The verification suite proves the Stratus S3 storage contract against Ceph RGW.
 
@@ -792,7 +913,7 @@ All tests must pass before Increment 2 begins.
 
 ---
 
-## 15. Operational Checks
+## 16. Operational Checks
 
 ### Ceph health
 
@@ -855,7 +976,7 @@ For production-like:
 
 ---
 
-## 16. Completion Gates
+## 17. Completion Gates
 
 ### Lab gate
 
@@ -895,7 +1016,7 @@ No production dataset should be onboarded based only on a single-node or non-sec
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### RGW endpoint unreachable
 
@@ -939,15 +1060,22 @@ No production dataset should be onboarded based only on a single-node or non-sec
 
 ---
 
-## 18. References
+## 19. References
 
 - Ceph Object Gateway documentation: https://docs.ceph.com/en/latest/radosgw/
+- Ceph Object Gateway S3 API: https://docs.ceph.com/en/latest/radosgw/s3/
+- Ceph RGW bucket policies: https://docs.ceph.com/en/latest/radosgw/bucketpolicy/
+- Ceph RGW encryption: https://docs.ceph.com/en/latest/radosgw/encryption/
 - Cephadm documentation: https://docs.ceph.com/en/latest/cephadm/
 - Cephadm new cluster deployment: https://docs.ceph.com/en/latest/cephadm/install/
 - Ceph architecture: https://docs.ceph.com/en/latest/architecture/
 - Ceph operations: https://docs.ceph.com/en/latest/rados/operations/
 - Ceph dashboard: https://docs.ceph.com/en/latest/mgr/dashboard/
 - Apache Ozone documentation: https://ozone.apache.org/docs/current/
+- Apache Ozone S3 protocol: https://ozone.apache.org/docs/current/interface/s3.html
+- Apache Ozone security: https://ozone.apache.org/docs/current/security.html
+- Apache Iceberg AWS/S3 storage documentation: https://iceberg.apache.org/docs/latest/aws/
+- Trino S3 file system support: https://trino.io/docs/current/object-storage/file-system-s3.html
 - AWS SDK for Java S3: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)

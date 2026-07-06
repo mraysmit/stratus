@@ -43,14 +43,14 @@ The baseline production storage target for Stratus Phase 1 is **Apache Ozone**.
 
 ### Why Ozone
 
-Ozone fits this platform better than MinIO OSS because Stratus is an on-prem lakehouse/data-fabric design, not a small standalone S3 appliance. Ozone is built for large-scale distributed storage and aligns with the Hadoop/Spark/Flink ecosystem while still exposing S3-compatible access for Iceberg and other object-store clients.
+Ozone fits this platform better than a small standalone S3 appliance because Stratus is an on-prem lakehouse/data-fabric design. Ozone is built for large-scale distributed object storage while still exposing S3-compatible access for Iceberg and other object-store clients.
 
 Relevant strengths:
 
 - open-source Apache project
 - on-prem distributed storage design
 - S3 Gateway for S3-compatible clients
-- Hadoop-compatible access paths for future engine integration
+- S3 Gateway access path for the Stratus lakehouse engine contract
 - strong consistency
 - replication and erasure coding
 - Kerberos security model
@@ -256,7 +256,7 @@ Before implementation:
 - read the matching Ozone documentation for that exact release
 - pin all artifacts, images, packages, or tarballs
 - record Java compatibility
-- record Hadoop client compatibility for Spark/Flink/Trino
+- record S3 Gateway client compatibility for Spark/Flink/Trino
 - record S3 Gateway limitations for that release
 
 Do not copy commands from a different Ozone documentation version without checking compatibility.
