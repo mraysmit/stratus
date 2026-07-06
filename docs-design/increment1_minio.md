@@ -1,92 +1,218 @@
-# Stratus Increment 1 — MinIO Storage Foundation
+# Stratus Increment 1 - Object Storage Foundation
 
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 1 delivers a multi-node distributed MinIO object storage cluster running on Podman containers across a lab cluster. When this increment is complete, all five platform buckets exist, TLS is enforced, service account credentials are isolated, and a Java verification suite confirms the storage layer is ready for Iceberg and Polaris in Increment 2.
+Increment 1 delivers the object-storage foundation consumed by Polaris, Iceberg, Spark, Airflow, Trino, and later Flink. The durable platform requirement is not "install MinIO." The durable requirement is:
+
+- a supported S3-compatible object-storage endpoint
+- TLS enforced for all client and service traffic
+- five required Stratus buckets
+- isolated platform service credentials
+- a repeatable verification suite proving bucket existence, S3 compatibility, credential isolation, and read/write behavior
+
+MinIO OSS may be used for disposable developer and lab validation only when the intended production path is MinIO AIStor. If the production path is not AIStor, do not start with MinIO OSS; start Increment 1 against the actual selected storage target or its vendor-supported non-production equivalent.
 
 ---
 
-## 2. Assumptions and Prerequisites
+## 2. Key Decision: Production Path First
 
-- Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each node
-- DNS resolution works between nodes (either via `/etc/hosts` or a local DNS server)
-- Nodes can reach each other on the ports defined in §4
-- Sudo access on each node for initial setup
-- The Java verification module requires JDK 21+ and Maven 3.9+
-
-### Reference documentation audit
+### Current upstream warning
 
 Reference baseline: 2026-07-05.
 
-The current MinIO documentation now presents the Linux/container deployment path under MinIO AIStor, and the Apache Polaris MinIO guide explicitly warns that MinIO OSS is in maintenance mode and intended only for local or test use in that context. This increment can still use MinIO-compatible S3 semantics for a lab foundation, but implementation must make an explicit product/support decision before any production-like deployment:
+The Apache Polaris MinIO guide explicitly warns that its MinIO OSS example is for local testing only. It also states that MinIO OSS is in maintenance mode and that MinIO container images may no longer receive updates or security fixes.
 
-- use a pinned, approved MinIO/AIStor image or internally mirrored artifact
-- do not use a floating `latest` tag
-- verify current distributed deployment, container, TLS, and access policy commands against the selected release documentation
-- record whether the deployment is lab-only MinIO OSS or a supported production object-storage target
+Therefore, this plan does not treat MinIO OSS as the production storage product for Stratus.
+
+### Production target
+
+The baseline production target for Stratus Phase 1 is **MinIO AIStor**, the supported MinIO object-storage distribution, deployed as an on-prem multi-node, erasure-coded S3-compatible object-storage cluster.
+
+This is an explicit design decision. Stratus keeps the S3 storage contract product-neutral enough to test and integrate cleanly, but the production implementation target for this plan is not an unnamed S3-compatible store. It is MinIO AIStor unless a later architecture decision record replaces it.
+
+Production target summary:
+
+| Decision area | Baseline choice |
+|---|---|
+| Product | MinIO AIStor |
+| Deployment model | On-prem multi-node distributed object-storage cluster |
+| API exposed to Stratus | S3-compatible API over HTTPS |
+| Data protection | AIStor-supported erasure-coded topology, sized from vendor-supported node/drive guidance |
+| Artifact discipline | approved AIStor image or artifact pinned by version and digest; no `latest` |
+| Support model | vendor-supported or otherwise contractually supported AIStor deployment |
+| Stratus endpoint name | `object-store.stratus.local` or environment-specific DNS alias |
+| Lab compatibility target | MinIO OSS may emulate the API for disposable developer/lab validation only when AIStor remains the production target |
+
+Non-baseline targets such as Ceph RGW, Dell ECS, NetApp StorageGRID, Cloudian, Apache Ozone S3 gateway, or an internally maintained MinIO-compatible artifact are not the default production path. They are replacement storage targets and require a superseding storage architecture decision record before use. That record must explain why MinIO AIStor is not being used and must prove the replacement target passes the same Stratus storage contract and downstream Polaris/Iceberg/Spark/Trino verification gates.
+
+If a replacement storage target is selected, the lab should use that target's own development or non-production deployment path. A MinIO OSS lab is no longer representative in that case because it validates MinIO behavior, not the operational, security, policy, TLS, compatibility, and failure behavior of the replacement product.
+
+### Decision record required
+
+Before any shared, long-lived, regulated, or production-like environment is declared ready, create a storage decision record containing:
+
+- selected object-storage product and edition
+- support owner and support contract or internal ownership model
+- approved version, appliance release, image tag, or image digest
+- topology and capacity model
+- TLS and certificate trust model
+- identity and credential management model
+- bucket, lifecycle, retention, encryption, backup, and recovery model
+- monitoring, alerting, and log integration
+- upgrade and patch process
+- known deviations from the lab reference implementation
+- verification evidence from the Java storage suite
+
+Increment 1 lab completion can unblock Increment 2 engineering work. It does not by itself approve production dataset onboarding.
 
 ---
 
-## 3. Cluster Topology
+## 3. Stratus Storage Contract
 
-A distributed MinIO cluster requires a minimum of four nodes for erasure coding. This plan uses four nodes.
+Every storage target must satisfy this contract.
+
+### Endpoint contract
+
+| Requirement | Contract |
+|---|---|
+| API | S3-compatible object API |
+| Transport | HTTPS only |
+| Endpoint variable | `STRATUS_S3_ENDPOINT` |
+| Path-style access | Required unless every downstream client has been verified with virtual-hosted style |
+| Region | Use `us-east-1` for the baseline AIStor target unless a verified client configuration requires a different fixed value |
+| CA trust | Clients must trust the issuing CA; routine commands must not require `--insecure` or `-k` |
+
+### Bucket contract
+
+| Bucket | Purpose |
+|---|---|
+| `stratus-landing` | raw source files and bounded external extracts before table ingestion |
+| `stratus-bronze` | bronze Iceberg data and metadata |
+| `stratus-silver` | silver Iceberg data and metadata |
+| `stratus-gold` | gold Iceberg data and metadata |
+| `stratus-platform` | platform-internal data such as quality results, Spark event logs, audit extracts, and maintenance metadata |
+
+The bucket names are part of the Stratus platform contract. Alternative object-store products may expose these through different administrative tooling, but clients must see these exact S3 bucket names.
+
+### Service credential contract
+
+| Principal | Minimum object-storage access |
+|---|---|
+| `svc-spark` | read/write/delete landing, bronze, silver, gold, platform |
+| `svc-polaris` | read/write/delete bronze, silver, gold, platform; landing access only if required by the selected Polaris storage configuration |
+| `svc-airflow` | read landing; no write access to bronze/silver/gold |
+| `svc-trino` | read bronze for internal verification, read silver/gold/platform for query serving and quality visibility |
+
+These names describe platform service identities. The selected object store may implement them as IAM users, service accounts, access keys, LDAP-backed users, OIDC clients, or another product-specific mechanism. The access boundaries must remain equivalent.
+
+### Security contract
+
+- TLS is required on all S3 endpoints.
+- Root/admin credentials must not be used by applications.
+- Service credentials must be stored outside source control.
+- Credential rotation must be documented before production readiness.
+- Server-side encryption or equivalent at-rest protection must be configured for production-like environments according to the AIStor-supported model.
+- Bucket policies are not the enterprise authorization layer for analytical users. User-facing data authorization is enforced later through Polaris, Trino, Ranger, and identity integration.
+
+### Recovery and operations contract
+
+Production-like storage must define:
+
+- node, drive, or appliance failure tolerance
+- backup or replication strategy for critical buckets and metadata
+- restore procedure and restore-test cadence
+- capacity alert thresholds
+- service-level monitoring
+- request/error metrics
+- audit or access logging where supported
+
+The lab reference implementation below exercises some failure behavior, but production recovery must be designed against the AIStor production topology or an approved replacement target.
+
+---
+
+## 4. Environments
+
+| Environment | Purpose | Storage target |
+|---|---|---|
+| Developer | local command and client validation | optional Docker Compose MinIO OSS only for the AIStor path; otherwise use the selected target's dev image/appliance/sandbox |
+| Lab | early integrated Stratus build and Increment 2 unblocker | AIStor non-production deployment, or MinIO OSS only as an AIStor API stand-in; replacement targets must use their own lab deployment |
+| Production-like | shared, long-lived, regulated, performance, or pre-production validation | MinIO AIStor unless superseded by approved storage ADR |
+| Production | real production dataset onboarding | MinIO AIStor with operational signoff unless superseded by approved storage ADR |
+
+The rest of this document contains a production contract plus a lab reference implementation. Do not confuse the lab reference implementation with production approval.
+
+---
+
+## 5. Production Implementation Requirements
+
+For production-like environments, implement MinIO AIStor using the approved AIStor runbook and vendor-supported topology. The Stratus-specific tasks are:
+
+1. Publish a stable HTTPS S3 endpoint, for example `https://object-store.stratus.example:9000`.
+2. Ensure client hosts, Polaris, Spark, Airflow, Trino, and later Flink trust the endpoint certificate chain.
+3. Create the five required buckets.
+4. Create or map the four platform service identities.
+5. Apply equivalent least-privilege access policies.
+6. Confirm path-style or virtual-hosted-style S3 behavior for all downstream clients.
+7. Configure production-required encryption, retention, lifecycle, monitoring, alerting, audit logging, backup, and restore.
+8. Run the Java verification suite against the production-like endpoint.
+9. Record evidence in the storage decision record and operational readiness checklist.
+
+If a superseding ADR selects a non-AIStor production target, skip the AIStor/MinIO container sections and replace them with that product's deployment runbook. Keep the bucket, identity, TLS, and verification sections.
+
+---
+
+## 6. Lab Reference Topology: MinIO / AIStor
+
+This section is a reference implementation for the AIStor production path. Use a supported AIStor artifact if the lab is shared or long-lived. Use MinIO OSS only for disposable local or internal validation where the goal is to validate the AIStor/MinIO API shape before moving to supported AIStor.
+
+If the production target is changed away from AIStor, skip this section and use the replacement product's own lab deployment. Do not use MinIO OSS as a generic stand-in for a non-MinIO production object store.
+
+### Topology
+
+The lab reference uses four nodes because distributed MinIO requires at least four nodes for erasure coding.
 
 | Node | Hostname | Role |
 |---|---|---|
-| Node 1 | `minio1.stratus.local` | MinIO server |
-| Node 2 | `minio2.stratus.local` | MinIO server |
-| Node 3 | `minio3.stratus.local` | MinIO server |
-| Node 4 | `minio4.stratus.local` | MinIO server |
-
-Each node contributes one or more drives. MinIO recommends a minimum of four drives per node in production — for a lab cluster, one dedicated directory per node is acceptable for initial setup.
+| Node 1 | `minio1.stratus.local` | object-storage server |
+| Node 2 | `minio2.stratus.local` | object-storage server |
+| Node 3 | `minio3.stratus.local` | object-storage server |
+| Node 4 | `minio4.stratus.local` | object-storage server |
 
 ```text
-minio1  ──┐
-minio2  ──┤  MinIO distributed cluster (erasure-coded, 4 nodes)
-minio3  ──┤
-minio4  ──┘
-           │
-           ▼
-    Load balancer / DNS alias
-    minio.stratus.local:9000   ← S3 API
-    minio.stratus.local:9001   ← Console UI
+minio1  ----\
+minio2  -----+--> distributed S3-compatible storage
+minio3  -----+    endpoint alias: minio.stratus.local
+minio4  ----/
 ```
 
-For a lab without a hardware load balancer, a simple round-robin DNS entry or a lightweight Nginx reverse proxy on any node is sufficient.
+Each node contributes one or more drives. For a disposable lab, one dedicated directory per node is acceptable. For a production-like AIStor/MinIO deployment, follow the supported drive and erasure-set layout for the approved product.
 
----
-
-## 4. Ports
+### Ports
 
 | Port | Purpose |
 |---|---|
-| 9000 | MinIO S3 API (TLS) |
-| 9001 | MinIO Console UI (TLS) |
+| 9000 | S3 API over TLS |
+| 9001 | MinIO Console over TLS |
 
-All inter-node MinIO communication also uses port 9000. Ensure these ports are open between all four nodes and from any client host.
+All inter-node MinIO traffic also uses port `9000`.
 
 ---
 
-## 5. TLS Certificates
+## 7. Lab TLS Certificates
 
-MinIO requires TLS certificates. For Increment 1 use self-signed certificates. These will be replaced with FreeIPA Dogtag-issued certificates in Increment 7.
+For lab use, generate a self-signed CA and per-node certificates. These are replaced later by the Phase 1 identity and PKI work, and they are not production certificate management.
 
-### Generate a self-signed CA and per-node certificates
-
-On a dedicated admin machine or on `minio1`:
+On an admin machine:
 
 ```bash
 mkdir -p ~/stratus-certs && cd ~/stratus-certs
 
-# Generate CA key and certificate
 openssl genrsa -out ca.key 4096
 openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
   -subj "/CN=Stratus Lab CA/O=Stratus/C=US"
 
-# Generate a certificate for each node
 for NODE in minio1 minio2 minio3 minio4; do
   openssl genrsa -out ${NODE}.key 2048
   openssl req -new -key ${NODE}.key -out ${NODE}.csr \
@@ -99,58 +225,63 @@ for NODE in minio1 minio2 minio3 minio4; do
 done
 ```
 
-Distribute to each node:
+Install each node certificate using the filenames MinIO expects:
 
 ```bash
 for NODE in minio1 minio2 minio3 minio4; do
-  ssh ${NODE}.stratus.local "mkdir -p /etc/stratus/certs"
-  scp ${NODE}.key ${NODE}.crt ca.crt \
-    ${NODE}.stratus.local:/etc/stratus/certs/
+  scp ${NODE}.key ${NODE}.crt ca.crt ${NODE}.stratus.local:/tmp/
+  ssh ${NODE}.stratus.local "
+    sudo mkdir -p /etc/stratus/certs/CAs
+    sudo install -m 0600 /tmp/${NODE}.key /etc/stratus/certs/private.key
+    sudo install -m 0644 /tmp/${NODE}.crt /etc/stratus/certs/public.crt
+    sudo install -m 0644 /tmp/ca.crt /etc/stratus/certs/CAs/stratus-ca.crt
+    rm -f /tmp/${NODE}.key /tmp/${NODE}.crt /tmp/ca.crt
+  "
 done
 ```
 
+MinIO reads:
+
+| File | Meaning |
+|---|---|
+| `/etc/stratus/certs/public.crt` | node certificate presented to clients and peers |
+| `/etc/stratus/certs/private.key` | private key matching `public.crt` |
+| `/etc/stratus/certs/CAs/stratus-ca.crt` | CA certificate trusted for peer connections |
+
 ---
 
-## 6. Storage Preparation
+## 8. Lab Storage Preparation
 
-On each node, create the data directory that MinIO will use. For a lab with one drive per node:
+On each MinIO lab node:
 
 ```bash
-# Run on each node
 sudo mkdir -p /data/minio
 sudo chown $USER:$USER /data/minio
 ```
 
-For a production-grade lab with multiple drives per node, mount each drive separately under `/data/minio1`, `/data/minio2` etc. and adjust the Podman volume mounts in §7 accordingly.
+For a lab with multiple dedicated drives, mount each drive separately and update the MinIO peer path and volume mounts accordingly. Do not simulate production durability by placing multiple "drives" on the same underlying filesystem and calling that production-ready.
 
 ---
 
-## 7. Podman Container Configuration
+## 9. Lab Podman Configuration
+
+This is the primary lab implementation: one container per node, managed by Podman and systemd. It is suitable for internal integration testing, not for production approval unless the AIStor support model and operations team explicitly adopt this exact model.
 
 ### Environment file
 
-Create `/etc/stratus/minio.env` on each node. Replace `NODE_N_IP` with the actual IP addresses of each node.
+Create `/etc/stratus/minio.env` on each node:
 
 ```bash
 # /etc/stratus/minio.env
 
-# Root credentials — change before any non-lab use
 MINIO_ROOT_USER=stratus-admin
 MINIO_ROOT_PASSWORD=change-me-before-use
-
-# Distributed cluster peers
-MINIO_VOLUMES="https://minio{1...4}.stratus.local:9000/data/minio"
-
-# TLS
-MINIO_OPTS="--certs-dir /etc/stratus/certs --console-address :9001"
-
-# Site name for observability
 MINIO_SITE_NAME=stratus-lab
 ```
 
-### Run MinIO on each node
+The root user and password are bootstrap credentials. They are used to create platform service identities and must not be used by applications.
 
-Run the following on each node. The container name, hostname, and volume paths are the same on every node — MinIO's distributed mode uses the `MINIO_VOLUMES` peer list to differentiate nodes.
+### Run the container on each node
 
 ```bash
 podman run -d \
@@ -164,25 +295,31 @@ podman run -d \
   quay.io/minio/minio:<approved-version> server \
     --certs-dir /etc/stratus/certs \
     --console-address ":9001" \
-    ${MINIO_VOLUMES}
+    "https://minio{1...4}.stratus.local:9000/data/minio"
 ```
 
-Replace `<approved-version>` with the specific MinIO or AIStor image tag approved for the environment. The tag must be recorded in the implementation runbook and kept consistent across all MinIO nodes.
+Replace `<approved-version>` with the approved image tag or digest for the lab. Do not use `latest`.
 
-`--network host` is used here so MinIO nodes can communicate with each other directly by hostname without Podman network address translation complexity. For environments where host networking is restricted, a Podman network with DNS can be configured instead.
+Command notes:
 
-### Verify the container started
+- `--network host` makes the container bind directly to host ports `9000` and `9001`.
+- `/data/minio` is the persistent object data path.
+- `/etc/stratus/certs` is mounted read-only and contains the TLS files from §7.
+- The peer list must be identical on all four nodes.
+- `:z` applies a shared SELinux label on SELinux-enabled hosts.
+
+### Verify startup
 
 ```bash
 podman ps | grep minio
 podman logs minio | tail -20
 ```
 
-Look for `API: https://...` and `Console: https://...` in the logs. If MinIO reports `Waiting for all MinIO nodes to be online`, the other nodes have not yet started — start all four nodes before MinIO begins serving requests.
+Look for HTTPS API and Console endpoints. If a node waits for peers, verify all four nodes are started, DNS resolves, port `9000` is open, certificates include the expected SANs, and every node uses the same peer list.
 
-### Auto-start with systemd
+### Manage with systemd
 
-Generate a systemd unit from the running container on each node:
+Generate a service unit on each node:
 
 ```bash
 podman generate systemd --new --name minio \
@@ -192,36 +329,214 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now stratus-minio.service
 ```
 
----
-
-## 8. Bucket and Service Account Setup
-
-Once all four nodes are running and the cluster is healthy, connect to any node to perform initial setup. The MinIO client (`mc`) is the standard tool for this.
-
-### Install the MinIO client
+After enabling the unit, use systemd for routine operations:
 
 ```bash
-curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
-chmod +x mc
-sudo mv mc /usr/local/bin/mc
+sudo systemctl status stratus-minio
+sudo systemctl restart stratus-minio
+sudo journalctl -u stratus-minio -f
 ```
 
-### Configure the client
+---
+
+## 10. Optional Developer Docker Compose Topology
+
+Docker Compose is included only as a single-host developer topology for the AIStor/MinIO path. It is useful for command validation and client testing when AIStor is the production target. It is not a deployment topology, not a resilience test, and not a substitute for the lab or production gates.
+
+If a superseding ADR selects a non-AIStor production target, remove this Compose topology from the active implementation path and use that product's developer or non-production environment instead.
+
+Use it to:
+
+- validate container command syntax
+- practice bucket and policy setup
+- run the Java S3 verification suite against a disposable endpoint
+
+### Prepare local directories and certificates
+
+The Compose certificate files come from the lab certificates generated in §7. Copy and rename them into the filenames MinIO expects:
+
+```bash
+mkdir -p deploy/minio-compose/certs/minio{1..4}/CAs
+mkdir -p deploy/minio-compose/data/minio{1..4}
+
+for NODE in minio1 minio2 minio3 minio4; do
+  cp ~/stratus-certs/${NODE}.crt deploy/minio-compose/certs/${NODE}/public.crt
+  cp ~/stratus-certs/${NODE}.key deploy/minio-compose/certs/${NODE}/private.key
+  cp ~/stratus-certs/ca.crt deploy/minio-compose/certs/${NODE}/CAs/stratus-ca.crt
+done
+```
+
+For host-based clients, add a hosts-file entry mapping `minio1.stratus.local` to `127.0.0.1`. If the developer workflow must use `https://localhost:9000`, generate a developer-only certificate that includes `DNS:localhost`.
+
+### Directory layout
+
+```text
+deploy/minio-compose/
+  compose.yaml
+  .env
+  certs/
+    minio1/public.crt
+    minio1/private.key
+    minio1/CAs/stratus-ca.crt
+    minio2/public.crt
+    minio2/private.key
+    minio2/CAs/stratus-ca.crt
+    minio3/public.crt
+    minio3/private.key
+    minio3/CAs/stratus-ca.crt
+    minio4/public.crt
+    minio4/private.key
+    minio4/CAs/stratus-ca.crt
+  data/
+    minio1/
+    minio2/
+    minio3/
+    minio4/
+```
+
+### `.env`
+
+```bash
+MINIO_IMAGE=quay.io/minio/minio:<approved-version>
+MINIO_ROOT_USER=stratus-admin
+MINIO_ROOT_PASSWORD=change-me-before-use
+```
+
+### `compose.yaml`
+
+```yaml
+services:
+  minio1:
+    image: ${MINIO_IMAGE}
+    hostname: minio1.stratus.local
+    command:
+      - server
+      - --certs-dir
+      - /etc/stratus/certs
+      - --console-address
+      - ":9001"
+      - https://minio{1...4}.stratus.local:9000/data/minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: stratus-compose-lab
+    volumes:
+      - ./data/minio1:/data/minio
+      - ./certs/minio1:/etc/stratus/certs:ro
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      stratus-minio:
+        aliases:
+          - minio1.stratus.local
+
+  minio2:
+    image: ${MINIO_IMAGE}
+    hostname: minio2.stratus.local
+    command:
+      - server
+      - --certs-dir
+      - /etc/stratus/certs
+      - --console-address
+      - ":9001"
+      - https://minio{1...4}.stratus.local:9000/data/minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: stratus-compose-lab
+    volumes:
+      - ./data/minio2:/data/minio
+      - ./certs/minio2:/etc/stratus/certs:ro
+    networks:
+      stratus-minio:
+        aliases:
+          - minio2.stratus.local
+
+  minio3:
+    image: ${MINIO_IMAGE}
+    hostname: minio3.stratus.local
+    command:
+      - server
+      - --certs-dir
+      - /etc/stratus/certs
+      - --console-address
+      - ":9001"
+      - https://minio{1...4}.stratus.local:9000/data/minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: stratus-compose-lab
+    volumes:
+      - ./data/minio3:/data/minio
+      - ./certs/minio3:/etc/stratus/certs:ro
+    networks:
+      stratus-minio:
+        aliases:
+          - minio3.stratus.local
+
+  minio4:
+    image: ${MINIO_IMAGE}
+    hostname: minio4.stratus.local
+    command:
+      - server
+      - --certs-dir
+      - /etc/stratus/certs
+      - --console-address
+      - ":9001"
+      - https://minio{1...4}.stratus.local:9000/data/minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: stratus-compose-lab
+    volumes:
+      - ./data/minio4:/data/minio
+      - ./certs/minio4:/etc/stratus/certs:ro
+    networks:
+      stratus-minio:
+        aliases:
+          - minio4.stratus.local
+
+networks:
+  stratus-minio:
+    name: stratus-minio
+```
+
+Start it:
+
+```bash
+docker compose up -d
+docker compose logs -f minio1
+```
+
+Only `minio1` publishes host ports. Other nodes are reachable inside the Docker network through aliases.
+
+---
+
+## 11. Bucket and Identity Provisioning
+
+Provision buckets and service identities on the AIStor production target or on the MinIO/AIStor lab reference target. The commands below use the MinIO client. If a superseding ADR selects another production storage product, use that product's equivalent administrative interface and preserve the same bucket names and access boundaries.
+
+### Configure client access
+
+For the lab reference:
 
 ```bash
 mc alias set stratus https://minio1.stratus.local:9000 \
   stratus-admin change-me-before-use \
-  --insecure   # remove --insecure once CA cert is trusted on this machine
+  --insecure
 ```
 
-To trust the CA certificate instead of using `--insecure`:
+Remove `--insecure` after the CA is trusted:
 
 ```bash
 sudo cp ~/stratus-certs/ca.crt /etc/pki/ca-trust/source/anchors/stratus-ca.crt
 sudo update-ca-trust
 ```
 
-### Create platform buckets
+Production-like environments must not require `--insecure`.
+
+### Create buckets
 
 ```bash
 mc mb stratus/stratus-landing
@@ -231,48 +546,46 @@ mc mb stratus/stratus-gold
 mc mb stratus/stratus-platform
 ```
 
-### Create service accounts
-
-One service account per platform service. These are MinIO access key / secret key pairs scoped to specific buckets.
+### Create lab service users
 
 ```bash
-# Spark service account — read/write all data buckets
 mc admin user add stratus svc-spark $(openssl rand -base64 32)
-
-# Polaris service account — read/write all data buckets (catalog metadata)
 mc admin user add stratus svc-polaris $(openssl rand -base64 32)
-
-# Airflow service account — read landing zone only (job triggering)
 mc admin user add stratus svc-airflow $(openssl rand -base64 32)
-
-# Trino service account — read queryable Iceberg zones and platform quality metadata
 mc admin user add stratus svc-trino $(openssl rand -base64 32)
 ```
 
-### Create and apply access policies
+For production-like AIStor, prefer the supported service-account or external identity model approved in the storage decision record and document the mapping to the four Stratus service principals.
 
-Create policy files then apply them:
+### Apply lab access policies
+
+Spark and Polaris read/write all platform buckets:
 
 ```bash
-# svc-spark: read/write landing, bronze, silver, gold, platform
 cat > /tmp/policy-spark.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:ListBucket"],
+      "Action": ["s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::stratus-landing",
+        "arn:aws:s3:::stratus-bronze",
+        "arn:aws:s3:::stratus-silver",
+        "arn:aws:s3:::stratus-gold",
+        "arn:aws:s3:::stratus-platform"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"],
       "Resource": [
         "arn:aws:s3:::stratus-landing/*",
-        "arn:aws:s3:::stratus-landing",
         "arn:aws:s3:::stratus-bronze/*",
-        "arn:aws:s3:::stratus-bronze",
         "arn:aws:s3:::stratus-silver/*",
-        "arn:aws:s3:::stratus-silver",
         "arn:aws:s3:::stratus-gold/*",
-        "arn:aws:s3:::stratus-gold",
-        "arn:aws:s3:::stratus-platform/*",
-        "arn:aws:s3:::stratus-platform"
+        "arn:aws:s3:::stratus-platform/*"
       ]
     }
   ]
@@ -280,48 +593,58 @@ cat > /tmp/policy-spark.json <<'EOF'
 EOF
 mc admin policy create stratus policy-spark /tmp/policy-spark.json
 mc admin policy attach stratus policy-spark --user svc-spark
-
-# svc-polaris: read/write all data and platform buckets
 mc admin policy attach stratus policy-spark --user svc-polaris
+```
 
-# svc-airflow: read landing zone only
+Airflow can read landing only:
+
+```bash
 cat > /tmp/policy-airflow.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObject","s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::stratus-landing/*",
-        "arn:aws:s3:::stratus-landing"
-      ]
+      "Action": ["s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::stratus-landing"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": ["arn:aws:s3:::stratus-landing/*"]
     }
   ]
 }
 EOF
 mc admin policy create stratus policy-airflow /tmp/policy-airflow.json
 mc admin policy attach stratus policy-airflow --user svc-airflow
+```
 
-# svc-trino: read bronze for internal verification, silver/gold for query serving,
-# and platform for quality result visibility. Analyst access is still enforced
-# through Trino/Ranger in later increments.
+Trino can read queryable and verification zones:
+
+```bash
 cat > /tmp/policy-trino.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObject","s3:ListBucket"],
+      "Action": ["s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::stratus-bronze",
+        "arn:aws:s3:::stratus-silver",
+        "arn:aws:s3:::stratus-gold",
+        "arn:aws:s3:::stratus-platform"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
       "Resource": [
         "arn:aws:s3:::stratus-bronze/*",
-        "arn:aws:s3:::stratus-bronze",
         "arn:aws:s3:::stratus-silver/*",
-        "arn:aws:s3:::stratus-silver",
         "arn:aws:s3:::stratus-gold/*",
-        "arn:aws:s3:::stratus-gold",
-        "arn:aws:s3:::stratus-platform/*",
-        "arn:aws:s3:::stratus-platform"
+        "arn:aws:s3:::stratus-platform/*"
       ]
     }
   ]
@@ -331,17 +654,15 @@ mc admin policy create stratus policy-trino /tmp/policy-trino.json
 mc admin policy attach stratus policy-trino --user svc-trino
 ```
 
-Store all generated credentials in a secrets file on a secure admin host. These will be migrated to a secrets manager in a later increment.
+Store generated credentials in the approved secret location for the environment. Do not commit them.
 
 ---
 
-## 9. Java Verification Module
+## 12. Java Verification Module
 
-The verification suite is a Java module in the Stratus repository that confirms the storage layer meets the requirements of Increment 1. It uses the AWS S3 SDK (compatible with MinIO's S3 API) and runs as a self-contained Maven test suite.
+The verification suite proves the Stratus storage contract against any S3-compatible target. It should avoid product-specific APIs.
 
-### Maven dependency
-
-Add to `pom.xml`:
+### Maven dependencies
 
 ```xml
 <dependency>
@@ -358,278 +679,192 @@ Add to `pom.xml`:
 
 ### Configuration
 
-The verification suite reads MinIO connection details from environment variables so credentials are never committed to source control:
+Preferred storage-neutral variables:
 
 | Variable | Description |
 |---|---|
-| `STRATUS_MINIO_ENDPOINT` | e.g. `https://minio1.stratus.local:9000` |
-| `STRATUS_MINIO_ACCESS_KEY` | root or service account access key |
-| `STRATUS_MINIO_SECRET_KEY` | corresponding secret key |
+| `STRATUS_S3_ENDPOINT` | HTTPS S3 endpoint |
+| `STRATUS_S3_ACCESS_KEY` | admin or verification access key |
+| `STRATUS_S3_SECRET_KEY` | matching secret key |
+| `STRATUS_S3_AIRFLOW_ACCESS_KEY` | optional Airflow principal access key |
+| `STRATUS_S3_AIRFLOW_SECRET_KEY` | optional Airflow principal secret key |
 
-### Verification test class
+For backward compatibility with older increment docs, the test may also accept the previous `STRATUS_MINIO_*` names as aliases.
 
-Place in `src/test/java/dev/mars/stratus/storage/MinioVerificationTest.java`:
+### Verification expectations
 
-```java
-package dev.mars.stratus.storage;
+The suite must verify:
 
-import org.junit.jupiter.api.*;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
+- all five buckets exist
+- verification credentials can write/read/delete a test object in each required bucket
+- `svc-airflow` can list/read landing
+- `svc-airflow` cannot write bronze
+- configured endpoint is HTTPS
 
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+The negative plaintext HTTP probe is kept as an operational check because behavior differs by product.
 
-import static org.assertj.core.api.Assertions.*;
-
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class MinioVerificationTest {
-
-    static final List<String> REQUIRED_BUCKETS = List.of(
-        "stratus-landing",
-        "stratus-bronze",
-        "stratus-silver",
-        "stratus-gold",
-        "stratus-platform"
-    );
-
-    static S3Client s3;
-
-    @BeforeAll
-    static void connect() {
-        String endpoint  = System.getenv("STRATUS_MINIO_ENDPOINT");
-        String accessKey = System.getenv("STRATUS_MINIO_ACCESS_KEY");
-        String secretKey = System.getenv("STRATUS_MINIO_SECRET_KEY");
-
-        assertThat(endpoint).as("STRATUS_MINIO_ENDPOINT must be set").isNotBlank();
-        assertThat(accessKey).as("STRATUS_MINIO_ACCESS_KEY must be set").isNotBlank();
-        assertThat(secretKey).as("STRATUS_MINIO_SECRET_KEY must be set").isNotBlank();
-
-        s3 = S3Client.builder()
-            .endpointOverride(URI.create(endpoint))
-            .credentialsProvider(StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(accessKey, secretKey)))
-            .region(Region.US_EAST_1)       // MinIO ignores region but SDK requires one
-            .forcePathStyle(true)           // required for MinIO
-            .build();
-    }
-
-    @Test
-    @Order(1)
-    void allRequiredBucketsExist() {
-        Set<String> existing = s3.listBuckets().buckets().stream()
-            .map(Bucket::name)
-            .collect(Collectors.toSet());
-
-        assertThat(existing)
-            .as("All five platform buckets must exist")
-            .containsAll(REQUIRED_BUCKETS);
-    }
-
-    @Test
-    @Order(2)
-    void canWriteToEachBucket() {
-        for (String bucket : REQUIRED_BUCKETS) {
-            String key = "verification/write-test.txt";
-            assertThatNoException()
-                .as("Write to bucket %s must succeed", bucket)
-                .isThrownBy(() -> s3.putObject(
-                    PutObjectRequest.builder().bucket(bucket).key(key).build(),
-                    RequestBody.fromString("stratus-verification", StandardCharsets.UTF_8)
-                ));
-        }
-    }
-
-    @Test
-    @Order(3)
-    void canReadBackFromEachBucket() {
-        for (String bucket : REQUIRED_BUCKETS) {
-            String key = "verification/write-test.txt";
-            var response = s3.getObjectAsBytes(
-                GetObjectRequest.builder().bucket(bucket).key(key).build());
-
-            assertThat(response.asUtf8String())
-                .as("Read-back from bucket %s must return written content", bucket)
-                .isEqualTo("stratus-verification");
-        }
-    }
-
-    @Test
-    @Order(4)
-    void serviceAccountIsolationLandingOnly() {
-        // Verify svc-airflow credentials can only access stratus-landing
-        String airflowKey    = System.getenv("STRATUS_MINIO_AIRFLOW_ACCESS_KEY");
-        String airflowSecret = System.getenv("STRATUS_MINIO_AIRFLOW_SECRET_KEY");
-        String endpoint      = System.getenv("STRATUS_MINIO_ENDPOINT");
-
-        assumeThat(airflowKey).as("svc-airflow credentials not set — skipping isolation test").isNotBlank();
-
-        S3Client airflowClient = S3Client.builder()
-            .endpointOverride(URI.create(endpoint))
-            .credentialsProvider(StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(airflowKey, airflowSecret)))
-            .region(Region.US_EAST_1)
-            .forcePathStyle(true)
-            .build();
-
-        // Should succeed: read landing
-        assertThatNoException()
-            .as("svc-airflow must be able to list stratus-landing")
-            .isThrownBy(() -> airflowClient.listObjectsV2(
-                ListObjectsV2Request.builder().bucket("stratus-landing").build()));
-
-        // Should fail: write to bronze
-        assertThatExceptionOfType(S3Exception.class)
-            .as("svc-airflow must not be able to write to stratus-bronze")
-            .isThrownBy(() -> airflowClient.putObject(
-                PutObjectRequest.builder().bucket("stratus-bronze").key("test.txt").build(),
-                RequestBody.fromString("should-be-denied", StandardCharsets.UTF_8)))
-            .withMessageContaining("Access Denied");
-    }
-
-    @Test
-    @Order(5)
-    void tlsEnforced() {
-        String endpoint = System.getenv("STRATUS_MINIO_ENDPOINT");
-        assertThat(endpoint)
-            .as("MinIO endpoint must use HTTPS — plaintext connections are not permitted")
-            .startsWith("https://");
-    }
-
-    @AfterAll
-    static void cleanup() {
-        // Remove verification test objects written during the test run
-        for (String bucket : REQUIRED_BUCKETS) {
-            try {
-                s3.deleteObject(DeleteObjectRequest.builder()
-                    .bucket(bucket)
-                    .key("verification/write-test.txt")
-                    .build());
-            } catch (Exception ignored) { }
-        }
-        if (s3 != null) s3.close();
-    }
-}
-```
-
-### Running the verification suite
+### Running the suite
 
 ```bash
-export STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-export STRATUS_MINIO_ACCESS_KEY=stratus-admin
-export STRATUS_MINIO_SECRET_KEY=change-me-before-use
-export STRATUS_MINIO_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
-export STRATUS_MINIO_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
+export STRATUS_S3_ENDPOINT=https://minio1.stratus.local:9000
+export STRATUS_S3_ACCESS_KEY=stratus-admin
+export STRATUS_S3_SECRET_KEY=change-me-before-use
+export STRATUS_S3_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
+export STRATUS_S3_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
 
+mvn test -pl . -Dtest=S3StorageVerificationTest
+```
+
+If the implementation keeps the older class name temporarily, run:
+
+```bash
 mvn test -pl . -Dtest=MinioVerificationTest
 ```
 
-All five tests must pass before Increment 1 is considered complete and Increment 2 begins.
+The class should be renamed to `S3StorageVerificationTest` when implemented so the code matches the product-neutral design.
 
 ---
 
-## 10. Operational Checks
+## 13. Operational Checks
 
-Once the verification suite passes, perform these additional operational checks before signing off Increment 1.
+### Storage health
 
-### Cluster health
+For MinIO/AIStor lab targets:
 
 ```bash
 mc admin info stratus
 ```
 
-Expected output: all four nodes shown as `online`; drives shown as healthy; erasure coding status shown.
+Expected: all four nodes online and drives healthy.
 
-### Console access
+If a superseding ADR selects another production storage product, use its supported health command or console and attach evidence to the decision record.
 
-Open `https://minio.stratus.local:9001` in a browser. Log in with the root credentials. Confirm:
-- All five buckets are visible
-- Bucket access policies are visible per bucket
-- Server health shows green for all nodes
-
-### Simulate node failure
-
-Stop MinIO on one node:
+### Bucket visibility
 
 ```bash
-# On minio4
+mc ls stratus/
+```
+
+Expected buckets:
+
+- `stratus-landing`
+- `stratus-bronze`
+- `stratus-silver`
+- `stratus-gold`
+- `stratus-platform`
+
+### TLS validation
+
+Production-like commands must work without `--insecure` or `-k`.
+
+For MinIO/AIStor lab targets, confirm plaintext HTTP is rejected:
+
+```bash
+curl -v http://minio1.stratus.local:9000/minio/health/live
+```
+
+A successful plaintext response is a gate failure.
+
+### Failure drill
+
+For the four-node MinIO/AIStor lab target, stop one node:
+
+```bash
 sudo systemctl stop stratus-minio
 ```
 
-Verify the cluster continues to serve read and write requests from the remaining three nodes:
+Then verify a read/write path still succeeds from a surviving node:
 
 ```bash
 mc cp /etc/hostname stratus/stratus-landing/failover-test.txt
 mc cat stratus/stratus-landing/failover-test.txt
 ```
 
-Both commands should succeed. Restart the stopped node and confirm it rejoins:
+Restart the node and confirm it rejoins:
 
 ```bash
-# On minio4
 sudo systemctl start stratus-minio
-mc admin info stratus   # minio4 should return to online
+mc admin info stratus
 ```
 
----
-
-## 11. Completion Gate
-
-Increment 1 is complete when all of the following are true:
-
-- [ ] All four MinIO nodes are running as Podman containers managed by systemd
-- [ ] Cluster shows all nodes online via `mc admin info stratus`
-- [ ] All five buckets exist: `stratus-landing`, `stratus-bronze`, `stratus-silver`, `stratus-gold`, `stratus-platform`
-- [ ] All four service accounts exist with correct access policies applied
-- [ ] `MinioVerificationTest` — all five tests pass against the live cluster
-- [ ] MinIO Console accessible via HTTPS on port 9001
-- [ ] Single node failure test passes — cluster continues serving during one node outage
-- [ ] TLS enforced — plaintext connection on port 9000 is rejected
-
-When all gates are checked, Increment 2 (Iceberg and Polaris) can begin.
+If a superseding ADR selects a different production target, perform that product's supported failure drill and record the result.
 
 ---
 
-## 12. Troubleshooting
+## 14. Completion Gates
 
-### Cluster does not form — nodes stuck waiting for peers
+### Lab gate
 
-- Confirm all four hostnames resolve from each node: `ping minio2.stratus.local` from `minio1`
-- Confirm port 9000 is open between nodes: `nc -zv minio2.stratus.local 9000`
-- All four nodes must be started before MinIO begins serving — start them in quick succession
+Increment 1 lab is complete when:
 
-### TLS errors in logs
+- [ ] storage target and support status are recorded as lab-only or supported
+- [ ] S3 HTTPS endpoint is reachable
+- [ ] all five Stratus buckets exist
+- [ ] platform service identities exist or are mapped
+- [ ] access policies enforce the service credential contract
+- [ ] Java storage verification passes
+- [ ] plaintext HTTP is rejected or otherwise impossible for the lab endpoint
+- [ ] lab operational health check passes
+- [ ] MinIO/AIStor lab, if used, passes the one-node failure drill
 
-- Confirm the certificate SAN includes the node hostname and the shared alias (`minio.stratus.local`)
-- Confirm the CA certificate is trusted on client machines: `update-ca-trust`
-- Check certificate expiry: `openssl x509 -in /etc/stratus/certs/minio1.crt -noout -dates`
+When the lab gate passes, Increment 2 engineering work can begin.
 
-### `Access Denied` on bucket operations
+### Production-ready gate
 
-- Confirm the service account policy is attached: `mc admin policy list stratus --user svc-spark`
-- Confirm the bucket name in the policy matches exactly — MinIO bucket names are case-sensitive
+The storage foundation is production-ready only when:
 
-### Podman container exits immediately
+- [ ] storage decision record is approved
+- [ ] MinIO AIStor support model is approved, or a superseding storage ADR approves a replacement target
+- [ ] production topology, capacity, monitoring, backup, recovery, patching, and rotation runbooks exist
+- [ ] TLS works without insecure client flags
+- [ ] service credentials are stored in the approved secret-management location
+- [ ] Java storage verification passes against the production-like target
+- [ ] restore or failure drill passes according to the AIStor recovery model, or the approved replacement target's recovery model
+- [ ] Phase 1 operational readiness checklist accepts the storage layer
 
-- Check logs: `podman logs minio`
-- Common cause: data directory permissions — ensure `$USER` owns `/data/minio`
-- Common cause: certificate path mismatch — confirm `-v /etc/stratus/certs:/etc/stratus/certs` mount path matches `--certs-dir` argument
+No production dataset should be onboarded based only on the MinIO OSS lab gate.
 
 ---
 
-## 13. References
+## 15. Troubleshooting
 
-- MinIO distributed deployment: https://min.io/docs/minio/linux/operations/install-deploy-manage/deploy-minio-multi-node-multi-drive.html
-- MinIO Podman deployment: https://min.io/docs/minio/container/index.html
-- MinIO access policy reference: https://min.io/docs/minio/linux/administration/identity-access-management/policy-based-access-control.html
+### S3 endpoint unreachable
+
+- Confirm DNS resolution from the client host.
+- Confirm firewall access to the S3 HTTPS port.
+- Confirm AIStor, or the approved replacement target, is listening on the expected endpoint.
+- Confirm client truststore contains the issuing CA.
+
+### TLS validation fails
+
+- Confirm the endpoint hostname is present in the certificate SAN.
+- Confirm the issuing CA is trusted by the client.
+- Confirm intermediate certificates are served or installed as required.
+- Avoid using `--insecure` except during disposable lab bring-up.
+
+### Bucket access denied
+
+- Confirm the service identity is the one expected by the test or component.
+- Confirm bucket-level list permissions and object-level permissions are both present.
+- Confirm AIStor policy syntax is correct, or that the approved replacement target has equivalent role mapping.
+- Confirm there is no explicit deny from a broader policy.
+
+### MinIO/AIStor lab cluster does not form
+
+- Confirm all four hostnames resolve from every node.
+- Confirm port `9000` is open between all nodes.
+- Confirm each node has the correct `public.crt`, `private.key`, and CA file.
+- Confirm every node uses the exact same peer list.
+- Confirm all nodes use the same approved image tag or digest.
+
+---
+
+## 16. References
+
 - Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
-- AWS S3 SDK for Java: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
+- MinIO distributed deployment: https://min.io/docs/minio/linux/operations/install-deploy-manage/deploy-minio-multi-node-multi-drive.html
+- MinIO container deployment: https://min.io/docs/minio/container/index.html
+- MinIO access policy reference: https://min.io/docs/minio/linux/administration/identity-access-management/policy-based-access-control.html
+- AWS SDK for Java S3: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
