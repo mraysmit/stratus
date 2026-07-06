@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This document defines a pragmatic on-prem data fabric architecture built around **MinIO (S3-compatible object storage)**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus optional **Firebolt Core** serving layer.
+This document defines a pragmatic on-prem data fabric architecture built around **Ceph RGW object storage**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus optional **Firebolt Core** serving layer.
 
 The design goal is not to assemble a random list of fashionable tools. The goal is to create a governed, scalable, batch-and-streaming-capable platform that supports:
 
@@ -15,7 +15,7 @@ The design goal is not to assemble a random list of fashionable tools. The goal 
 
 The recommended architectural position is:
 
-- **MinIO object storage** is the persistence layer
+- **Ceph RGW object storage** is the persistence layer
 - **Iceberg** is the mandatory table abstraction and data contract
 - **Spark** is the primary batch compute engine
 - **Flink** is the primary streaming and real-time compute engine
@@ -41,7 +41,7 @@ The most important decision in this design is to make **Apache Iceberg the found
 All persisted analytical datasets should be stored in open formats using **Apache Iceberg tables** over files in object storage.
 
 ### 2.2 Storage and table semantics must be separated
-MinIO provides S3-compatible object storage for files. It is **not** the semantic contract for consumers. The semantic contract is the **Iceberg table**.
+Ceph RGW provides S3-compatible object storage for files. It is **not** the semantic contract for consumers. The semantic contract is the **Iceberg table**.
 
 ### 2.3 Streaming and batch are separate compute concerns
 - **Flink** handles continuous, stateful, event-driven, near-real-time processing
@@ -62,6 +62,105 @@ The default shared query plane should be **Trino over Iceberg** for open interac
 
 ### 2.7 Platform behavior must be verified by contracts
 Every platform layer should expose a small set of explicit contracts that can be verified automatically: storage buckets and policies, catalog namespaces, table schemas, Spark job outcomes, Airflow DAG behavior, quality gate decisions, query results, lineage publication, and access control. The platform is not considered healthy because services are running; it is healthy when those contracts pass against the live stack.
+
+---
+
+### 2.8 Storage architecture decision
+
+The storage platform decision belongs at the architecture level because every downstream increment depends on it. Increment 1 implements the selected storage target; it does not own the architecture tradeoff.
+
+The storage decision is not approved merely because a product is named. Before implementation starts, the storage target must pass the due-diligence gates below and the evidence must be attached to the Phase 1 architecture decision record.
+
+The decision process is:
+
+1. Confirm the Stratus storage requirements.
+2. Screen plausible open-source, on-prem storage candidates.
+3. Compare the viable candidates against the requirements.
+4. Run a proof-of-fit against the selected release and configuration.
+5. Record any gaps, mitigations, and disqualifying risks.
+6. Only then proceed into the Increment 1 implementation runbook.
+
+This section exists because "S3-compatible" is not specific enough for a production data-fabric storage decision. Stratus needs a storage platform that works with Iceberg, Polaris, Spark, Airflow, Trino, and future Flink workloads, and that can be operated on premises with a real production recovery model.
+
+#### 2.8.1 Stratus storage requirements
+
+| Requirement | Why it matters | Acceptance evidence |
+|---|---|---|
+| Open-source on-prem deployment | Stratus must not depend on a proprietary managed object store for the foundation layer. | License and deployment model recorded for the selected release. |
+| Production distributed storage | The storage layer must survive node/disk failure and support capacity growth. | HA topology, failure-domain design, and recovery drills documented. |
+| S3-compatible client contract | Polaris, Iceberg, Spark, Trino, Airflow, and Java verification use an S3-style object API. | Required S3 operations pass through the verification suite. |
+| Iceberg table safety | Iceberg writes metadata and data files and relies on predictable read-after-write/list behavior. | Iceberg create/write/read/snapshot/maintenance tests pass through Polaris and Spark. |
+| Multipart upload behavior | Iceberg and Spark may use multipart upload for larger parquet files. | Multipart create, complete, abort, list parts, and retry behavior verified. |
+| Path-style endpoint support | Internal DNS and lab deployments often use endpoint overrides rather than AWS-style virtual-hosted buckets. | Spark, Trino, Java SDK, and Polaris configs work with `STRATUS_S3_PATH_STYLE_ACCESS=true`. |
+| Service identity isolation | Platform services must not share one storage credential. | `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino` access tests pass and cross-bucket denies are proven. |
+| TLS and CA trust | Production traffic must not rely on insecure TLS bypass. | HTTPS endpoint works with trusted CA; plaintext and untrusted connections fail. |
+| Encryption-at-rest path | Gold/platform data require an approved at-rest protection model. | Storage encryption design is selected and tested for the chosen target. |
+| Operational observability | Operators need health, capacity, request/error, and recovery visibility. | Dashboard/CLI/metrics checks are part of acceptance. |
+| Backup, recovery, and failure drills | Production readiness requires proof that loss and recovery procedures work. | Disk/node/gateway failure drills and restore tests complete successfully. |
+| Upgrade and lifecycle model | The storage platform will need patching and upgrades after Phase 1. | Release pinning, upgrade path, and rollback constraints are documented. |
+| Governance integration path | Increment 6 adds Ranger/Atlas; storage must not block identity and policy integration. | Authz boundary is defined: storage service credentials at layer 1; analytical user policy through Polaris/Trino/Ranger later. |
+
+#### 2.8.2 Candidate screen
+
+The initial open-source on-prem candidate set is:
+
+| Candidate | Advanced to detailed fit? | Reason |
+|---|---|---|
+| Ceph RGW | Yes | Mature open-source distributed storage platform with S3-compatible RGW, replication/erasure coding, dashboard, health model, and broad object-store operations. |
+| Apache Ozone | Yes | Strong open-source on-prem object-storage candidate with Ozone Manager/SCM/Datanodes, S3 Gateway, Kerberos/Ranger integration options, Recon, replication, and erasure coding. |
+| OpenStack Swift | No for Phase 1 baseline | Mature object store, but its native API and operational ecosystem are less directly aligned to the Iceberg/Spark/Trino S3 client contract chosen for Stratus Phase 1. It can be revisited if Swift is already an enterprise standard. |
+| SeaweedFS | No for production baseline | Useful lightweight distributed file/object system, but not selected as the primary governed lakehouse storage substrate without deeper evidence for Iceberg/Polaris/Spark/Trino production behavior, security, and operations. |
+| DAOS | No for Phase 1 baseline | Strong HPC-oriented object storage, but the Stratus Phase 1 contract is S3 lakehouse compatibility and general on-prem platform operations, not a specialized HPC storage interface. |
+
+Only Ceph RGW and Apache Ozone advance to detailed comparison because both plausibly satisfy the Stratus requirement for open-source, production-capable, on-prem object storage with an S3 access path.
+
+#### 2.8.3 Ceph RGW vs Apache Ozone requirements fit
+
+Scoring scale:
+
+- `5` = strong fit with low validation risk
+- `4` = good fit with normal release/configuration validation required
+- `3` = viable, but material proof-of-fit required before approval
+- `2` = weak fit or requires an architectural change
+- `1` = poor fit for the stated requirement
+- `0` = does not satisfy the requirement
+
+| Requirement | Ceph RGW fit | Ceph score | Apache Ozone fit | Ozone score | Decision implication |
+|---|---|---:|---|---:|---|
+| On-prem open-source production storage | Strong. Ceph is a production distributed storage platform with MON/MGR/OSD/RGW services. | 5 | Strong. Ozone is an Apache distributed object store with OM/SCM/Datanodes and production deployment patterns. | 5 | Both remain viable. |
+| S3 API coverage for lakehouse engines | Strong baseline. Ceph documents S3-compatible object access and support for core bucket/object/multipart operations. Must still test the exact release. | 5 | Viable but must be proven. Ozone S3 Gateway provides S3 access, but the design must verify the subset needed by Iceberg/Polaris/Spark/Trino. | 3 | Ceph has the lower S3-compatibility risk for the selected client contract. |
+| Iceberg/Spark/Trino fit | Strong if S3FileIO, Spark S3 client, and Trino endpoint/path-style settings pass against RGW. | 4 | Viable if the selected Ozone S3 Gateway release passes the same Iceberg/Spark/Trino endpoint and path-style tests. | 3 | Ceph has the lower assumed compatibility risk, but both must be proven. |
+| Kerberos/Ranger alignment | Possible through adjacent identity/policy integrations, but not the native center of the object-store contract. | 3 | Stronger integration options if Stratus later requires storage-layer Ranger/Kerberos enforcement. | 4 | Ozone gains weight only if storage-layer policy enforcement becomes an explicit requirement. |
+| Analytical user authorization model | Storage layer uses service credentials; analytical user policy is enforced later through Polaris/Trino/Ranger. | 4 | Can support stronger storage-layer authorization, but that is not required by the current Phase 1 storage contract. | 4 | Both are acceptable if user-facing authorization stays above storage. |
+| Operational model | Strong but complex. Ceph has mature health, dashboard, metrics, CRUSH placement, recovery, and cephadm lifecycle management. | 4 | Strong but also complex. Ozone has OM/SCM HA, Recon, Datanodes, security, and object-store operational patterns. | 4 | Team skill set matters; both require real operators. |
+| Failure-domain and recovery controls | Strong. CRUSH, pools, OSD health, backfill/recovery behavior are central Ceph concepts. | 5 | Strong. Ozone has replication/erasure coding and service HA patterns. | 4 | Both viable; prove via drills. |
+| Encryption and key management | Supported through Ceph/RGW encryption options and storage-layer controls; exact mode must be release-validated. | 4 | Supported through Ozone/KMS/transparent data encryption path; exact mode must be release-validated. | 4 | Both viable; neither should be assumed from AWS S3 semantics. |
+| Future multi-protocol storage | Strong if Stratus later needs object plus block/file from one storage substrate. | 5 | Strong for object storage; less relevant if Stratus later needs block/file from the same storage substrate. | 3 | Ceph has broader infrastructure-storage optionality. |
+| **Total** |  | **39 / 45** |  | **35 / 45** | Ceph scores higher under the current Stratus requirements because the comparison scores stated storage, S3 compatibility, security, operations, and recovery needs. |
+
+The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is treated as the lower-risk S3 API target for the selected Iceberg/Spark/Trino/Polaris path, while Ozone remains viable if its S3 Gateway passes the same proof-of-fit and its security or operational model is preferred.
+
+#### 2.8.4 Required proof-of-fit before implementation
+
+Ceph RGW can remain the baseline only after the following evidence exists:
+
+- Official release and deployment method selected and pinned.
+- RGW endpoint created with HTTPS and trusted CA.
+- Java S3 verification suite passes for create bucket, put, get, head, list, delete, multipart upload, abort multipart upload, and credential-deny cases.
+- Iceberg `S3FileIO` can create, write, read, update, expire snapshots, compact, and remove orphan files against RGW.
+- Spark can read from landing and write Iceberg tables through Polaris using the RGW endpoint.
+- Trino can query Iceberg tables using the same object-store endpoint and path-style configuration.
+- Service credentials prove least privilege across `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino`.
+- TLS, encryption-at-rest, logging, metrics, backup, restore, and failure drills pass in a production-like topology.
+- Apache Ozone is either rejected with specific evidence or retained as an alternate with explicit trigger conditions.
+
+If any of these fail, the storage decision must stop and produce a short ADR comparing Ceph RGW and Apache Ozone against the failed requirement before the implementation proceeds.
+
+#### 2.8.5 Decision summary
+
+Ceph RGW is the current candidate baseline because Stratus Phase 1 depends on the exact S3 behavior required by Iceberg, Spark, Trino, Polaris, Airflow, and the Java verification suite. Apache Ozone also exposes an S3-compatible API, so the distinction is not S3 versus non-S3. The distinction is that Ceph RGW is being treated as the lower-risk S3 API target for this client mix, while Ozone remains viable only if its S3 Gateway passes the same proof-of-fit and its operational or security model is preferred.
+
+Apache Ozone remains the control candidate, not a footnote. Ozone may become the better choice if the requirements shift toward storage-layer Ranger/Kerberos enforcement or Ozone's volume/bucket namespace as the primary platform abstraction. That change would require revising the storage contract and the downstream Increment 2/3/5 engine configuration, not just swapping an endpoint URL.
 
 ---
 
@@ -102,7 +201,7 @@ Every platform layer should expose a small set of explicit contracts that can be
                                           │
                                           ▼
                           ┌───────────────────────────────┐
-                          │       MinIO Object Storage    │
+                          │      Ceph RGW Object Storage  │
                           │  raw files + Iceberg data /   │
                           │  metadata files + manifests   │
                           └───────────────────────────────┘
@@ -133,10 +232,10 @@ Every platform layer should expose a small set of explicit contracts that can be
 
 ## 4. Core Components and Responsibilities
 
-### 4.1 MinIO (S3-Compatible Object Storage)
+### 4.1 Ceph RGW Object Storage
 
 ### Role
-MinIO is the durable persistence substrate. It stores:
+Ceph RGW is the durable persistence substrate. It exposes the Ceph storage cluster through an S3-compatible API and stores:
 
 - landed raw files
 - parquet/orc data files
@@ -461,7 +560,7 @@ Spark SQL and notebooks remain engineering tools. They should not be treated as 
 
 ### Design rules
 - Trino must use the central Apache Polaris REST catalog for Iceberg table discovery.
-- Trino must query Iceberg tables, not raw MinIO object paths.
+- Trino must query Iceberg tables, not raw object-storage paths.
 - Trino is the shared read/query plane, not the primary ETL engine for bronze-to-silver or silver-to-gold processing.
 - Trino query validation should compare row counts, aggregates, schemas, and quality-result visibility against Spark-produced outputs.
 - Trino access should initially be constrained to internal platform validation, then integrated with Ranger and Keycloak/FreeIPA as the governance and identity increments land.
@@ -746,7 +845,7 @@ A clean design separates three planes.
 
 ### 7.1 Data Plane
 Contains:
-- MinIO object storage
+- Ceph RGW object storage
 - Iceberg tables
 - Apache Polaris REST catalog
 - Spark
@@ -928,14 +1027,14 @@ The following are control-plane state and must be protected by backup, restore, 
 | FreeIPA | Kerberos principals, LDAP users/groups, DNS, PKI material |
 | Keycloak | realms, clients, identity mappings, token configuration |
 
-If control-plane state is not backed up, the platform is not recoverable even if the data files in MinIO survive.
+If control-plane state is not backed up, the platform is not recoverable even if the data files in object storage survive.
 
 ---
 
 ## 11. Reference End-to-End Flow
 
 ### 11.1 Batch flow
-1. source files arrive in MinIO landing zone
+1. source files arrive in the object-storage landing zone
 2. Airflow triggers ingestion and validation pipeline
 3. Spark normalises and writes bronze Iceberg tables
 4. Spark transforms bronze to silver
@@ -961,7 +1060,7 @@ This flow applies when a streaming backbone such as Kafka is deployed (typically
 A realistic on-prem deployment would separate infrastructure by concern.
 
 ### 12.1 Storage tier
-- MinIO object store cluster
+- Ceph RGW object store backed by a Ceph cluster
 - erasure coding / replication depending on product choice
 - separate buckets or namespaces by domain and lifecycle zone
 
@@ -1037,7 +1136,7 @@ Reference:
 | Trino | HTTPS and OIDC via Keycloak for client access; internal trust via the selected Trino secure-communication model |
 | Atlas | LDAP via FreeIPA for user authentication |
 | Ranger | LDAP via FreeIPA for user/group sync; HTTPS policy download to engine plugins |
-| MinIO | service accounts with access/secret key pairs; TLS enforced |
+| Ceph RGW | service accounts with access/secret key pairs; TLS enforced |
 | Airflow web UI | OIDC via Keycloak |
 
 ### 13.2.1 Service and protocol interaction model
@@ -1051,7 +1150,7 @@ Security in Stratus is not one mechanism. Each protocol has a specific job:
 | LDAP / LDAPS | FreeIPA user and group lookup for Keycloak, Ranger usersync, Atlas, and SSSD |
 | OIDC / OAuth2 | browser, CLI, and REST-facing service authentication through Keycloak |
 | HTTPS / TLS | transport encryption and server identity for every platform endpoint |
-| S3 API over HTTPS | object access to MinIO for Spark, Trino, Polaris, Airflow, and verification tools |
+| S3 API over HTTPS | object access to Ceph RGW for Spark, Trino, Polaris, Airflow, and verification tools |
 | Iceberg REST catalog over HTTPS | table and namespace resolution through Polaris |
 | Ranger policy REST | policy download from Ranger Admin to the Trino Ranger plugin |
 | JDBC over HTTPS | analyst, BI, and verification access through Trino |
@@ -1072,10 +1171,10 @@ The core data access chain is:
 User / BI tool ──OIDC/JDBC──► Trino
 Trino ──Ranger policy check──► Ranger
 Trino ──Iceberg REST──► Polaris
-Trino ──S3 API──► MinIO
+Trino ──S3 API──► Ceph RGW
 ```
 
-Ranger governs what an authenticated user can query through Trino. Polaris governs catalog, namespace, and table metadata resolution. MinIO governs service-account object access. These layers are complementary and must not be collapsed into a single bucket policy or a single OIDC login check.
+Ranger governs what an authenticated user can query through Trino. Polaris governs catalog, namespace, and table metadata resolution. Ceph RGW governs service-account object access. These layers are complementary and must not be collapsed into a single bucket policy or a single OIDC login check.
 
 ### Service account model
 Every pipeline component runs as a named Linux service account registered in FreeIPA. No shared credentials. No human credentials used for job execution. Keytabs are managed centrally and rotated on a defined schedule.
@@ -1086,7 +1185,7 @@ Service credentials must not be committed to source control or embedded directly
 - credentials stored in a dedicated secrets manager or equivalent secured platform service
 - Airflow reads credentials through a secrets backend or protected connections
 - Spark and Flink jobs receive short-lived or centrally rotated service credentials
-- MinIO access keys, Polaris client secrets, Keycloak client secrets, and Kerberos keytabs have named owners and rotation schedules
+- Ceph RGW access keys, Polaris client secrets, Keycloak client secrets, and Kerberos keytabs have named owners and rotation schedules
 - every secret has a documented consumer list and emergency rotation procedure
 
 Plaintext environment files are acceptable only as a lab bootstrap mechanism and must be treated as temporary.
@@ -1145,7 +1244,7 @@ This means sensitive datasets are protected by classification, not by rememberin
 ### 13.6 Encryption
 
 - **In transit**: TLS enforced across all inter-service communication; certificates issued by FreeIPA's Dogtag PKI
-- **At rest**: MinIO supports server-side encryption; enable per bucket for sensitive zones
+- **At rest**: use the approved Ceph/RGW encryption-at-rest model for sensitive zones
 - **Kerberos tickets**: short-lived; keytab rotation managed via FreeIPA
 
 ---
@@ -1187,7 +1286,7 @@ The observability stack uses open source components consistent with the Linux-on
 | Log aggregation | **Grafana Loki** (or OpenSearch if full-text search of logs is required) |
 | Distributed tracing (optional) | **Grafana Tempo** |
 
-All four are open source (Apache 2.0 / AGPLv3), on-prem deployable, and integrate natively with each other. Prometheus exporters exist for Spark, Flink, Kafka, MinIO, Airflow, Trino, and the JVM-based services (Atlas, Polaris, Ranger).
+All four are open source (Apache 2.0 / AGPLv3), on-prem deployable, and integrate natively with each other. Prometheus exporters or metrics integrations exist for Spark, Flink, Kafka, Ceph, Airflow, Trino, and the JVM-based services (Atlas, Polaris, Ranger).
 
 References:
 - Prometheus: https://prometheus.io/
@@ -1207,12 +1306,12 @@ References:
 - Ranger audit log volume and policy evaluation latency
 - DAG import errors and scheduler heartbeat freshness
 - promotion gate block rate and override frequency
-- MinIO bucket growth by zone and dataset
+- Ceph RGW bucket growth by zone and dataset
 - Polaris catalog request latency and authentication failures
 - control-plane backup age and last restore-test status
 
 ### 14.1.1 Logging contract
-Task logs and service logs should be structured enough to correlate a platform run across Airflow, Spark, Polaris, MinIO, and Atlas.
+Task logs and service logs should be structured enough to correlate a platform run across Airflow, Spark, Polaris, Ceph RGW, and Atlas.
 
 At minimum, logs emitted by pipeline jobs should include:
 - `run_id`
@@ -1240,7 +1339,7 @@ The platform should define recovery expectations separately for data and control
 
 | Area | Recovery expectation |
 |---|---|
-| MinIO data | recover from node or drive loss according to erasure coding policy |
+| Ceph data | recover from node or drive loss according to replication or erasure-coding policy |
 | Iceberg tables | recover through snapshots, rollback, and retained metadata |
 | Airflow | restore metadata DB and DAG code sufficiently to resume scheduling with run history |
 | Polaris | restore catalog metadata so table identifiers continue resolving to the same locations |
@@ -1257,15 +1356,15 @@ Each implementation increment must leave behind verified platform capability tha
 
 | Increment | Produces | Consumed by | Cross-check required |
 |---|---|---|---|
-| 1 — MinIO | TLS S3 endpoint, five platform buckets, service accounts, bucket policies | Polaris, Spark, Airflow, Trino | bucket existence, path-style S3 access, credential isolation, HTTPS-only access |
+| 1 — Storage | TLS S3 endpoint, five platform buckets, service accounts, bucket policies | Polaris, Spark, Airflow, Trino | bucket existence, path-style S3 access, credential isolation, HTTPS-only access, Ceph health |
 | 2 — Iceberg and Polaris | `stratus` catalog, bronze/silver/gold/platform namespaces, `platform.quality_check_results` | Spark, Airflow, Trino, quality subsystem | namespace resolution, table creation, table reads/writes, quality table schema |
-| 3 — Spark | ingestion, transform, materialisation, quality, promotion, and maintenance jobs | Airflow orchestration and Trino result validation | Spark can read/write via Polaris and MinIO; quality records are written with run IDs and snapshot IDs |
+| 3 — Spark | ingestion, transform, materialisation, quality, promotion, and maintenance jobs | Airflow orchestration and Trino result validation | Spark can read/write via Polaris and Ceph RGW; quality records are written with run IDs and snapshot IDs |
 | 4 — Airflow | scheduled DAGs, retries, alerts, promotion gates, maintenance orchestration | Trino query validation and operational monitoring | DAGs submit Spark jobs, failed blocking checks halt downstream tasks, maintenance runs on schedule |
 | 5 — Trino | shared SQL query plane over governed Iceberg tables | analysts, BI, governance validation | SQL results match Spark outputs; Trino resolves tables through Polaris and does not bypass the catalog |
 | 6 — Atlas and Ranger | metadata entities, lineage, classifications, policies, and audit | identity hardening and secure operations | Atlas metadata is searchable; Ranger allow/deny behavior works through Trino |
 | 7 — FreeIPA and Keycloak | identity, OIDC, Kerberos, LDAP groups, trusted certificates | secure platform operations | earlier increment behavior still passes after replacing lab users, self-signed certificates, and bootstrap credentials |
 
-This traceability prevents each increment from becoming a local installation exercise. For example, Increment 5 should not merely prove that Trino starts. It should prove that Trino can query the exact Iceberg tables produced by Spark, orchestrated by Airflow, registered in Polaris, and stored in MinIO.
+This traceability prevents each increment from becoming a local installation exercise. For example, Increment 5 should not merely prove that Trino starts. It should prove that Trino can query the exact Iceberg tables produced by Spark, orchestrated by Airflow, registered in Polaris, and stored in Ceph RGW.
 
 ### 14.5 End-to-end functional assertions
 The platform should maintain a small permanent verification dataset that can be recreated safely in every environment. It should exercise the full batch path:
@@ -1280,7 +1379,7 @@ The following assertions should be stable across increments:
 
 | Assertion | Why it matters |
 |---|---|
-| landing file is readable only by intended service accounts | validates MinIO bucket policies from Increment 1 |
+| landing file is readable only by intended service accounts | validates storage service-account policies from Increment 1 |
 | bronze table preserves raw row count, including intentional duplicate | validates ingestion fidelity from Increment 3 |
 | quality check records both warning and blocking outcomes | validates the quality result contract from Increment 2 and 3 |
 | Airflow blocks promotion on a failed blocking check | validates orchestration behavior from Increment 4 |
@@ -1294,7 +1393,7 @@ QA for the platform is not a separate after-the-fact activity. Each platform lay
 
 | Area | Owner | Verification mechanism |
 |---|---|---|
-| Storage | platform infrastructure | S3 SDK tests and MinIO operational checks |
+| Storage | platform infrastructure | S3 SDK tests and Ceph/RGW operational checks |
 | Catalog and tables | platform data architecture | Iceberg Java API tests and Polaris API checks |
 | Batch compute | data engineering platform | Spark verification jobs and table assertions |
 | Orchestration | platform operations | Airflow REST API tests and DAG-state assertions |
@@ -1316,7 +1415,7 @@ Minimum version matrix to maintain:
 
 | Component | Version discipline |
 |---|---|
-| MinIO / AIStor | choose a supported object-storage distribution and pin the image; do not use `latest` |
+| Ceph RGW | choose a supported Ceph release and pin all images/packages; do not use `latest` |
 | Apache Polaris | pin the catalog release and validate REST catalog behavior against Iceberg clients |
 | Apache Iceberg | align Java API, Spark runtime, Flink runtime, and Trino connector expectations |
 | Apache Spark | align Spark major version, Scala version, and Iceberg Spark runtime artifact |
@@ -1340,7 +1439,7 @@ Current Phase 1 target baseline as of 2026-07-05:
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| MinIO / AIStor | latest supported release approved for the environment, pinned by image digest |
+| Ceph RGW | latest supported release approved for the environment, pinned by image digest or package version |
 | Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
 | FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
 
@@ -1393,7 +1492,7 @@ No implementation increment should be signed off with floating container tags, u
 
 ### Phase 1 – Foundation
 Deliver:
-- MinIO object storage
+- Ceph RGW object storage
 - Iceberg table standard
 - Apache Polaris REST catalog
 - Spark batch processing
@@ -1409,7 +1508,7 @@ Phase 1 acceptance:
 - completed through the operational readiness gate in [phase1_operational_readiness.md](phase1_operational_readiness.md), which validates integrated function, recovery, observability, security, governance, quality, and runbook ownership
 
 ### Phase 1 scope note
-Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after MinIO, Iceberg, Spark, Airflow, and Atlas are stable.
+Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after Ceph RGW, Iceberg, Spark, Airflow, and Atlas are stable.
 
 ### Phase 2 – Streaming and Operational Maturity
 Deliver:
@@ -1452,7 +1551,7 @@ Primary outcome:
 The recommended architecture is:
 
 **Data layer**
-- **MinIO** for durable object storage
+- **Ceph RGW** for durable object storage
 - **Apache Iceberg** as the mandatory table abstraction and data contract
 - **Apache Polaris** as the central REST catalog and multi-engine metadata control point
 
@@ -1504,7 +1603,8 @@ Get them wrong and you will just have an expensive collection of tools.
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
-- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
+- Ceph Object Gateway documentation: https://docs.ceph.com/en/latest/radosgw/
+- Ceph Object Gateway S3 API: https://docs.ceph.com/en/latest/radosgw/s3/
 - Apache Polaris GitHub: https://github.com/apache/polaris
 - Apache Iceberg overview: https://iceberg.apache.org/
 - Apache Iceberg multi-engine support: https://iceberg.apache.org/multi-engine-support/
