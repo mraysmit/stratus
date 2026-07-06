@@ -882,14 +882,14 @@ A critical design decision is the Iceberg catalog strategy.
 
 ### Options evaluated
 Common Iceberg catalog approaches include:
-- Hadoop catalog — filesystem-based, no multi-engine coordination, not suitable for a shared platform
+- filesystem catalog — file-path-based metadata, no multi-engine coordination, not suitable for a shared platform
 - Hive catalog — legacy coupling to Hive Metastore, limits engine flexibility
 - REST catalog — open API standard, engine-agnostic, fits multi-engine design
 - JDBC catalog — simple but operationally fragile at scale; lacks REST API compatibility
 - Nessie — REST-compatible with Git-like branching semantics; strong fit for data-environment workflows
 - **Apache Polaris** — Apache-incubated open source REST catalog server; implements the Iceberg REST Catalog spec natively
 
-Iceberg’s Flink docs explicitly call out catalog configuration options such as `hive`, `hadoop`, `rest`, `jdbc`, and others depending on implementation support:
+Iceberg’s Flink docs explicitly call out catalog configuration options such as `hive`, `rest`, `jdbc`, and other implementation-specific catalog types:
 - Iceberg Flink catalog configuration: https://iceberg.apache.org/docs/latest/flink/
 
 ### Decision
@@ -909,7 +909,7 @@ Reference:
 - keeps metadata control in a dedicated, independently operable service boundary
 
 ### Why not the alternatives
-- **Hadoop catalog**: no shared multi-engine coordination, not suitable for a governed platform
+- **Filesystem catalog**: no shared multi-engine coordination, not suitable for a governed platform
 - **Hive Metastore**: legacy dependency, limits engine flexibility, adds operational complexity
 - **JDBC catalog**: operationally fragile at scale, lacks REST API compatibility, no access control model
 - **Nessie**: strong Git-like branching semantics are valuable but add operational complexity that is not required in Phase 1; remains the preferred alternative if data-environment branching becomes a platform requirement
