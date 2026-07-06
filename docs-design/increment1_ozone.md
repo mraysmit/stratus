@@ -4,7 +4,7 @@
 
 This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. The production target for this revised increment is **Apache Ozone**, not MinIO or AIStor.
+Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. The production target for this revised increment is **Apache Ozone**.
 
 When this increment is complete:
 
@@ -383,7 +383,7 @@ sudo systemctl status ozone-recon
 
 ### Developer topology
 
-Use the Ozone project-provided Docker Compose or development container topology for local validation when available for the selected release. Do not use MinIO as the developer topology for this Ozone path.
+Use the Ozone project-provided Docker Compose or development container topology for local validation when available for the selected release.
 
 Developer validation should prove:
 
@@ -488,7 +488,7 @@ s3.path-style-access = true
 warehouse / base locations = s3://stratus-bronze, s3://stratus-silver, s3://stratus-gold, s3://stratus-platform
 ```
 
-Increment 2 must be updated to refer to Ozone/object storage rather than MinIO.
+Increment 2 must be updated to refer to Ozone/object storage.
 
 ---
 
