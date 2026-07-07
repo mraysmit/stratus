@@ -7,7 +7,7 @@ This document is the technical implementation plan for Increment 6 of the Stratu
 Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classification plane, and Apache Ranger as the access policy and audit plane. When this increment is complete, Iceberg datasets created by Spark and queried through Trino have Atlas entities with ownership, schema, zone, quality status, and lineage. Ranger policies enforce zone and classification-based access through Trino. A Java verification suite confirms that governance is not decorative: metadata is searchable, lineage exists, classifications can be applied, Trino allow/deny behavior follows Ranger policy, and Ranger audit logs record the decisions.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
+- Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark jobs create and maintain bronze, silver, and gold Iceberg tables
 - Increment 4 complete — Airflow orchestrates Spark jobs, quality checks, promotion gates, and maintenance
@@ -74,7 +74,7 @@ trino-coordinator.stratus.local
 └──────────────────────────────────────────────┘
           │
           ▼
-Polaris REST catalog → MinIO Iceberg data
+Polaris REST catalog → Ceph RGW Iceberg data
 ```
 
 Atlas is not an enforcement layer. Ranger is the enforcement layer. Increment 6 must prove the loop:
@@ -954,7 +954,7 @@ When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardeni
 ### Metadata publisher leaks secrets into Atlas
 
 - Stop the publisher and inspect the payload mapping
-- Atlas entities must not contain MinIO secrets, Polaris client secrets, keytabs, or JDBC passwords
+- Atlas entities must not contain Ceph RGW secrets, Polaris client secrets, keytabs, or JDBC passwords
 - Rotate any leaked credential and remove the attribute from Atlas
 
 ---
@@ -969,7 +969,7 @@ When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardeni
 - Trino documentation: https://trino.io/docs/current/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)

@@ -192,7 +192,7 @@ metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.Prometh
 metrics.reporter.prom.port: 9249
 ```
 
-When MinIO-backed durable checkpoints are enabled, update `state.checkpoints.dir` and `state.savepoints.dir` to the approved object-storage path and add the required filesystem dependencies to the Flink image.
+When Ceph RGW-backed durable checkpoints are enabled, update `state.checkpoints.dir` and `state.savepoints.dir` to the approved object-storage path and add the required filesystem dependencies to the Flink image.
 
 ### Kafka client properties
 

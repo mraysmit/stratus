@@ -4,7 +4,7 @@
 
 This document is the technical implementation plan for Increment 11 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
 
-Increment 11 connects the Phase 2 streaming runtime to the Phase 1 lakehouse foundation. Flink consumes Kafka and Debezium CDC topics, resolves Iceberg tables through Apache Polaris, writes data files to MinIO, and commits Iceberg snapshots that Trino can query. When this increment is complete, Kafka events and CDC records are continuously written into governed Iceberg tables without bypassing Polaris, weakening Ranger/Atlas governance expectations, or creating uncontrolled small-file debt.
+Increment 11 connects the Phase 2 streaming runtime to the Phase 1 lakehouse foundation. Flink consumes Kafka and Debezium CDC topics, resolves Iceberg tables through Apache Polaris, writes data files to Ceph RGW, and commits Iceberg snapshots that Trino can query. When this increment is complete, Kafka events and CDC records are continuously written into governed Iceberg tables without bypassing Polaris, weakening Ranger/Atlas governance expectations, or creating uncontrolled small-file debt.
 
 This increment is not a general Flink deployment and not an Iceberg maintenance increment. Increment 10 proves the Flink runtime. Increment 11 proves streaming table writes, checkpoint-aligned commits, table ownership, reader visibility, and operational guardrails.
 
@@ -15,7 +15,7 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 - Increment 2 complete - Polaris and Iceberg namespaces operational
 - Increment 5 complete - Trino can query Polaris-managed Iceberg tables
 - Increment 6 and 7 complete - Atlas/Ranger identity and governance model operational
-- `svc-flink` has approved Kafka, Polaris, and MinIO credentials
+- `svc-flink` has approved Kafka, Polaris, and Ceph RGW credentials
 
 ---
 
@@ -28,7 +28,7 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 - Iceberg target is `1.11.0`
 - Flink Kafka Connector target is `5.0.0`
 - Polaris endpoint is reachable at `https://polaris.stratus.local:8181/api/catalog`
-- MinIO endpoint is reachable at `https://minio1.stratus.local:9000`
+- Ceph RGW endpoint is reachable at `https://object-store.stratus.local`
 - Kafka verification CDC topic from Increment 9 is populated
 - Trino can query `bronze`, `silver`, and `platform` namespaces
 - Flink checkpoint and savepoint paths are durable enough for restart tests
@@ -80,7 +80,7 @@ Flink streaming job
 Polaris REST catalog ──► Iceberg metadata
       │
       ▼
-MinIO data files
+Ceph RGW data files
       │
       ├── Trino validation queries
       ├── Atlas lineage publication in Increment 12
@@ -162,9 +162,9 @@ warehouse=stratus
 credential=svc-flink:<polaris-client-secret>
 scope=PRINCIPAL_ROLE:ALL
 io-impl=org.apache.iceberg.aws.s3.S3FileIO
-s3.endpoint=https://minio1.stratus.local:9000
+s3.endpoint=https://object-store.stratus.local
 s3.access-key-id=svc-flink
-s3.secret-access-key=<svc-flink-minio-secret>
+s3.secret-access-key=<svc-flink-ceph-rgw-secret>
 s3.path-style-access=true
 ```
 
@@ -253,7 +253,7 @@ Job requirements:
 - write through Polaris REST catalog
 - commit Iceberg snapshots on successful checkpoints
 - expose processed, late, failed, and committed record metrics
-- fail closed if Polaris, MinIO, Kafka, or TLS trust fails
+- fail closed if Polaris, Ceph RGW, Kafka, or TLS trust fails
 - write quality results for accepted and rejected records
 
 Pseudocode:
@@ -316,7 +316,7 @@ CREATE CATALOG stratus WITH (
   'credential'='svc-flink:<polaris-client-secret>',
   'scope'='PRINCIPAL_ROLE:ALL',
   'io-impl'='org.apache.iceberg.aws.s3.S3FileIO',
-  's3.endpoint'='https://minio1.stratus.local:9000',
+  's3.endpoint'='https://object-store.stratus.local',
   's3.path-style-access'='true'
 );
 
@@ -370,7 +370,7 @@ Expected: new snapshots appear after successful Flink checkpoints.
 
 ## 11. Java Verification Suite
 
-The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris, MinIO, and Trino.
+The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris, Ceph RGW, and Trino.
 
 ### Maven dependencies
 
@@ -488,7 +488,7 @@ Minimum alerts:
 - Trino freshness lag above threshold
 - quality failure spike
 - Polaris unavailable
-- MinIO write failures
+- Ceph RGW write failures
 
 ---
 
@@ -499,7 +499,7 @@ Increment 11 is complete when:
 - [ ] Flink runtime, Kafka connector, and Iceberg runtime versions are pinned and compatible
 - [ ] Flink Iceberg image includes `iceberg-flink-runtime-2.1` 1.11.0 and `iceberg-aws-bundle` 1.11.0
 - [ ] `svc-flink` resolves tables through Polaris REST catalog
-- [ ] `svc-flink` writes data files only to approved MinIO locations
+- [ ] `svc-flink` writes data files only to approved Ceph RGW locations
 - [ ] streaming-owned bronze table exists and is documented
 - [ ] optional silver current-state table is either implemented safely or explicitly deferred
 - [ ] Flink job consumes Debezium CDC topic and writes bronze Iceberg records
