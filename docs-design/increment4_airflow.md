@@ -7,7 +7,7 @@ This document is the technical implementation plan for Increment 4 of the Stratu
 Increment 4 delivers Apache Airflow as the orchestration and control-plane layer for the batch platform created in Increment 3. Airflow schedules and coordinates Spark jobs, data quality checks, promotion gates, and Iceberg table maintenance. When this increment is complete, the bronze, silver, and gold pipeline runs as managed DAGs with retries, failure visibility, structured run metadata, and deterministic promotion blocking. A Java verification suite uses the Airflow REST API and the table layer to confirm the orchestration layer works end to end.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
+- Increment 1 complete — the Ceph cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark cluster running, Spark jobs implemented, all Increment 3 gate tests passing
 
@@ -22,10 +22,10 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 - Airflow host can reach:
   - Spark master on port 7077
   - Spark master web UI on port 8080
-  - MinIO on port 9000
+  - Ceph RGW on port 443
   - Polaris on port 8181
-- `svc-airflow` MinIO credentials from Increment 1 are available
-- `svc-spark` MinIO credentials and Polaris principal credentials from Increment 3 are available
+- `svc-airflow` Ceph RGW credentials from Increment 1 are available
+- `svc-spark` Ceph RGW credentials and Polaris principal credentials from Increment 3 are available
 - The Stratus application fat JAR from Increment 3 is available to the Airflow runtime
 
 ### Reference documentation audit
@@ -67,7 +67,7 @@ airflow.stratus.local
 spark-master.stratus.local:7077
           │
           ▼
-Spark workers → Polaris REST catalog → MinIO Iceberg tables
+Spark workers → Polaris REST catalog → Ceph RGW Iceberg tables
 ```
 
 Airflow is not a compute engine. DAG tasks submit Spark jobs, run lightweight control-plane checks, evaluate promotion gates, and schedule maintenance. Heavy transformations remain in Spark.
@@ -87,7 +87,7 @@ The Airflow host must also be able to reach the ports from previous increments:
 |---|---|---|
 | 7077 | Spark master | Spark job submission |
 | 8080 | Spark master UI | Operational verification |
-| 9000 | MinIO | Landing-zone detection and Spark object storage access |
+| 443 | Ceph RGW | Landing-zone detection and Spark object storage access |
 | 8181 | Polaris | Spark Iceberg catalog access |
 
 For Increment 4, Airflow's own endpoint may be HTTP inside the lab network. TLS and Keycloak-backed authentication are hardened in Increment 7.
@@ -205,18 +205,18 @@ _AIRFLOW_WWW_USER_EMAIL=stratus-admin@example.com
 STRATUS_SPARK_MASTER=spark://spark-master.stratus.local:7077
 STRATUS_SPARK_APP_JAR=/opt/airflow/jars/stratus.jar
 
-# Polaris and MinIO used by Spark jobs
+# Polaris and Ceph RGW used by Spark jobs
 STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 STRATUS_POLARIS_CLIENT_ID=svc-spark
 STRATUS_POLARIS_CLIENT_SECRET=<svc-spark Polaris client secret>
 STRATUS_POLARIS_CATALOG=stratus
-STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-STRATUS_MINIO_ACCESS_KEY=svc-spark
-STRATUS_MINIO_SECRET_KEY=<svc-spark MinIO secret>
+STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+STRATUS_S3_ACCESS_KEY=svc-spark
+STRATUS_S3_SECRET_KEY=<svc-spark Ceph RGW secret>
 
 # Landing-zone detection account
-STRATUS_AIRFLOW_MINIO_ACCESS_KEY=svc-airflow
-STRATUS_AIRFLOW_MINIO_SECRET_KEY=<svc-airflow MinIO secret>
+STRATUS_AIRFLOW_S3_ACCESS_KEY=svc-airflow
+STRATUS_AIRFLOW_S3_SECRET_KEY=<svc-airflow Ceph RGW secret>
 STRATUS_LANDING_BUCKET=stratus-landing
 ```
 
@@ -236,7 +236,7 @@ The minimum `spark-submit` configuration is:
 --conf spark.sql.catalog.stratus.scope=PRINCIPAL_ROLE:ALL
 --conf spark.sql.catalog.stratus.warehouse=stratus
 --conf spark.sql.catalog.stratus.io-impl=org.apache.iceberg.aws.s3.S3FileIO
---conf spark.sql.catalog.stratus.s3.endpoint=https://minio1.stratus.local:9000
+--conf spark.sql.catalog.stratus.s3.endpoint=https://object-store.stratus.local
 --conf spark.sql.catalog.stratus.s3.access-key-id=svc-spark
 --conf spark.sql.catalog.stratus.s3.secret-access-key=<svc-spark secret>
 --conf spark.sql.catalog.stratus.s3.path-style-access=true
@@ -414,18 +414,18 @@ podman exec airflow-scheduler airflow variables set stratus_spark_master "$STRAT
 podman exec airflow-scheduler airflow variables set stratus_spark_app_jar "$STRATUS_SPARK_APP_JAR"
 podman exec airflow-scheduler airflow variables set stratus_polaris_uri "$STRATUS_POLARIS_URI"
 podman exec airflow-scheduler airflow variables set stratus_polaris_catalog "$STRATUS_POLARIS_CATALOG"
-podman exec airflow-scheduler airflow variables set stratus_minio_endpoint "$STRATUS_MINIO_ENDPOINT"
+podman exec airflow-scheduler airflow variables set stratus_s3_endpoint "$STRATUS_S3_ENDPOINT"
 podman exec airflow-scheduler airflow variables set stratus_landing_bucket "$STRATUS_LANDING_BUCKET"
 ```
 
-### Create an S3-compatible connection for MinIO landing detection
+### Create an S3-compatible connection for Ceph RGW landing detection
 
 ```bash
-podman exec airflow-scheduler airflow connections add stratus_minio_landing \
+podman exec airflow-scheduler airflow connections add stratus_landing \
   --conn-type aws \
-  --conn-login "$STRATUS_AIRFLOW_MINIO_ACCESS_KEY" \
-  --conn-password "$STRATUS_AIRFLOW_MINIO_SECRET_KEY" \
-  --conn-extra "{\"endpoint_url\": \"${STRATUS_MINIO_ENDPOINT}\", \"verify\": false}"
+  --conn-login "$STRATUS_AIRFLOW_S3_ACCESS_KEY" \
+  --conn-password "$STRATUS_AIRFLOW_S3_SECRET_KEY" \
+  --conn-extra "{\"endpoint_url\": \"${STRATUS_S3_ENDPOINT}\", \"verify\": false}"
 ```
 
 `verify=false` is acceptable only while using the self-signed lab CA. Once the CA is trusted in the Airflow image, set `verify` to the CA bundle path or remove the flag.
@@ -468,14 +468,14 @@ from airflow.models import Variable
 def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
     catalog = Variable.get("stratus_polaris_catalog", default_var="stratus")
     polaris_uri = Variable.get("stratus_polaris_uri")
-    minio_endpoint = Variable.get("stratus_minio_endpoint")
+    s3_endpoint = Variable.get("stratus_s3_endpoint")
     master = Variable.get("stratus_spark_master")
     app_jar = Variable.get("stratus_spark_app_jar")
 
     client_id = os.environ["STRATUS_POLARIS_CLIENT_ID"]
     client_secret = os.environ["STRATUS_POLARIS_CLIENT_SECRET"]
-    access_key = os.environ["STRATUS_MINIO_ACCESS_KEY"]
-    secret_key = os.environ["STRATUS_MINIO_SECRET_KEY"]
+    access_key = os.environ["STRATUS_S3_ACCESS_KEY"]
+    secret_key = os.environ["STRATUS_S3_SECRET_KEY"]
 
     return [
         "spark-submit",
@@ -489,7 +489,7 @@ def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
         "--conf", f"spark.sql.catalog.{catalog}.scope=PRINCIPAL_ROLE:ALL",
         "--conf", f"spark.sql.catalog.{catalog}.warehouse={catalog}",
         "--conf", f"spark.sql.catalog.{catalog}.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.endpoint={minio_endpoint}",
+        "--conf", f"spark.sql.catalog.{catalog}.s3.endpoint={s3_endpoint}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.access-key-id={access_key}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.secret-access-key={secret_key}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.path-style-access=true",
@@ -536,7 +536,7 @@ with DAG(
         task_id="wait_for_source_file",
         bucket_key="customers/{{ ds }}/customers.csv",
         bucket_name="{{ var.value.stratus_landing_bucket }}",
-        aws_conn_id="stratus_minio_landing",
+        aws_conn_id="stratus_landing",
         poke_interval=60,
         timeout=600,
         mode="reschedule",
@@ -847,9 +847,9 @@ The Spark and Iceberg dependencies from Increment 3 remain in place for table as
 | `STRATUS_POLARIS_CLIENT_ID` | `svc-spark` |
 | `STRATUS_POLARIS_CLIENT_SECRET` | svc-spark client secret |
 | `STRATUS_POLARIS_CATALOG` | `stratus` |
-| `STRATUS_MINIO_ENDPOINT` | MinIO S3 endpoint |
-| `STRATUS_MINIO_ACCESS_KEY` | `svc-spark` access key |
-| `STRATUS_MINIO_SECRET_KEY` | `svc-spark` secret key |
+| `STRATUS_S3_ENDPOINT` | Ceph RGW S3 endpoint |
+| `STRATUS_S3_ACCESS_KEY` | `svc-spark` access key |
+| `STRATUS_S3_SECRET_KEY` | `svc-spark` secret key |
 
 ### Shared Airflow REST client
 
@@ -1074,9 +1074,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-export STRATUS_MINIO_ACCESS_KEY=svc-spark
-export STRATUS_MINIO_SECRET_KEY=<svc-spark secret>
+export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+export STRATUS_S3_ACCESS_KEY=svc-spark
+export STRATUS_S3_SECRET_KEY=<svc-spark secret>
 
 mvn test -pl . -Dtest=AirflowOrchestrationVerificationTest
 ```
@@ -1214,13 +1214,13 @@ podman exec airflow-scheduler curl -k https://polaris.stratus.local:8181/api/cat
 
 ### Landing-zone sensor never succeeds
 
-- Confirm the expected key exists in MinIO:
+- Confirm the expected key exists in Ceph RGW:
 
 ```bash
-mc ls stratus/stratus-landing/customers/$(date +%F)/customers.csv
+aws s3 --endpoint-url https://object-store.stratus.local ls s3://stratus-landing/customers/$(date +%F)/customers.csv
 ```
 
-- Confirm the `stratus_minio_landing` Airflow connection has the MinIO endpoint in its JSON extras
+- Confirm the `stratus_landing` Airflow connection has the Ceph RGW endpoint in its JSON extras
 - Confirm the `svc-airflow` credentials can list the landing bucket
 
 ### Promotion gate does not block
@@ -1262,6 +1262,6 @@ Common causes:
 - Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)

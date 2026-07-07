@@ -4,10 +4,10 @@
 
 This document is the technical implementation plan for Increment 5 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 5 delivers Trino as the shared interactive SQL query plane over Polaris-managed Apache Iceberg tables stored in MinIO. When this increment is complete, users and platform operators can discover bronze, silver, gold, and platform tables through Trino, query Spark-produced datasets without touching Spark or MinIO paths, inspect `platform.quality_check_results`, and verify SQL results against the outputs produced and orchestrated by Increments 3 and 4. A Java JDBC verification suite confirms Trino works as an independent query surface over the same table contracts.
+Increment 5 delivers Trino as the shared interactive SQL query plane over Polaris-managed Apache Iceberg tables stored in Ceph RGW. When this increment is complete, users and platform operators can discover bronze, silver, gold, and platform tables through Trino, query Spark-produced datasets without touching Spark or Ceph RGW paths, inspect `platform.quality_check_results`, and verify SQL results against the outputs produced and orchestrated by Increments 3 and 4. A Java JDBC verification suite confirms Trino works as an independent query surface over the same table contracts.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
+- Increment 1 complete — Ceph cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark cluster running, bronze/silver/gold verification tables created by Spark, all Increment 3 gate tests passing
 - Increment 4 complete — Airflow running, DAGs able to orchestrate Spark jobs and quality gates, all Increment 4 gate tests passing
@@ -25,9 +25,9 @@ Increment 5 delivers Trino as the shared interactive SQL query plane over Polari
   - `trino-worker2.stratus.local`
 - Trino nodes can reach:
   - Polaris on port 8181
-  - MinIO on port 9000
+  - Ceph RGW on port 443 (HTTPS)
   - Airflow on port 8088 for operational cross-checks
-- `svc-trino` MinIO credentials from Increment 1 are available
+- `svc-trino` Ceph RGW credentials from Increment 1 are available
 - `svc-trino` Polaris principal from Increment 2 exists and has read access to silver, gold, and platform namespaces, plus controlled bronze access for verification where required
 - Verification datasets from Increment 3 or Airflow DAG outputs from Increment 4 are available
 
@@ -58,7 +58,7 @@ trino-worker1         trino-worker2
         Polaris REST catalog
                  │ reads Iceberg data files
                  ▼
-        MinIO object storage
+        Ceph RGW object storage
 ```
 
 Trino is the consumer-facing query plane. It is not the primary ETL engine. Spark remains responsible for heavy batch transformation, quality checks, and table maintenance unless a later design deliberately assigns a specific SQL workload to Trino.
@@ -71,12 +71,12 @@ Trino is the consumer-facing query plane. It is not the primary ETL engine. Spar
 |---|---|---|
 | 8080 | trino-coordinator | Trino web UI, REST API, JDBC endpoint |
 
-The Trino workers connect to the coordinator on port 8080. The coordinator and workers must also reach MinIO and Polaris:
+The Trino workers connect to the coordinator on port 8080. The coordinator and workers must also reach Ceph RGW and Polaris:
 
 | Port | Service | Purpose |
 |---|---|---|
 | 8181 | Polaris | Iceberg REST catalog |
-| 9000 | MinIO | Iceberg metadata and data file access |
+| 443 | Ceph RGW | Iceberg metadata and data file access |
 
 For Increment 5, Trino may run with internal lab access only. OIDC client authentication, Kerberos internal authentication, and Ranger-backed policy enforcement are hardened in later increments.
 
@@ -216,7 +216,7 @@ query.max-total-memory-per-node=3GB
 
 Create `/etc/stratus/trino/catalog/stratus.properties` on every Trino node.
 
-This catalog points Trino at Apache Polaris using the Iceberg REST catalog interface and enables native S3-compatible access to MinIO. Trino must resolve tables through Polaris. It must not be configured as a path-based reader over raw MinIO directories.
+This catalog points Trino at Apache Polaris using the Iceberg REST catalog interface and enables native S3-compatible access to Ceph RGW. Trino must resolve tables through Polaris. It must not be configured as a path-based reader over raw Ceph RGW buckets.
 
 ```properties
 # /etc/stratus/trino/catalog/stratus.properties
@@ -234,13 +234,13 @@ iceberg.rest-catalog.oauth2.scope=PRINCIPAL_ROLE:ALL
 # Increment 5 is a read/query increment.
 iceberg.security=READ_ONLY
 
-# MinIO object storage
+# Ceph RGW object storage
 fs.s3.enabled=true
-s3.endpoint=https://minio1.stratus.local:9000
+s3.endpoint=https://object-store.stratus.local
 s3.region=us-east-1
 s3.path-style-access=true
 s3.aws-access-key=svc-trino
-s3.aws-secret-key=<svc-trino MinIO secret>
+s3.aws-secret-key=<svc-trino Ceph RGW secret>
 
 # Query behavior
 iceberg.file-format=PARQUET
@@ -738,7 +738,7 @@ Increment 5 is complete when all of the following are true:
 - [ ] Trino web UI reachable on port 8080
 - [ ] Trino reports one coordinator and two active workers
 - [ ] `stratus` catalog configured with the Iceberg connector and Apache Polaris REST catalog
-- [ ] Trino uses native S3 access to MinIO with path-style access enabled
+- [ ] Trino uses native S3 access to Ceph RGW with path-style access enabled
 - [ ] Bronze, silver, gold, and platform schemas visible through Trino
 - [ ] Trino can query Spark-produced bronze, silver, and gold verification tables
 - [ ] Bronze row count matches Spark ingestion output
@@ -790,12 +790,12 @@ Common causes:
 - OAuth2 credential or scope is incorrect
 - `svc-trino` Polaris principal does not have the required catalog role
 
-### Trino cannot read MinIO data
+### Trino cannot read Ceph RGW data
 
 - Confirm `fs.s3.enabled=true`
 - Confirm `s3.path-style-access=true`
-- Confirm MinIO endpoint includes port 9000
-- Confirm `svc-trino` MinIO credentials can read the target buckets
+- Confirm the `s3.endpoint` value resolves to `https://object-store.stratus.local` and is reachable over HTTPS
+- Confirm `svc-trino` Ceph RGW credentials can read the target buckets
 - Check whether the table location uses `s3://` or `s3a://` and verify Trino can resolve it
 
 ### Table exists in Spark but not in Trino
@@ -812,10 +812,10 @@ Common causes:
 - Check the Iceberg snapshot visible to Trino using the `$snapshots` metadata table
 - Compare with Spark SQL against the same fully qualified table name
 
-### `Access Denied` from MinIO
+### `Access Denied` from Ceph RGW
 
-- Confirm the `svc-trino` MinIO policy includes read and list access for silver, gold, platform, and the bronze verification bucket scope used by this increment
-- Confirm the secret in `stratus.properties` matches the active MinIO service account secret
+- Confirm the `svc-trino` Ceph RGW policy includes read and list access for silver, gold, platform, and the bronze verification bucket scope used by this increment
+- Confirm the secret in `stratus.properties` matches the active Ceph RGW service account secret
 
 ### Invalid column test does not fail
 
@@ -835,7 +835,7 @@ Common causes:
 - Apache Polaris: https://polaris.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)

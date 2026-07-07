@@ -6,7 +6,7 @@ This document is the technical implementation plan for Increment 8 of the Stratu
 
 Increment 8 delivers Apache Kafka as the durable, replayable event backbone for Phase 2. Kafka is used by Kafka Connect, Debezium CDC connectors, Flink streaming jobs, application event producers, and Atlas entity change notifications after Atlas is migrated from the Phase 1 embedded notifier posture. When this increment is complete, the platform has a secure KRaft-mode Kafka cluster with TLS, authentication, ACLs, topic standards, retention policy, observability, and a Java verification suite.
 
-Kafka is not the data lake, the catalog, the governance system, or the scheduler. It is the event backbone. Governed analytical state remains in Iceberg tables managed through Polaris and stored in MinIO.
+Kafka is not the data lake, the catalog, the governance system, or the scheduler. It is the event backbone. Governed analytical state remains in Iceberg tables managed through Polaris and stored in Ceph RGW.
 
 **Prerequisites:**
 - Phase 1 operational readiness complete

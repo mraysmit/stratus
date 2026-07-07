@@ -1,4 +1,6 @@
-# Stratus Increment 1 - Object Storage Foundation
+# Stratus Increment 1 - Object Storage Foundation (MinIO / AIStor)
+
+> **Status: superseded.** The Stratus storage architecture decision ([on_prem_data_fabric_architecture.md §2.8](on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 storage baseline. The current Increment 1 implementation plan is [increment1_ceph.md](increment1_ceph.md). This document is retained for historical reference and as the MinIO/AIStor reference implementation should the platform later revisit that path; it is not the active runbook.
 
 ## 1. Purpose
 

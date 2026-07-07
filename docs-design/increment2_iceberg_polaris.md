@@ -4,20 +4,20 @@
 
 This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the MinIO storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
+Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the Ceph RGW storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
 
-**Prerequisite:** Increment 1 must be complete. All five MinIO buckets must exist and all Increment 1 gate tests must pass before starting this increment.
+**Prerequisite:** Increment 1 must be complete. All five Ceph RGW buckets must exist and all Increment 1 gate tests must pass before starting this increment.
 
 ---
 
 ## 2. Assumptions and Prerequisites
 
-- Increment 1 complete — MinIO cluster running, buckets and service accounts in place
+- Increment 1 complete — Ceph RGW cluster running, buckets and service accounts in place
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the Polaris host
 - JDK 21+ and Maven 3.9+ installed on the verification host
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
-- `svc-polaris` MinIO credentials from Increment 1 are available
+- `svc-polaris` Ceph RGW credentials from Increment 1 are available
 
 ### Reference documentation audit
 
@@ -44,7 +44,7 @@ Polaris runs as a single Podman container on a dedicated host. For Increment 2 i
            │  (namespace, table, schema, snapshot location)
            ▼
   ┌─────────────────────────────────────────┐
-  │  MinIO cluster  (Increment 1)           │
+  │  Ceph RGW cluster  (Increment 1)        │
   │  stratus-bronze / silver / gold /       │
   │  platform  ← Iceberg data files        │
   └─────────────────────────────────────────┘
@@ -109,11 +109,11 @@ Create `/etc/stratus/polaris.env` on the Polaris host:
 POLARIS_BOOTSTRAP_PRINCIPAL_NAME=stratus-root
 POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL=change-me-before-use
 
-# MinIO connection — used by Polaris to read/write Iceberg metadata files
-MINIO_ENDPOINT=https://minio1.stratus.local:9000
-MINIO_ACCESS_KEY=svc-polaris
-MINIO_SECRET_KEY=<svc-polaris secret from Increment 1>
-MINIO_PATH_STYLE_ACCESS=true
+# Ceph RGW connection — used by Polaris to read/write Iceberg metadata files
+CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+CEPH_RGW_ACCESS_KEY=svc-polaris
+CEPH_RGW_SECRET_KEY=<svc-polaris secret from Increment 1>
+CEPH_RGW_PATH_STYLE_ACCESS=true
 
 # H2 persistence
 POLARIS_PERSISTENCE=h2
@@ -210,7 +210,7 @@ curl -sk -X POST \
         "s3://stratus-gold",
         "s3://stratus-platform"
       ],
-      "s3.endpoint": "https://minio1.stratus.local:9000",
+      "s3.endpoint": "https://object-store.stratus.local",
       "s3.access-key-id": "svc-polaris",
       "s3.secret-access-key": "<svc-polaris secret>",
       "s3.path-style-access": "true"
@@ -327,7 +327,7 @@ Add to `pom.xml`:
     <version>1.13.1</version>
 </dependency>
 
-<!-- AWS S3 FileIO — used by Iceberg to read/write MinIO -->
+<!-- AWS S3 FileIO — used by Iceberg to read/write Ceph RGW -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-aws</artifactId>
@@ -355,9 +355,9 @@ The verification suite reads all connection details from environment variables:
 | `STRATUS_POLARIS_CLIENT_ID` | Polaris principal client id |
 | `STRATUS_POLARIS_CLIENT_SECRET` | Polaris principal client secret |
 | `STRATUS_POLARIS_CATALOG` | Catalog name — `stratus` |
-| `STRATUS_MINIO_ENDPOINT` | e.g. `https://minio1.stratus.local:9000` |
-| `STRATUS_MINIO_ACCESS_KEY` | `svc-polaris` access key |
-| `STRATUS_MINIO_SECRET_KEY` | `svc-polaris` secret key |
+| `STRATUS_S3_ENDPOINT` | e.g. `https://object-store.stratus.local` |
+| `STRATUS_S3_ACCESS_KEY` | `svc-polaris` access key |
+| `STRATUS_S3_SECRET_KEY` | `svc-polaris` secret key |
 
 ### Shared catalog client helper
 
@@ -379,9 +379,9 @@ public class PolarisTestClient {
         String clientId     = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog      = System.getenv("STRATUS_POLARIS_CATALOG");
-        String minioEndpoint = System.getenv("STRATUS_MINIO_ENDPOINT");
-        String accessKey    = System.getenv("STRATUS_MINIO_ACCESS_KEY");
-        String secretKey    = System.getenv("STRATUS_MINIO_SECRET_KEY");
+        String s3Endpoint   = System.getenv("STRATUS_S3_ENDPOINT");
+        String accessKey    = System.getenv("STRATUS_S3_ACCESS_KEY");
+        String secretKey    = System.getenv("STRATUS_S3_SECRET_KEY");
 
         Map<String, String> properties = new HashMap<>();
         properties.put(CatalogProperties.URI, uri);
@@ -389,7 +389,7 @@ public class PolarisTestClient {
         properties.put("scope", "PRINCIPAL_ROLE:ALL");
         properties.put(CatalogProperties.WAREHOUSE_LOCATION, "s3://stratus-bronze");
         properties.put(CatalogProperties.FILE_IO_IMPL, "org.apache.iceberg.aws.s3.S3FileIO");
-        properties.put("s3.endpoint", minioEndpoint);
+        properties.put("s3.endpoint", s3Endpoint);
         properties.put("s3.access-key-id", accessKey);
         properties.put("s3.secret-access-key", secretKey);
         properties.put("s3.path-style-access", "true");
@@ -693,9 +693,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-export STRATUS_MINIO_ACCESS_KEY=svc-polaris
-export STRATUS_MINIO_SECRET_KEY=<svc-polaris secret>
+export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+export STRATUS_S3_ACCESS_KEY=svc-polaris
+export STRATUS_S3_SECRET_KEY=<svc-polaris secret>
 
 mvn test -pl . -Dtest=IcebergPolarisVerificationTest
 ```
@@ -708,19 +708,19 @@ All ten tests must pass before Increment 2 is considered complete.
 
 Once the verification suite passes, perform these additional checks before signing off Increment 2.
 
-### Confirm table metadata is stored in MinIO
+### Confirm table metadata is stored in Ceph RGW
 
 Iceberg metadata files (`.metadata.json`, manifest lists, manifests) should be visible in the bronze bucket:
 
 ```bash
-mc ls --recursive stratus/stratus-bronze/
+aws --endpoint-url https://object-store.stratus.local s3 ls --recursive s3://stratus-bronze/
 ```
 
 Expect to see:
 - `metadata/` directory with `.metadata.json` and `.avro` manifest files
 - `data/` directory with `.parquet` data files
 
-This confirms Polaris is correctly directing Iceberg to write metadata and data into MinIO.
+This confirms Polaris is correctly directing Iceberg to write metadata and data into Ceph RGW.
 
 ### Confirm namespace properties in Polaris
 
@@ -761,7 +761,7 @@ Increment 2 is complete when all of the following are true:
 - [ ] `svc-spark` and `svc-trino` principals created in Polaris with correct roles
 - [ ] `platform.quality_check_results` Iceberg table created with correct schema
 - [ ] `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
-- [ ] Iceberg metadata files visible in MinIO buckets via `mc ls`
+- [ ] Iceberg metadata files visible in Ceph RGW buckets via `aws s3 ls`
 - [ ] Polaris logs show no errors during the verification test run
 
 When all gates are checked, Increment 3 (Apache Spark) can begin.
@@ -787,12 +787,12 @@ Common causes:
 - Confirm the `scope` parameter is included in the token request: `scope=PRINCIPAL_ROLE:ALL`
 - Check that the token has not expired (default TTL is typically 1 hour)
 
-### Iceberg cannot write to MinIO
+### Iceberg cannot write to Ceph RGW
 
-- Confirm `s3.path-style-access=true` is set — MinIO requires path-style access
-- Confirm the `svc-polaris` credentials have write access to the target bucket in MinIO
-- Confirm the MinIO endpoint in Polaris storage config matches the running MinIO cluster
-- Test MinIO access directly: `mc ls stratus/stratus-bronze/`
+- Confirm `s3.path-style-access=true` is set — Ceph RGW requires path-style access
+- Confirm the `svc-polaris` credentials have write access to the target bucket in Ceph RGW
+- Confirm the Ceph RGW endpoint in Polaris storage config matches the running Ceph cluster
+- Test Ceph RGW access directly: `aws --endpoint-url https://object-store.stratus.local s3 ls s3://stratus-bronze/`
 
 ### `NoSuchTableException` in verification test
 
@@ -802,7 +802,7 @@ Common causes:
 ### Verification test runs but parquet read returns zero rows
 
 - The Iceberg snapshot may not have been committed — ensure `.commit()` was called after `newAppend()`
-- Confirm the FileIO properties (MinIO endpoint, credentials) are correctly set in `PolarisTestClient`
+- Confirm the FileIO properties (Ceph RGW endpoint, credentials) are correctly set in `PolarisTestClient`
 
 ---
 
@@ -810,11 +810,10 @@ Common causes:
 
 - Apache Polaris documentation: https://polaris.apache.org/
 - Apache Polaris GitHub: https://github.com/apache/polaris
-- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
 - Apache Iceberg Java API: https://iceberg.apache.org/docs/latest/java-api-quickstart/
 - Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
-- MinIO S3 compatibility: https://min.io/docs/minio/linux/reference/s3-api-compatibility.html
+- Ceph RGW S3 API compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)

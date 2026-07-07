@@ -130,7 +130,7 @@ Business marts provide stable consumer-facing structures. They should be built f
 
 | Test | Pass condition |
 |---|---|
-| Namespace | mart namespace exists in Polaris and maps to approved MinIO location |
+| Namespace | mart namespace exists in Polaris and maps to approved Ceph RGW location |
 | Build | mart build job creates Iceberg tables from governed gold sources |
 | Quality | mart quality checks write to `platform.quality_check_results` |
 | Lineage | Atlas shows gold-to-mart lineage |
