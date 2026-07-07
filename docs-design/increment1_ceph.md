@@ -309,7 +309,7 @@ Use the official Ceph deployment documentation for the selected release. This se
 Choose and document one supported deployment method:
 
 - `cephadm` with Podman
-- `cephadm` with Docker
+- `cephadm` with Docker Engine
 - distribution packages
 - internally standardized automation
 
@@ -317,7 +317,62 @@ The runbook must describe bootstrap, host enrollment, daemon placement, and upgr
 
 For Stratus, the preferred deployment method is **cephadm with Podman** on Linux hosts. Cephadm is the Ceph-native lifecycle tool for containerized Ceph daemons. It bootstraps the first monitor and manager, enrolls additional hosts, and deploys services such as OSD and RGW through Ceph's orchestration layer.
 
-Docker is acceptable as the container runtime only when the environment standardizes on Docker Engine and the selected Ceph release documents compatibility with that Docker version. Do not hand-write standalone `podman run` or `docker run` commands for MON/MGR/OSD/RGW as the primary deployment mechanism; use `cephadm` so daemon placement, configuration, upgrades, health checks, and service lifecycle stay under Ceph's orchestrator.
+Docker Engine is acceptable as the container runtime only when the environment standardizes on Docker Engine and the selected Ceph release documents compatibility with that Docker version. Do not hand-write standalone `podman run` or `docker run` commands for MON/MGR/OSD/RGW as the primary deployment mechanism; use `cephadm` so daemon placement, configuration, upgrades, health checks, and service lifecycle stay under Ceph's orchestrator.
+
+Docker Desktop is a developer workstation tool in this design. It may run the Docker Compose client harness in §11 and developer-side verification containers, but it is not production evidence for MON quorum, OSD placement, CRUSH behavior, RGW high availability, or recovery. Production Ceph nodes must run a supported Linux host runtime such as Podman or Docker Engine.
+
+### Runtime profile matrix
+
+| Profile | Runtime | Purpose | Production evidence? |
+|---|---|---|---|
+| Developer workstation | Docker Desktop with Docker Compose | Run AWS CLI and Java verification containers against an existing RGW endpoint | No |
+| Developer Linux host | Podman or Docker Engine with single-host cephadm | Bring up a disposable Ceph/RGW endpoint for S3 client development | No |
+| Lab cluster | Podman with cephadm | Preferred representative lab for RGW, S3 behavior, Ceph health, and failure drills | Partial, only if topology matches the gate being proven |
+| Lab cluster | Docker Engine with cephadm | Acceptable when Docker Engine is the approved Linux runtime and the selected Ceph release supports it | Partial, only if topology matches the gate being proven |
+| Production | Podman with cephadm | Preferred Stratus production deployment model | Yes |
+| Production | Docker Engine with cephadm | Allowed only with release compatibility, operations approval, and daemon restart/runbook evidence | Yes |
+| Production | Docker Desktop | Not allowed | No |
+
+### Production Podman profile
+
+The production Podman profile is the default Stratus path. It uses `cephadm` to manage Ceph daemon containers on Linux hosts while keeping daemon placement, configuration, health, upgrades, and restarts under the Ceph orchestrator.
+
+Production Podman requirements:
+
+- selected Ceph release and image digest are pinned
+- Podman version is approved against the selected Ceph release
+- every Ceph host runs supported Linux, systemd, time synchronization, LVM2, SSH, and persistent host storage
+- OSD devices are dedicated disks or block devices, not loopback files
+- cephadm SSH keys and admin credentials are stored and rotated according to the platform secret-management standard
+- MON, MGR, OSD, and RGW placement is declared through `ceph orch`, not ad hoc container commands
+- RGW is deployed redundantly behind `object-store.stratus.local`
+- Prometheus/Grafana, Ceph Dashboard, audit logs, and alert routing are enabled before the production-ready gate
+
+Production Podman runbooks must include:
+
+- host bootstrap and enrollment
+- daemon placement specs for MON, MGR, OSD, and RGW
+- pool and CRUSH creation
+- RGW realm, zonegroup, zone, and frontend configuration
+- TLS certificate install and rotation
+- image upgrade, rollback, and failed-upgrade handling
+- OSD replacement and host drain procedure
+- Podman service failure and host reboot behavior
+
+### Production Docker Engine profile
+
+The production Docker Engine profile is allowed only when the platform operations team standardizes on Docker Engine for Linux servers and the selected Ceph release documents compatibility with that Docker version.
+
+Production Docker Engine requirements are the same as the Podman profile, with additional evidence:
+
+- Docker Engine version and package source are pinned and approved
+- Docker daemon configuration, restart policy, logging driver, and storage driver are documented
+- Docker daemon restart behavior is tested because daemon loss can affect all Ceph daemon containers on the host
+- cephadm remains the lifecycle owner for Ceph containers
+- operators use `ceph orch` commands for daemon management, not raw `docker stop`, `docker rm`, or `docker run`
+- host-level monitoring includes Docker daemon health in addition to Ceph health
+
+Docker Engine production approval must be recorded in the storage decision evidence bundle. If the selected Ceph release or enterprise runtime policy does not support Docker Engine for production Ceph, use the Podman profile.
 
 ### Storage layout
 
@@ -359,7 +414,7 @@ The RGW layer must define:
 
 ---
 
-## 10. Podman and Docker Lab Deployment
+## 10. Podman and Docker Engine Lab Deployment
 
 This section provides a containerized lab deployment pattern for Ceph. It is not a replacement for the production topology in §5. It is intended to prove RGW, S3 client behavior, bucket setup, and Java verification before building the full production-like cluster.
 
@@ -451,7 +506,7 @@ ceph health detail
 
 Expose RGW through `object-store.stratus.local` using the lab load balancer, reverse proxy, or DNS pattern approved for the lab. Production-like environments must use a redundant endpoint and trusted TLS certificate.
 
-### Docker-based cephadm lab
+### Docker Engine-based cephadm lab
 
 Use this path only when Docker Engine is the approved container runtime. The Ceph deployment model is still cephadm; only the container runtime changes.
 
@@ -495,11 +550,39 @@ Do not use a single-host lab to prove failure tolerance, CRUSH design, OSD recov
 
 ---
 
-## 11. Docker Compose Developer Harness
+## 11. Docker Desktop and Docker Compose Developer Harness
 
-Docker Compose is not the Ceph cluster deployment mechanism for Stratus. A real Ceph lab should use cephadm with Podman or Docker as described in §10.
+Docker Compose is not the Ceph cluster deployment mechanism for Stratus. A real Ceph lab should use cephadm with Podman or Docker Engine as described in §10.
 
 Compose is useful as a **developer client harness** that runs tools against an existing RGW endpoint. It keeps S3 smoke-test commands repeatable without pretending to orchestrate MON/MGR/OSD/RGW.
+
+### Developer Docker Desktop setup
+
+Use this setup on a developer workstation running Docker Desktop on Windows, macOS, or Linux Desktop. The purpose is to exercise the Stratus S3 client contract against a Ceph RGW endpoint that already exists.
+
+The endpoint may be:
+
+- a shared Ceph/RGW lab endpoint
+- a single-host cephadm lab running in a separate Linux VM
+- a production-like non-production Ceph endpoint approved for development tests
+
+Do not run the production Ceph cluster itself inside Docker Desktop. Docker Desktop does not provide the production evidence Stratus needs for systemd-managed Linux hosts, dedicated OSD devices, MON quorum, MGR failover, CRUSH placement, RGW high availability, Ceph Dashboard operations, or recovery drills.
+
+Developer prerequisites:
+
+- Docker Desktop with Docker Compose v2 enabled
+- network access to `object-store.stratus.local` or the selected RGW endpoint
+- developer workstation trusts the Stratus lab CA
+- `STRATUS_S3_ENDPOINT`, `STRATUS_S3_ACCESS_KEY`, and `STRATUS_S3_SECRET_KEY` are stored in a local `.env` file outside source control
+- the Java verification source tree is available on the workstation
+
+For Windows workstations, run Docker Compose from PowerShell or WSL, but keep path handling consistent. If the repository is mounted from Windows into Linux containers, confirm line endings and volume paths before running the Java verification suite.
+
+### Developer Podman setup
+
+On a Linux developer host, the same client harness can be run with Podman Compose or a compatible `podman compose` workflow if that is the local standard. The harness still targets an existing RGW endpoint; it does not replace the cephadm lab.
+
+The developer Podman path is useful when engineers want their local client runtime to match the production Podman profile more closely. It still does not prove production storage durability, HA, or recovery.
 
 ### Compose directory layout
 
@@ -555,6 +638,12 @@ Start the harness:
 docker compose up -d
 ```
 
+For a Podman-based developer harness, use the locally approved equivalent:
+
+```bash
+podman compose up -d
+```
+
 Run S3 smoke checks:
 
 ```bash
@@ -572,6 +661,15 @@ docker compose exec verifier mvn test -Dtest=S3StorageVerificationTest
 ```
 
 If the image does not trust the CA by default, update the container trust store or use a project-specific Java truststore. Do not add `--no-verify-ssl` to routine tests; that would bypass a core Increment 1 requirement.
+
+For Docker Desktop, expected developer evidence is:
+
+- `docker compose ps` shows the client harness containers running
+- AWS CLI can list the five Stratus buckets through the RGW endpoint
+- Java verification passes with TLS validation enabled
+- no secrets are committed to the repository
+
+For Podman developer workstations, capture the same evidence with the equivalent `podman compose` commands.
 
 ### What Compose validates
 
@@ -603,7 +701,8 @@ The Compose harness does not validate:
 
 Use either:
 
-- single-host cephadm with Podman or Docker
+- Docker Desktop with the Compose client harness against an existing RGW endpoint
+- single-host cephadm with Podman or Docker Engine on a Linux host
 - a cephadm-managed lab cluster
 - the Docker Compose client harness against an existing RGW endpoint
 
@@ -858,6 +957,7 @@ For production-like:
 Increment 1 lab is complete when:
 
 - [ ] approved Ceph release is selected and pinned
+- [ ] lab runtime profile is recorded as Podman, Docker Engine, or Docker Desktop client harness only
 - [ ] Ceph lab cluster is running
 - [ ] RGW is reachable over HTTPS
 - [ ] all five Stratus S3 buckets exist
@@ -875,6 +975,7 @@ When the lab gate passes, Increment 2 engineering work can begin.
 The Ceph storage foundation is production-ready only when:
 
 - [ ] production Ceph topology is approved
+- [ ] production runtime profile is approved as Podman or Docker Engine; Docker Desktop is not used for production Ceph nodes
 - [ ] MON quorum and MGR failover are configured and tested
 - [ ] OSD storage layout, CRUSH rules, pool replication, and/or erasure coding are approved
 - [ ] RGW is deployed redundantly behind the approved endpoint
