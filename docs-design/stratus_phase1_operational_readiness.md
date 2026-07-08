@@ -66,9 +66,9 @@ Current Phase 1 target baseline as of 2026-07-05:
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| Ceph RGW | latest supported release approved for the environment, pinned by image digest or package version |
-| Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
-| FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
+| Ceph RGW | approved Ceph release pinned by package version or image tag plus digest in the environment version matrix |
+| Apache Atlas / Ranger | approved Apache releases built as internal images and pinned by tag plus digest after plugin/database compatibility review |
+| FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |
 
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
 

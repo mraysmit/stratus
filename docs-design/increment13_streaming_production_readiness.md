@@ -251,4 +251,4 @@ After this gate passes, controlled production streaming sources may onboard, and
 - Increment 10 - Flink Streaming Compute: [increment10_flink_streaming_compute.md](increment10_flink_streaming_compute.md)
 - Increment 11 - Streaming Writes to Iceberg: [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md)
 - Increment 12 - Atlas Event Bus and Lineage Automation: [increment12_atlas_event_lineage.md](increment12_atlas_event_lineage.md)
-- Phase 1 operational readiness: [phase1_operational_readiness.md](phase1_operational_readiness.md)
+- Phase 1 operational readiness: [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md)

@@ -149,7 +149,7 @@ The platform is Linux-only with no Windows dependencies.
 
 ## Design Documents
 
-- [docs-design/on_prem_data_fabric_architecture.md](docs-design/on_prem_data_fabric_architecture.md) — full architecture specification
+- [docs-design/stratus_on_prem_data_fabric_architecture.md](docs-design/stratus_on_prem_data_fabric_architecture.md) — full architecture specification
 
 ## Status
 

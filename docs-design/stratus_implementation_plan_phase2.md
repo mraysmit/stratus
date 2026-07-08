@@ -11,7 +11,7 @@ The Phase 2 goal is simple: **make governed data movement continuous where conti
 References:
 - [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- [phase1_operational_readiness.md](phase1_operational_readiness.md)
+- [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md)
 
 ---
 
@@ -64,8 +64,8 @@ Phase 2 uses fast-moving projects. Before implementation, the platform team must
 | Apache Iceberg | 1.11.0 unless superseded by a newer release before implementation |
 | Iceberg Flink runtime | must match the selected Flink major/minor line; Iceberg 1.11.0 publishes Flink 2.1, 2.0, and 1.20 runtime jars |
 | Apache Polaris | 1.5.0 unless superseded by a newer approved release before implementation |
-| Apache Atlas | latest approved Apache release image built and pinned internally |
-| Apache Ranger | latest approved Apache release image built and pinned internally |
+| Apache Atlas | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
+| Apache Ranger | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Java | 21 where supported; do not introduce Java 8 or Java 11-era examples |
 
 Important compatibility rule: do not select Flink solely by latest version number if the selected Iceberg release does not publish or document a compatible Flink runtime. The implementation owner must choose either:
@@ -379,7 +379,7 @@ Phase 2 should hand off:
 - [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) - Phase 3 query acceleration and data products implementation plan
-- [phase1_operational_readiness.md](phase1_operational_readiness.md) - Phase 1 operational acceptance gate
+- [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate
 - [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md) - Increment 8 Kafka event backbone implementation plan
 - [increment9_kafka_connect_debezium.md](increment9_kafka_connect_debezium.md) - Increment 9 Kafka Connect and Debezium CDC implementation plan
 - [increment10_flink_streaming_compute.md](increment10_flink_streaming_compute.md) - Increment 10 Flink streaming compute implementation plan
