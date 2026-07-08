@@ -1,4 +1,6 @@
-# Stratus Increment 1 - Object Storage Foundation
+# Stratus Increment 1 - Object Storage Foundation (MinIO / AIStor)
+
+> **Status: superseded.** The Stratus storage architecture decision ([on_prem_data_fabric_architecture.md §2.8](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 storage baseline. The current Increment 1 implementation plan is [increment1_ceph.md](increment1_ceph.md). This document is retained for historical reference and as the MinIO/AIStor reference implementation should the platform later revisit that path; it is not the active runbook.
 
 ## 1. Purpose
 
@@ -18,7 +20,7 @@ MinIO OSS may be used for disposable developer and lab validation only when the 
 
 ## 2. Storage Decision
 
-The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is a legacy implementation variant for a MinIO/AIStor path and applies only if a future architecture decision explicitly selects that target.
+The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is a legacy implementation variant for a MinIO/AIStor path and applies only if a future architecture decision explicitly selects that target.
 
 ### Implementation target
 
@@ -835,4 +837,4 @@ No production dataset should be onboarded based only on the MinIO OSS lab gate.
 - MinIO access policy reference: https://min.io/docs/minio/linux/administration/identity-access-management/policy-based-access-control.html
 - AWS SDK for Java S3: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)

@@ -15,7 +15,7 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 - Increment 2 complete - Polaris and Iceberg namespaces operational
 - Increment 5 complete - Trino can query Polaris-managed Iceberg tables
 - Increment 6 and 7 complete - Atlas/Ranger identity and governance model operational
-- `svc-flink` has approved Kafka, Polaris, and S3 credentials
+- `svc-flink` has approved Kafka, Polaris, and Ceph RGW credentials
 
 ---
 
@@ -28,7 +28,7 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 - Iceberg target is `1.11.0`
 - Flink Kafka Connector target is `5.0.0`
 - Polaris endpoint is reachable at `https://polaris.stratus.local:8181/api/catalog`
-- S3 endpoint is reachable at `https://object-store.stratus.local`
+- Ceph RGW endpoint is reachable at `https://object-store.stratus.local`
 - Kafka verification CDC topic from Increment 9 is populated
 - Trino can query `bronze`, `silver`, and `platform` namespaces
 - Flink checkpoint and savepoint paths are durable enough for restart tests
@@ -164,7 +164,7 @@ scope=PRINCIPAL_ROLE:ALL
 io-impl=org.apache.iceberg.aws.s3.S3FileIO
 s3.endpoint=https://object-store.stratus.local
 s3.access-key-id=svc-flink
-s3.secret-access-key=<svc-flink-Ceph RGW-secret>
+s3.secret-access-key=<svc-flink-ceph-rgw-secret>
 s3.path-style-access=true
 ```
 

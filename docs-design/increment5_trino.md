@@ -25,9 +25,9 @@ Increment 5 delivers Trino as the shared interactive SQL query plane over Polari
   - `trino-worker2.stratus.local`
 - Trino nodes can reach:
   - Polaris on port 8181
-  - Ceph RGW on port 9000
+  - Ceph RGW on port 443 (HTTPS)
   - Airflow on port 8088 for operational cross-checks
-- `svc-trino` S3 credentials from Increment 1 are available
+- `svc-trino` Ceph RGW credentials from Increment 1 are available
 - `svc-trino` Polaris principal from Increment 2 exists and has read access to silver, gold, and platform namespaces, plus controlled bronze access for verification where required
 - Verification datasets from Increment 3 or Airflow DAG outputs from Increment 4 are available
 
@@ -76,7 +76,7 @@ The Trino workers connect to the coordinator on port 8080. The coordinator and w
 | Port | Service | Purpose |
 |---|---|---|
 | 8181 | Polaris | Iceberg REST catalog |
-| 9000 | Ceph RGW | Iceberg metadata and data file access |
+| 443 | Ceph RGW | Iceberg metadata and data file access |
 
 For Increment 5, Trino may run with internal lab access only. OIDC client authentication, Kerberos internal authentication, and Ranger-backed policy enforcement are hardened in later increments.
 
@@ -216,7 +216,7 @@ query.max-total-memory-per-node=3GB
 
 Create `/etc/stratus/trino/catalog/stratus.properties` on every Trino node.
 
-This catalog points Trino at Apache Polaris using the Iceberg REST catalog interface and enables native S3-compatible access to Ceph RGW. Trino must resolve tables through Polaris. It must not be configured as a path-based reader over raw Ceph RGW directories.
+This catalog points Trino at Apache Polaris using the Iceberg REST catalog interface and enables native S3-compatible access to Ceph RGW. Trino must resolve tables through Polaris. It must not be configured as a path-based reader over raw Ceph RGW buckets.
 
 ```properties
 # /etc/stratus/trino/catalog/stratus.properties
@@ -240,7 +240,7 @@ s3.endpoint=https://object-store.stratus.local
 s3.region=us-east-1
 s3.path-style-access=true
 s3.aws-access-key=svc-trino
-s3.aws-secret-key=<svc-trino S3 secret>
+s3.aws-secret-key=<svc-trino Ceph RGW secret>
 
 # Query behavior
 iceberg.file-format=PARQUET
@@ -795,8 +795,8 @@ Common causes:
 
 - Confirm `fs.s3.enabled=true`
 - Confirm `s3.path-style-access=true`
-- Confirm S3 endpoint includes port 9000
-- Confirm `svc-trino` S3 credentials can read the target buckets
+- Confirm the `s3.endpoint` value resolves to `https://object-store.stratus.local` and is reachable over HTTPS
+- Confirm `svc-trino` Ceph RGW credentials can read the target buckets
 - Check whether the table location uses `s3://` or `s3a://` and verify Trino can resolve it
 
 ### Table exists in Spark but not in Trino
@@ -835,8 +835,8 @@ Common causes:
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)

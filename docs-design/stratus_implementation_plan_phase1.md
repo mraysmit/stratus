@@ -8,7 +8,7 @@ The architecture document defines what the platform is and why each component ex
 
 The guiding principle is simple: **build the stack from the bottom up**. Storage before tables. Tables before compute. Compute before orchestration. Query before governance. Identity last, hardening what already works. Each increment should leave the platform in a working, demonstrable state.
 
-Reference: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+Reference: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 
 ---
 
@@ -360,7 +360,7 @@ Operational production-readiness signoff is covered by [phase1_operational_readi
 
 ## 12. Design Documents
 
-- [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
+- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
 - [increment1_ceph.md](increment1_ceph.md) — Increment 1 Ceph object storage foundation implementation plan
 - [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) — Increment 2 table and catalog implementation plan
 - [increment3_spark.md](increment3_spark.md) — Increment 3 batch compute implementation plan

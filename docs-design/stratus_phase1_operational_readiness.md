@@ -13,7 +13,7 @@ Phase 1 is accepted only when the platform can prove three things:
 3. Security, governance, and quality controls remain enforced during normal operations and failure scenarios.
 
 Reference:
-- [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 
 ---
@@ -66,7 +66,7 @@ Current Phase 1 target baseline as of 2026-07-05:
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| Ceph RGW | latest supported release approved for the environment, pinned by image digest |
+| Ceph RGW | latest supported release approved for the environment, pinned by image digest or package version |
 | Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
 | FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
 
@@ -139,7 +139,7 @@ Acceptance requires proving the system behavior, not merely proving that each co
 
 | Service | Protocols used | Required acceptance evidence |
 |---|---|---|
-| Ceph RGW | HTTPS S3 API, Ceph Dashboard HTTPS | buckets exist, TLS validates without insecure flags, service-account policies isolate landing/bronze/silver/gold/platform zones |
+| Ceph RGW | HTTPS S3 API, Ceph Dashboard HTTPS | buckets exist, TLS validates without insecure flags, RGW user policies isolate landing/bronze/silver/gold/platform zones |
 | Apache Polaris | HTTPS REST catalog API, JDBC or metadata database connection if externalized | `stratus` catalog resolves namespaces and tables, service principals are scoped, Iceberg metadata locations point to approved Ceph RGW paths |
 | Apache Spark | Spark cluster protocol, Iceberg REST, HTTPS S3 API, JVM truststore | ingestion, transform, materialisation, quality, and maintenance jobs run through Polaris and Ceph RGW |
 | Apache Airflow 3.x | HTTPS UI/API, Airflow public API, metadata database protocol, `spark-submit` | API server, DAG processor, scheduler, and triggerer are healthy; DAGs run, retry, alert, and enforce quality gates |
@@ -227,7 +227,7 @@ Readiness requires a restore drill, not only a backup configuration.
 
 | Area | Backup requirement | Restore acceptance |
 |---|---|---|
-| Ceph RGW object data | erasure-coded storage plus operational backup or replication strategy for critical buckets | verification dataset remains readable after node or drive failure drill, or after restoring from the approved backup path |
+| Ceph object data | replicated or erasure-coded pool design for critical buckets plus OSD/MON recovery procedures | verification dataset remains readable after an OSD, MON, or RGW daemon failure drill, or after restoring from the approved backup path |
 | Iceberg metadata | table metadata files, manifests, manifest lists, snapshots, and delete files retained according to policy | an older snapshot can be inspected, manifests resolve, and a controlled rollback procedure is documented |
 | Polaris | catalog metadata store backup | restored Polaris resolves existing table identifiers to the same Ceph RGW table metadata locations as the accepted restore point |
 | Airflow | PostgreSQL metadata backup plus DAG repository backup | restored Airflow lists DAGs, preserves relevant run history, and triggers the verification DAG |
@@ -283,7 +283,7 @@ Operators must be able to answer four questions quickly:
 | Dashboard | Required signals |
 |---|---|
 | Platform overview | service health, active incidents, backup age, certificate expiry, failed DAG count |
-| Ceph RGW | node health, drive health, capacity, request error rate, bucket growth by zone |
+| Ceph RGW | OSD/MON/MGR/RGW daemon health, pool capacity, RGW request/error rate, bucket growth by zone |
 | Polaris and Iceberg | catalog latency, auth failures, table count, metadata growth, failed table resolutions, per-table maintenance policy version, file count, small-file count, average file size, snapshot chain length, manifest count, delete-file count, orphan-file count, last maintenance action, orphan cleanup result |
 | Spark | application status, duration, executor failures, failed stages, event log availability |
 | Airflow 3.x | API server health, scheduler heartbeat, DAG processor heartbeat, triggerer health, DAG import errors, failed tasks, Deadline Alert breaches |
@@ -295,8 +295,8 @@ Operators must be able to answer four questions quickly:
 
 ### Required alerts
 
-- Ceph RGW node or drive unavailable
-- bucket capacity threshold breached
+- Ceph OSD, MON, or RGW daemon unavailable
+- Ceph pool/bucket capacity threshold breached
 - Polaris unavailable or elevated 5xx response rate
 - Polaris table metadata location mismatch after restore validation
 - Iceberg file-count or small-file-count threshold breached for a governed table
@@ -352,7 +352,7 @@ Logs must not print passwords, access keys, tokens, keytabs, private keys, or fu
 | Ceph RGW service policy | service accounts have the minimum object-storage access needed for their platform role |
 | Secret handling | secrets are stored in approved protected files or secret manager, not in source code or logs |
 | Bootstrap retirement | lab bootstrap users, passwords, and local placeholder accounts are disabled or break-glass only |
-| Rotation | keytabs, service account keys, Keycloak client secrets, and S3 credentials have tested rotation runbooks |
+| Rotation | keytabs, service account keys, Keycloak client secrets, and Ceph RGW credentials have tested rotation runbooks |
 | Audit | privileged access, policy changes, query denies, quality overrides, and restore actions are auditable |
 
 Security acceptance must include both positive and negative tests. A user in an approved group must succeed, and a user outside the approved group must be denied with an auditable reason.
@@ -423,7 +423,7 @@ The following drills must be run before Phase 1 signoff:
 | FreeIPA group propagation | group membership change reaches Keycloak and Ranger within the approved window |
 | Airflow DAG import error | alert fires and the failed DAG does not silently disappear from operational visibility |
 | Spark job retry | transient failure retries according to policy and records final status |
-| Ceph RGW node or drive failure | service remains within expected erasure-code tolerance, or restore path is executed |
+| Ceph OSD, MON, or RGW daemon failure | service remains within the approved replication/erasure-coding fault-tolerance target, or restore path is executed |
 | Catalog/object-store consistency restore | restored Polaris metadata, Iceberg metadata files, manifests, and Ceph RGW object data resolve to a consistent table snapshot |
 | Iceberg failure recovery | catalog corruption, missing metadata file, missing manifest file, accidental object deletion, logical bad write, rollback to known-good snapshot, and object-store unavailability scenarios have documented rollback or restore evidence |
 | Control-plane restore | restored Polaris, Airflow, Ranger, Atlas, FreeIPA, and Keycloak support the verification workflow |
@@ -571,7 +571,7 @@ After this gate passes, Phase 1 can onboard controlled production datasets or pr
 
 ## 19. References
 
-- Main architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+- Main architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Increment 1 - Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 - Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
