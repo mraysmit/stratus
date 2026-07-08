@@ -18,8 +18,8 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 - Podman 4.x installed on each Spark node
 - JDK 21+ and Maven 3.9+ on the development and verification host
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
-- Nodes can reach Ceph RGW on port 9000 and Polaris on port 8181
-- `svc-spark` S3 credentials and Polaris principal credentials from earlier increments are available
+- Nodes can reach Ceph RGW at `object-store.stratus.local` (HTTPS) and Polaris on port 8181
+- `svc-spark` Ceph RGW credentials and Polaris principal credentials from earlier increments are available
 
 ### Reference documentation audit
 
@@ -422,7 +422,7 @@ public class SparkTestSession {
         String clientId    = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog     = System.getenv("STRATUS_POLARIS_CATALOG");
-        String s3Endpoint = System.getenv("STRATUS_S3_ENDPOINT");
+        String s3Endpoint  = System.getenv("STRATUS_S3_ENDPOINT");
         String accessKey   = System.getenv("STRATUS_S3_ACCESS_KEY");
         String secretKey   = System.getenv("STRATUS_S3_SECRET_KEY");
 
@@ -877,6 +877,6 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 - Iceberg Spark SQL extensions: https://iceberg.apache.org/docs/latest/spark-ddl/
 - Apache Spark Docker images: https://hub.docker.com/r/apache/spark
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

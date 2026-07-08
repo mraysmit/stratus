@@ -9,7 +9,7 @@ Phase 1 establishes the governed batch lakehouse foundation: Ceph RGW, Iceberg, 
 The Phase 2 goal is simple: **make governed data movement continuous where continuous movement is justified**. Batch remains the right tool for bounded workloads. Streaming is added for CDC, event streams, replay, low-latency ingestion, and stateful processing.
 
 References:
-- [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - [phase1_operational_readiness.md](phase1_operational_readiness.md)
 
@@ -376,7 +376,7 @@ Phase 2 should hand off:
 
 ## 14. Design Documents
 
-- [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
+- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) - Phase 3 query acceleration and data products implementation plan
 - [phase1_operational_readiness.md](phase1_operational_readiness.md) - Phase 1 operational acceptance gate
@@ -386,7 +386,7 @@ Phase 2 should hand off:
 - [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md) - Increment 11 streaming writes to Iceberg implementation plan
 - [increment12_atlas_event_lineage.md](increment12_atlas_event_lineage.md) - Increment 12 Atlas event bus and lineage automation implementation plan
 - [increment13_streaming_production_readiness.md](increment13_streaming_production_readiness.md) - Increment 13 streaming operations and production readiness checklist
-- [increment1_ceph.md](increment1_ceph.md) - Phase 1 storage foundation
+- [increment1_ceph.md](increment1_ceph.md) - Phase 1 storage foundation (Ceph RGW)
 - [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) - Phase 1 table and catalog foundation
 - [increment3_spark.md](increment3_spark.md) - Phase 1 batch compute
 - [increment4_airflow.md](increment4_airflow.md) - Phase 1 orchestration

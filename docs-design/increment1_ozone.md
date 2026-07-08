@@ -25,7 +25,7 @@ This document intentionally separates two concerns:
 
 ## 2. Storage Decision
 
-The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is an implementation variant for **Apache Ozone** and applies only if the architecture decision selects Ozone as the Increment 1 storage target.
+The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is an implementation variant for **Apache Ozone** and applies only if the architecture decision selects Ozone as the Increment 1 storage target.
 
 ### Implementation target
 
@@ -677,4 +677,4 @@ No production dataset should be onboarded based only on a single-node or non-sec
 - Ceph Object Gateway documentation: https://docs.ceph.com/en/latest/radosgw/
 - AWS SDK for Java S3: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)

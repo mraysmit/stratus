@@ -418,7 +418,7 @@ public class PolarisTestClient {
         String clientId     = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog      = System.getenv("STRATUS_POLARIS_CATALOG");
-        String s3Endpoint = System.getenv("STRATUS_S3_ENDPOINT");
+        String s3Endpoint   = System.getenv("STRATUS_S3_ENDPOINT");
         String accessKey    = System.getenv("STRATUS_S3_ACCESS_KEY");
         String secretKey    = System.getenv("STRATUS_S3_SECRET_KEY");
 
@@ -848,10 +848,10 @@ Common causes:
 
 ### Iceberg cannot write to Ceph RGW
 
-- Confirm `s3.path-style-access=true` is set unless virtual-hosted bucket access has been explicitly validated for the environment
+- Confirm `s3.path-style-access=true` is set — Ceph RGW requires path-style access
 - Confirm the `svc-polaris` credentials have write access to the target bucket in Ceph RGW
-- Confirm the S3 endpoint in Polaris storage config matches the running Ceph RGW cluster
-- Test Ceph RGW access directly: `aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls s3://stratus-bronze/`
+- Confirm the Ceph RGW endpoint in Polaris storage config matches the running Ceph cluster
+- Test Ceph RGW access directly: `aws --endpoint-url https://object-store.stratus.local s3 ls s3://stratus-bronze/`
 
 ### `NoSuchTableException` in verification test
 
@@ -861,7 +861,7 @@ Common causes:
 ### Verification test runs but parquet read returns zero rows
 
 - The Iceberg snapshot may not have been committed — ensure `.commit()` was called after `newAppend()`
-- Confirm the FileIO properties (S3 endpoint, credentials) are correctly set in `PolarisTestClient`
+- Confirm the FileIO properties (Ceph RGW endpoint, credentials) are correctly set in `PolarisTestClient`
 
 ---
 
@@ -872,7 +872,7 @@ Common causes:
 - Apache Iceberg Java API: https://iceberg.apache.org/docs/latest/java-api-quickstart/
 - Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
-- Ceph RGW S3 compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
+- Ceph RGW S3 API compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)

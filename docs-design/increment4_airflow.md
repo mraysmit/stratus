@@ -22,10 +22,10 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 - Airflow host can reach:
   - Spark master on port 7077
   - Spark master web UI on port 8080
-  - Ceph RGW on port 9000
+  - Ceph RGW on port 443
   - Polaris on port 8181
-- `svc-airflow` S3 credentials from Increment 1 are available
-- `svc-spark` S3 credentials and Polaris principal credentials from Increment 3 are available
+- `svc-airflow` Ceph RGW credentials from Increment 1 are available
+- `svc-spark` Ceph RGW credentials and Polaris principal credentials from Increment 3 are available
 - The Stratus application fat JAR from Increment 3 is available to the Airflow runtime
 
 ### Reference documentation audit
@@ -87,7 +87,7 @@ The Airflow host must also be able to reach the ports from previous increments:
 |---|---|---|
 | 7077 | Spark master | Spark job submission |
 | 8080 | Spark master UI | Operational verification |
-| 9000 | Ceph RGW | Landing-zone detection and Spark object storage access |
+| 443 | Ceph RGW | Landing-zone detection and Spark object storage access |
 | 8181 | Polaris | Spark Iceberg catalog access |
 
 For Increment 4, Airflow's own endpoint may be HTTP inside the lab network. TLS and Keycloak-backed authentication are hardened in Increment 7.
@@ -212,7 +212,7 @@ STRATUS_POLARIS_CLIENT_SECRET=<svc-spark Polaris client secret>
 STRATUS_POLARIS_CATALOG=stratus
 STRATUS_S3_ENDPOINT=https://object-store.stratus.local
 STRATUS_S3_ACCESS_KEY=svc-spark
-STRATUS_S3_SECRET_KEY=<svc-spark S3 secret>
+STRATUS_S3_SECRET_KEY=<svc-spark Ceph RGW secret>
 
 # Landing-zone detection account
 STRATUS_AIRFLOW_S3_ACCESS_KEY=svc-airflow
@@ -423,7 +423,7 @@ podman exec airflow-scheduler airflow variables set stratus_landing_bucket "$STR
 ### Create an S3-compatible connection for Ceph RGW landing detection
 
 ```bash
-podman exec airflow-scheduler airflow connections add stratus_s3_landing \
+podman exec airflow-scheduler airflow connections add stratus_landing \
   --conn-type aws \
   --conn-login "$STRATUS_AIRFLOW_S3_ACCESS_KEY" \
   --conn-password "$STRATUS_AIRFLOW_S3_SECRET_KEY" \
@@ -471,7 +471,7 @@ from airflow.models import Variable
 def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
     catalog = Variable.get("stratus_polaris_catalog", default_var="stratus")
     polaris_uri = Variable.get("stratus_polaris_uri")
-    STRATUS_S3_ENDPOINT = Variable.get("stratus_s3_endpoint")
+    s3_endpoint = Variable.get("stratus_s3_endpoint")
     master = Variable.get("stratus_spark_master")
     app_jar = Variable.get("stratus_spark_app_jar")
 
@@ -492,7 +492,7 @@ def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
         "--conf", f"spark.sql.catalog.{catalog}.scope=PRINCIPAL_ROLE:ALL",
         "--conf", f"spark.sql.catalog.{catalog}.warehouse={catalog}",
         "--conf", f"spark.sql.catalog.{catalog}.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.endpoint={STRATUS_S3_ENDPOINT}",
+        "--conf", f"spark.sql.catalog.{catalog}.s3.endpoint={s3_endpoint}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.access-key-id={access_key}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.secret-access-key={secret_key}",
         "--conf", f"spark.sql.catalog.{catalog}.s3.path-style-access=true",
@@ -539,7 +539,7 @@ with DAG(
         task_id="wait_for_source_file",
         bucket_key="customers/{{ ds }}/customers.csv",
         bucket_name="{{ var.value.stratus_landing_bucket }}",
-        aws_conn_id="stratus_s3_landing",
+        aws_conn_id="stratus_landing",
         poke_interval=60,
         timeout=600,
         mode="reschedule",
@@ -1234,11 +1234,10 @@ podman exec airflow-scheduler curl --cacert /etc/stratus/certs/ca.crt \
 - Confirm the expected key exists in Ceph RGW:
 
 ```bash
-aws --endpoint-url "$STRATUS_S3_ENDPOINT" \
-  s3 ls "s3://stratus-landing/customers/$(date +%F)/customers.csv"
+aws s3 --endpoint-url https://object-store.stratus.local ls s3://stratus-landing/customers/$(date +%F)/customers.csv
 ```
 
-- Confirm the `stratus_s3_landing` Airflow connection has the S3 endpoint in its JSON extras
+- Confirm the `stratus_landing` Airflow connection has the Ceph RGW endpoint in its JSON extras
 - Confirm the `svc-airflow` credentials can list the landing bucket
 
 ### Promotion gate does not block
@@ -1279,7 +1278,7 @@ Common causes:
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
 - Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)

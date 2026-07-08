@@ -9,7 +9,7 @@ Increment 7 hardens the working platform from Increments 1 through 6. It introdu
 This is a migration and hardening increment, not a greenfield install. The existing platform must continue to work after identity is made real.
 
 **Prerequisites:**
-- Increment 1 complete — Ceph RGW storage running with all buckets and service accounts
+- Increment 1 complete — Ceph RGW storage running with all buckets and service credentials
 - Increment 2 complete — Polaris and Iceberg tables operational
 - Increment 3 complete — Spark jobs and quality gates operational
 - Increment 4 complete — Airflow DAGs operational
@@ -26,7 +26,7 @@ This is a migration and hardening increment, not a greenfield install. The exist
 - DNS resolution:
   - `ipa.stratus.local`
   - `keycloak.stratus.local`
-  - `Ceph RGW.stratus.local`
+  - `object-store.stratus.local`
   - `polaris.stratus.local`
   - `airflow.stratus.local`
   - `trino-coordinator.stratus.local`
@@ -164,7 +164,7 @@ Increment 7 does not collapse every credential into one mechanism. That would be
 | Human access to UIs and SQL | Keycloak OIDC backed by FreeIPA |
 | Linux host and service identity | FreeIPA, SSSD, Kerberos principals, keytabs where used |
 | Iceberg catalog access | Polaris-supported OAuth2/OIDC or approved Polaris principal model |
-| Object storage access | Ceph RGW service accounts unless the selected Ceph RGW deployment supports a verified external identity integration |
+| Object storage access | Ceph RGW service credentials (RGW users) unless the selected Ceph deployment supports a verified external identity integration |
 | Ranger policy administration | FreeIPA-backed users/groups and Ranger admin roles |
 | Atlas metadata access | FreeIPA-backed LDAP users/groups |
 
@@ -191,7 +191,7 @@ Existing service ports from earlier increments remain in place, but their TLS an
 
 | Service | Hardened behavior |
 |---|---|
-| Ceph RGW | TLS chain trusted; SSE enabled on sensitive buckets |
+| Ceph RGW | TLS chain trusted; encryption-at-rest enabled on sensitive buckets |
 | Polaris | HTTPS with trusted certificate; OIDC integration where supported |
 | Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.2.2 |
 | Trino | HTTPS coordinator endpoint; Keycloak/OIDC client auth |
@@ -321,7 +321,7 @@ Issue certificates for:
 
 | Hostname | Service |
 |---|---|
-| `Ceph RGW.stratus.local` and Ceph RGW node names | Ceph RGW S3 and console endpoints |
+| `object-store.stratus.local` | Ceph RGW S3 endpoint (already issued in Increment 1 — see [increment1_ceph.md](increment1_ceph.md)) |
 | `polaris.stratus.local` | Polaris REST catalog |
 | `airflow.stratus.local` | Airflow UI/API |
 | `trino-coordinator.stratus.local` | Trino coordinator UI/JDBC |
@@ -614,7 +614,7 @@ Spark ──HTTPS REST──► Polaris
 Spark ──HTTPS S3 API──► Ceph RGW
 ```
 
-Airflow authenticates operators and API clients. It should not become the source of data authorization. Data access still flows through Spark, Polaris, S3 credentials, Ranger/Trino for query, and Atlas/Ranger governance metadata.
+Airflow authenticates operators and API clients. It should not become the source of data authorization. Data access still flows through Spark, Polaris, Ceph RGW credentials, Ranger/Trino for query, and Atlas/Ranger governance metadata.
 
 ### Polaris authentication
 
@@ -645,12 +645,12 @@ Polaris is the catalog control point. It decides which catalog, namespace, and t
 
 ## 12. Ceph RGW Encryption and Credential Posture
 
-Increment 7 does not replace Ceph RGW S3 access keys unless the selected Ceph RGW deployment supports an approved external identity integration for the platform. It does harden their posture:
+Increment 7 does not replace Ceph RGW S3 access keys unless the selected Ceph deployment supports an approved external identity integration for the platform. It does harden their posture:
 
-- Ceph RGW TLS certificates are FreeIPA-issued and trusted
-- Ceph RGW service accounts remain named per service
+- RGW TLS certificates (`object-store.stratus.local`) are FreeIPA-issued and trusted
+- RGW users (`svc-spark`, `svc-polaris`, `svc-airflow`, `svc-trino`) remain named per service
 - credentials have owners and rotation procedures
-- `stratus-gold` and `stratus-platform` use server-side encryption
+- `stratus-gold` and `stratus-platform` use the approved Ceph/RGW encryption-at-rest model
 - verification confirms Spark and Trino still read/write/query expected Iceberg tables after TLS and encryption changes
 
 Do not imply Kerberos replaces S3 access keys unless that integration is explicitly implemented and verified.
@@ -662,12 +662,12 @@ Spark / Trino / Polaris / Airflow
       │ HTTPS S3 API
       ▼
 Ceph RGW
-      │ bucket policy + service account
+      │ bucket policy + RGW user credential
       ▼
 Iceberg data, metadata, manifests, platform objects
 ```
 
-Ceph RGW enforces object-level service-account policy. It does not know the human analyst who submitted a Trino query unless a future integration explicitly carries that identity into object-storage authorization. Human-level data authorization in this phase is enforced at Trino/Ranger and Polaris/catalog layers.
+Ceph RGW enforces object-level, per-RGW-user policy. It does not know the human analyst who submitted a Trino query unless a future integration explicitly carries that identity into object-storage authorization. Human-level data authorization in this phase is enforced at Trino/Ranger and Polaris/catalog layers.
 
 ---
 
@@ -681,7 +681,7 @@ Increment 7 must retire lab bootstrap credentials from normal operation.
 | Keycloak bootstrap admin | emergency admin only; not used by services |
 | Keycloak client secrets | stored in secret manager or protected host files |
 | Kerberos keytabs | owner-only permissions; rotation procedure |
-| Ceph RGW service account secrets | named owner and rotation procedure |
+| Ceph RGW service credential secrets | named owner and rotation procedure |
 | Polaris bootstrap principal | disabled or locked away after service principals exist |
 | Airflow admin bootstrap user | replaced by Keycloak-authenticated platform admins |
 | Ranger/Atlas local lab users | removed or disabled after LDAP migration |
@@ -1141,8 +1141,8 @@ When all gates are checked, the Phase 1 batch, query, governance, and identity f
 - Apache Ranger: https://ranger.apache.org/
 - Apache Atlas: https://atlas.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
+- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)
