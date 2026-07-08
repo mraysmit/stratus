@@ -55,6 +55,7 @@ Every other component in the stack writes to or reads from object storage. Nothi
 - Service identities and scoped S3 credentials created for platform services (Spark, Polaris, Airflow, Trino)
 - Ceph Dashboard enabled for operational visibility
 - Ceph pool, CRUSH, placement group, and failure-domain assumptions documented for the deployment
+- Measured storage evidence bundle completed for concurrency, throughput, metadata-heavy behavior, small-file stress, request latency/error rates, capacity cost, and operator effort
 
 ### Verification
 
@@ -67,6 +68,13 @@ Every other component in the stack writes to or reads from object storage. Nothi
 | TLS | All connections enforce TLS; plaintext connection is rejected |
 | Credential isolation | Service identity A cannot read or write to a bucket it has no policy for |
 | RGW compatibility | Required S3 operations for Iceberg, Spark, Polaris, Airflow, and Trino are verified against the RGW endpoint |
+| Concurrent engine access | Spark write, Trino read, Polaris resolution, and operator S3 listing run together without stale reads, authz leakage, failed commits, or threshold breach |
+| Large scan/read throughput | Trino and Spark scan representative tables; sustained throughput, elapsed time, latency, retries, and bottleneck analysis are recorded |
+| Ingestion/write throughput | Spark writes representative bronze/silver data; multipart behavior, commit duration, latency, retries, and error rate are recorded |
+| Iceberg metadata behavior | Metadata-heavy table create/write/read/list behavior records object count, list latency, bucket-index health, manifest count, and snapshot-chain behavior |
+| Small-file/object-count stress | Small-file debt is generated and maintenance proves compaction/orphan cleanup reduces debt without destabilizing concurrent access |
+| Request latency/error budget | Mixed S3 operations record p50/p95/p99 latency, 4xx/5xx rate, timeout rate, and retry rate against declared thresholds |
+| Cost/capacity/operator model | Raw-to-usable capacity, growth assumptions, metadata overhead, expansion triggers, and operator effort are recorded and accepted |
 | Ceph health | `ceph status` reports a healthy cluster and RGW service health is visible |
 | Dashboard | Ceph Dashboard is accessible and shows expected cluster, pool, bucket, and daemon state |
 
@@ -91,7 +99,8 @@ Without Iceberg and a catalog, the storage layer is just buckets and files. Pola
 - A bronze Iceberg table created via Polaris to verify the end-to-end table creation path
 - A silver Iceberg table and a gold Iceberg table created to verify namespace isolation
 - `platform.quality_check_results` Iceberg table created in the platform namespace (schema per architecture §5.3)
-- Iceberg table maintenance operations verified via the Iceberg Java API: snapshot expiry, file compaction, orphan cleanup
+- Iceberg table maintenance operations verified via the Iceberg Java API using metadata-table driven thresholds for file count, average file size, snapshot-chain length, manifest count, delete-file count, and orphan-file count
+- Catalog production-readiness gates met for external Polaris metadata store, backup/restore, audit logging, HA/failover posture, and credential model
 
 ### Verification
 
@@ -130,7 +139,7 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 - An ingestion job: reads a CSV or JSON file from `stratus-landing`, writes it as an Iceberg table in `stratus-bronze`
 - A transformation job: reads from bronze, applies type normalisation and deduplication, writes to `stratus-silver`
 - A materialisation job: reads from silver, aggregates, writes a summary table to `stratus-gold`
-- A maintenance job: runs snapshot expiry and compaction on a target table using Spark actions
+- A metadata-driven maintenance job: inspects Iceberg metadata tables such as `files`, `snapshots`, `manifests`, and `history`; applies per-table policy; and runs snapshot expiry, rewrite/compaction, delete-file cleanup, or orphan cleanup only when thresholds are breached
 - A data quality job: runs schema conformance, completeness, and uniqueness checks on a dataset; writes results to `platform.quality_check_results`
 - A promotion gate: reads quality outcomes from `platform.quality_check_results` for a dataset run; blocks promotion if any blocking check failed
 
@@ -147,7 +156,7 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 | Quality job — fail | A dataset with nulls in a mandatory column produces a FAIL outcome with correct detail |
 | Promotion gate — pass | Dataset with all PASS outcomes is promoted |
 | Promotion gate — block | Dataset with a FAIL blocking outcome is not promoted; failure reason is recorded |
-| Maintenance job | Compaction reduces file count on a fragmented table; snapshot count is reduced by expiry |
+| Maintenance job | Compaction, snapshot expiry, delete-file cleanup, and orphan cleanup decisions are driven by Iceberg metadata-table signals and per-table thresholds |
 | Atlas lineage payload | Each job produces a lineage event payload (logged; not yet sent to Atlas) |
 
 ### Demonstrated outcome
@@ -171,7 +180,7 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
   - **Ingestion DAG** — detect new files in landing zone → run ingestion job → run quality checks → promote to bronze
   - **Bronze-to-silver DAG** — run transform job → run quality checks → run promotion gate → promote to silver
   - **Silver-to-gold DAG** — run materialisation job → run quality checks → promote to gold
-  - **Maintenance DAG** — daily: snapshot expiry + compaction for active tables; weekly: orphan file cleanup
+  - **Maintenance DAG** — scheduled trigger that queries Iceberg metadata tables, evaluates per-table thresholds, emits alerts for breached thresholds, and then runs snapshot expiry, compaction, delete-file cleanup, or orphan cleanup as policy requires
 - Each DAG emits structured success/failure events
 - Airflow alerts configured for job failure and Deadline Alert breach
 

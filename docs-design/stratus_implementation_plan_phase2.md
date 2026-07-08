@@ -4,7 +4,7 @@
 
 This document defines how Stratus Phase 2 is built and verified.
 
-Phase 1 establishes the governed batch lakehouse foundation: MinIO, Iceberg, Polaris, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, Keycloak, and operational readiness. Phase 2 adds the streaming and CDC layer on top of that foundation. It should not reopen Phase 1 architecture decisions unless the Phase 1 operational readiness gate found a blocking issue.
+Phase 1 establishes the governed batch lakehouse foundation: Ceph RGW, Iceberg, Polaris, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, Keycloak, and operational readiness. Phase 2 adds the streaming and CDC layer on top of that foundation. It should not reopen Phase 1 architecture decisions unless the Phase 1 operational readiness gate found a blocking issue.
 
 The Phase 2 goal is simple: **make governed data movement continuous where continuous movement is justified**. Batch remains the right tool for bounded workloads. Streaming is added for CDC, event streams, replay, low-latency ingestion, and stateful processing.
 
@@ -20,7 +20,7 @@ References:
 Phase 2 should not begin until:
 
 - Phase 1 operational acceptance has passed.
-- Polaris, Iceberg, MinIO, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are operational.
+- Polaris, Iceberg, Ceph RGW, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are operational.
 - The Phase 1 verification dataset can still run end to end.
 - Control-plane backup and restore procedures are tested.
 - Platform certificates and OIDC flows no longer require lab-only insecure settings.
@@ -178,7 +178,7 @@ Flink needs a stable event source. It should not be introduced as a generic comp
 
 - Flink cluster deployed on Linux with Podman or the approved runtime pattern.
 - JobManager and TaskManagers configured with TLS and trusted platform CA.
-- Checkpoint storage configured on MinIO or another approved durable path.
+- Checkpoint storage configured on Ceph RGW or another approved durable path.
 - Savepoint procedure documented.
 - Kafka connector installed for the selected Flink release.
 - Prometheus metrics enabled.
@@ -209,7 +209,7 @@ The platform has a working streaming runtime that can consume Kafka events conti
 
 ### What we are building
 
-Flink-to-Iceberg streaming ingestion using Apache Polaris as the catalog and MinIO as the object store.
+Flink-to-Iceberg streaming ingestion using Apache Polaris as the catalog and Ceph RGW as the object store.
 
 ### Why this comes fourth
 
@@ -218,7 +218,7 @@ Streaming compute must work before streaming table writes are introduced. Iceber
 ### What is delivered
 
 - Flink configured to resolve Iceberg tables through Apache Polaris.
-- Flink configured to write Iceberg data files to MinIO through approved service credentials.
+- Flink configured to write Iceberg data files to Ceph RGW through approved service credentials.
 - A streaming-owned bronze table populated from the verification CDC topic.
 - A streaming-owned silver table populated after lightweight validation and normalization.
 - One-writer-per-table ownership policy for streaming tables.
@@ -232,7 +232,7 @@ Streaming compute must work before streaming table writes are introduced. Iceber
 | Test | Pass condition |
 |---|---|
 | Catalog resolution | Flink resolves target tables through Polaris |
-| Write path | Flink writes Iceberg data files to approved MinIO locations |
+| Write path | Flink writes Iceberg data files to approved Ceph RGW locations |
 | Snapshot creation | streaming job creates new Iceberg snapshots after checkpoint commits |
 | Trino visibility | Trino sees committed streaming records after snapshot publication |
 | Restart safety | job restart does not duplicate committed records beyond the documented semantics |
@@ -347,7 +347,7 @@ Phase 2 is complete when:
 - [ ] Kafka Connect workers are running and connector state topics are protected.
 - [ ] Debezium captures the verification source snapshot and ongoing changes.
 - [ ] Flink consumes Kafka events with checkpointing, savepoints, metrics, and recovery.
-- [ ] Flink writes streaming-owned Iceberg tables through Polaris and MinIO.
+- [ ] Flink writes streaming-owned Iceberg tables through Polaris and Ceph RGW.
 - [ ] Trino can query committed streaming table snapshots.
 - [ ] Ranger policies govern streaming-created tables.
 - [ ] Atlas shows streaming table metadata, classifications, and lineage.
@@ -386,7 +386,7 @@ Phase 2 should hand off:
 - [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md) - Increment 11 streaming writes to Iceberg implementation plan
 - [increment12_atlas_event_lineage.md](increment12_atlas_event_lineage.md) - Increment 12 Atlas event bus and lineage automation implementation plan
 - [increment13_streaming_production_readiness.md](increment13_streaming_production_readiness.md) - Increment 13 streaming operations and production readiness checklist
-- [increment1_minio.md](increment1_minio.md) - Phase 1 storage foundation
+- [increment1_ceph.md](increment1_ceph.md) - Phase 1 storage foundation
 - [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) - Phase 1 table and catalog foundation
 - [increment3_spark.md](increment3_spark.md) - Phase 1 batch compute
 - [increment4_airflow.md](increment4_airflow.md) - Phase 1 orchestration

@@ -29,7 +29,7 @@ Before this readiness review begins:
 - Airflow is deployed using the approved Airflow 3.x topology from Increment 4 and hardened by Increment 7.
 - FreeIPA and Keycloak are the active identity sources for users, groups, certificates, and OIDC flows.
 - Ranger policies reference approved FreeIPA groups, not local lab placeholder users.
-- MinIO, Polaris, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are reachable over approved encrypted protocols.
+- Ceph RGW, Polaris, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are reachable over approved encrypted protocols.
 - The permanent Phase 1 verification dataset exists and can be safely recreated.
 - Runbooks and operational ownership are assigned before signoff.
 
@@ -41,7 +41,7 @@ This readiness gate depends on the same upstream projects referenced by the incr
 
 At minimum, review current documentation for:
 
-- MinIO server and `mc`
+- Ceph, Ceph RGW, and the approved S3-compatible client used by operators
 - Apache Iceberg
 - Apache Polaris
 - Apache Spark
@@ -66,7 +66,7 @@ Current Phase 1 target baseline as of 2026-07-05:
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| MinIO / AIStor | latest supported release approved for the environment, pinned by image digest |
+| Ceph RGW | latest supported release approved for the environment, pinned by image digest |
 | Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
 | FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
 
@@ -123,12 +123,12 @@ Ranger policy checks     Atlas metadata and lineage
   |                       ^
   |                       | HTTPS REST lineage publication
   v                       |
-Trino ----Iceberg REST----> Polaris ----S3 API----> MinIO
+Trino ----Iceberg REST----> Polaris ----S3 API----> Ceph RGW
   ^                          ^
   |                          |
   | JDBC verification        | Iceberg REST
   |                          |
-Airflow ----spark-submit----> Spark ----S3 API----> MinIO
+Airflow ----spark-submit----> Spark ----S3 API----> Ceph RGW
 ```
 
 Acceptance requires proving the system behavior, not merely proving that each container starts. Every readiness check should identify which service, protocol, credential, and data contract it exercises.
@@ -139,9 +139,9 @@ Acceptance requires proving the system behavior, not merely proving that each co
 
 | Service | Protocols used | Required acceptance evidence |
 |---|---|---|
-| MinIO | HTTPS S3 API, MinIO Console HTTPS | buckets exist, TLS validates without insecure flags, service-account policies isolate landing/bronze/silver/gold/platform zones |
-| Apache Polaris | HTTPS REST catalog API, JDBC or metadata database connection if externalized | `stratus` catalog resolves namespaces and tables, service principals are scoped, Iceberg metadata locations point to approved MinIO paths |
-| Apache Spark | Spark cluster protocol, Iceberg REST, HTTPS S3 API, JVM truststore | ingestion, transform, materialisation, quality, and maintenance jobs run through Polaris and MinIO |
+| Ceph RGW | HTTPS S3 API, Ceph Dashboard HTTPS | buckets exist, TLS validates without insecure flags, service-account policies isolate landing/bronze/silver/gold/platform zones |
+| Apache Polaris | HTTPS REST catalog API, JDBC or metadata database connection if externalized | `stratus` catalog resolves namespaces and tables, service principals are scoped, Iceberg metadata locations point to approved Ceph RGW paths |
+| Apache Spark | Spark cluster protocol, Iceberg REST, HTTPS S3 API, JVM truststore | ingestion, transform, materialisation, quality, and maintenance jobs run through Polaris and Ceph RGW |
 | Apache Airflow 3.x | HTTPS UI/API, Airflow public API, metadata database protocol, `spark-submit` | API server, DAG processor, scheduler, and triggerer are healthy; DAGs run, retry, alert, and enforce quality gates |
 | Trino | HTTPS client protocol/JDBC, Iceberg REST, Ranger plugin REST, HTTPS S3 API through connector | curated SQL queries match Spark outputs; unauthorized queries are denied; Trino does not bypass Polaris |
 | Apache Atlas | HTTPS REST API, embedded or configured graph/search stores | metadata entities, lineage, classifications, ownership, and quality attributes are searchable and current |
@@ -227,9 +227,9 @@ Readiness requires a restore drill, not only a backup configuration.
 
 | Area | Backup requirement | Restore acceptance |
 |---|---|---|
-| MinIO object data | erasure-coded storage plus operational backup or replication strategy for critical buckets | verification dataset remains readable after node or drive failure drill, or after restoring from the approved backup path |
-| Iceberg metadata | table metadata and snapshots retained according to policy | an older snapshot can be inspected and a controlled rollback procedure is documented |
-| Polaris | catalog metadata store backup | restored Polaris resolves existing table identifiers to the same MinIO locations |
+| Ceph RGW object data | erasure-coded storage plus operational backup or replication strategy for critical buckets | verification dataset remains readable after node or drive failure drill, or after restoring from the approved backup path |
+| Iceberg metadata | table metadata files, manifests, manifest lists, snapshots, and delete files retained according to policy | an older snapshot can be inspected, manifests resolve, and a controlled rollback procedure is documented |
+| Polaris | catalog metadata store backup | restored Polaris resolves existing table identifiers to the same Ceph RGW table metadata locations as the accepted restore point |
 | Airflow | PostgreSQL metadata backup plus DAG repository backup | restored Airflow lists DAGs, preserves relevant run history, and triggers the verification DAG |
 | Spark | job artifact repository and configuration backup | restored job artifacts can be submitted by Airflow |
 | Trino | catalog, security, and coordinator configuration backup | restored Trino can query the gold verification table and enforce Ranger policy |
@@ -249,6 +249,23 @@ The readiness drill must prove:
 - restored services start cleanly
 - restored services can run the end-to-end verification path
 - restored identity and policy state does not silently broaden access
+- restored Polaris catalog state, Iceberg metadata files, manifests, and object data resolve to the same accepted table snapshot
+- restored Polaris table metadata locations match the expected Iceberg `metadata/*.metadata.json` files for the accepted restore point
+- restored manifests and manifest lists reference object files that exist in Ceph RGW
+- rollback to a known-good Iceberg snapshot is executable after a logical bad write
+
+### Coupled Iceberg recovery drills
+
+Iceberg recovery must be tested as a coupled catalog, metadata, and object-data workflow. The following drills are required before production signoff:
+
+| Drill | Required evidence |
+|---|---|
+| Catalog corruption | Restore Polaris metadata and prove existing table identifiers resolve to the expected metadata file locations. |
+| Missing metadata file | Remove or quarantine a non-production table metadata file, prove detection, restore it, and validate the table can be read at the accepted snapshot. |
+| Missing manifest or manifest list | Remove or quarantine a non-production manifest artifact, prove read/planning failure is detected, restore it, and validate table planning succeeds. |
+| Object-store unavailability | Make the Ceph RGW endpoint unavailable in a controlled test and prove Spark, Trino, Polaris, Airflow, and alerts fail predictably without corrupting table state. |
+| Logical bad write | Commit a controlled bad write, roll back to a known-good Iceberg snapshot, and prove Spark and Trino read the restored result consistently. |
+| Catalog/object mismatch | Restore catalog metadata and object data from intentionally mismatched points in a non-production drill, prove validation fails, then restore both to a consistent point. |
 
 ---
 
@@ -266,8 +283,8 @@ Operators must be able to answer four questions quickly:
 | Dashboard | Required signals |
 |---|---|
 | Platform overview | service health, active incidents, backup age, certificate expiry, failed DAG count |
-| MinIO | node health, drive health, capacity, request error rate, bucket growth by zone |
-| Polaris and Iceberg | catalog latency, auth failures, table count, metadata growth, failed table resolutions |
+| Ceph RGW | node health, drive health, capacity, request error rate, bucket growth by zone |
+| Polaris and Iceberg | catalog latency, auth failures, table count, metadata growth, failed table resolutions, per-table maintenance policy version, file count, small-file count, average file size, snapshot chain length, manifest count, delete-file count, orphan-file count, last maintenance action, orphan cleanup result |
 | Spark | application status, duration, executor failures, failed stages, event log availability |
 | Airflow 3.x | API server health, scheduler heartbeat, DAG processor heartbeat, triggerer health, DAG import errors, failed tasks, Deadline Alert breaches |
 | Trino | query latency, failed queries, queued queries, worker health, Ranger plugin errors |
@@ -278,9 +295,17 @@ Operators must be able to answer four questions quickly:
 
 ### Required alerts
 
-- MinIO node or drive unavailable
+- Ceph RGW node or drive unavailable
 - bucket capacity threshold breached
 - Polaris unavailable or elevated 5xx response rate
+- Polaris table metadata location mismatch after restore validation
+- Iceberg file-count or small-file-count threshold breached for a governed table
+- Iceberg average file size below table policy threshold
+- Iceberg snapshot-chain length above table policy threshold
+- Iceberg manifest count or metadata-file growth above table policy threshold
+- Iceberg delete-file count above table policy threshold
+- Iceberg orphan-file count or orphan cleanup failure above table policy threshold
+- Iceberg maintenance skipped because no table-specific policy exists
 - Spark job failure rate above threshold
 - Airflow scheduler heartbeat stale
 - Airflow DAG processor heartbeat stale
@@ -324,10 +349,10 @@ Logs must not print passwords, access keys, tokens, keytabs, private keys, or fu
 | FreeIPA identity | users, groups, hosts, service principals, keytabs, and CA state are backed up and documented |
 | Keycloak OIDC | tokens validate issuer, audience, signature, expiry, and group claims |
 | Ranger authorization | policies reference FreeIPA groups and enforce access through Trino |
-| MinIO service policy | service accounts have the minimum object-storage access needed for their platform role |
+| Ceph RGW service policy | service accounts have the minimum object-storage access needed for their platform role |
 | Secret handling | secrets are stored in approved protected files or secret manager, not in source code or logs |
 | Bootstrap retirement | lab bootstrap users, passwords, and local placeholder accounts are disabled or break-glass only |
-| Rotation | keytabs, service account keys, Keycloak client secrets, and MinIO credentials have tested rotation runbooks |
+| Rotation | keytabs, service account keys, Keycloak client secrets, and S3 credentials have tested rotation runbooks |
 | Audit | privileged access, policy changes, query denies, quality overrides, and restore actions are auditable |
 
 Security acceptance must include both positive and negative tests. A user in an approved group must succeed, and a user outside the approved group must be denied with an auditable reason.
@@ -369,7 +394,7 @@ Every Phase 1 service must have a named owner, escalation path, and runbook. The
 | Certificate renewal | issuing authority, renewal steps, trust distribution, rollback |
 | Keytab rotation | principals affected, rotation steps, validation steps |
 | Keycloak client secret rotation | clients affected, rotation order, validation steps |
-| MinIO service credential rotation | access key owner, policy mapping, dependent services |
+| Ceph RGW service credential rotation | access key owner, policy mapping, dependent services |
 | Airflow DAG failure | triage, retry, backfill, clearing task state, escalation |
 | Spark job failure | event log review, failed stage triage, rerun procedure |
 | Trino query failure | query id lookup, catalog check, Ranger policy check |
@@ -398,7 +423,9 @@ The following drills must be run before Phase 1 signoff:
 | FreeIPA group propagation | group membership change reaches Keycloak and Ranger within the approved window |
 | Airflow DAG import error | alert fires and the failed DAG does not silently disappear from operational visibility |
 | Spark job retry | transient failure retries according to policy and records final status |
-| MinIO node or drive failure | service remains within expected erasure-code tolerance, or restore path is executed |
+| Ceph RGW node or drive failure | service remains within expected erasure-code tolerance, or restore path is executed |
+| Catalog/object-store consistency restore | restored Polaris metadata, Iceberg metadata files, manifests, and Ceph RGW object data resolve to a consistent table snapshot |
+| Iceberg failure recovery | catalog corruption, missing metadata file, missing manifest file, accidental object deletion, logical bad write, rollback to known-good snapshot, and object-store unavailability scenarios have documented rollback or restore evidence |
 | Control-plane restore | restored Polaris, Airflow, Ranger, Atlas, FreeIPA, and Keycloak support the verification workflow |
 | Credential rotation | one non-production service credential is rotated and dependent service validation passes |
 | Backup age alert | stale or missing backup condition raises an alert |
@@ -420,11 +447,13 @@ Phase 1 readiness does not require final production sizing, but it does require 
 
 | Area | Smoke check |
 |---|---|
-| MinIO | ingest and read the verification dataset plus a larger synthetic file without error; capacity dashboard updates |
+| Ceph RGW | ingest and read the verification dataset plus a larger synthetic file without error; capacity dashboard updates |
+| Ceph RGW metadata-heavy behavior | create, list, read, update, and clean up representative Iceberg metadata/object layouts without elevated error rate or unexpected latency |
 | Spark | run the full pipeline with a scaled verification dataset and record duration and resource use |
 | Airflow | run concurrent DAGs at the expected initial operating level without scheduler starvation |
 | Trino | run concurrent read-only analytical queries over gold data and record latency and failure rate |
 | Polaris | resolve tables repeatedly from Spark and Trino without elevated latency or auth failures |
+| Concurrent catalog and object-store access | run Spark writes, Trino reads, Polaris table resolutions, and operator S3 listing checks together and record baseline error rate and latency |
 | Atlas | publish lineage for repeated verification runs without stale metadata |
 | Ranger | evaluate policy decisions under concurrent Trino queries without plugin errors |
 | Observability | metrics and logs remain queryable after the smoke test |
@@ -489,9 +518,11 @@ Phase 1 is production-ready when all of the following are true:
 - [ ] Keycloak realm, clients, federation, token claims, and key rotation are verified
 - [ ] no normal operational flow requires insecure TLS flags
 - [ ] bootstrap credentials and local lab users are removed, disabled, or documented as break-glass only
-- [ ] certificate, keytab, MinIO credential, and Keycloak client-secret rotation runbooks exist
+- [ ] certificate, keytab, Ceph RGW credential, and Keycloak client-secret rotation runbooks exist
 - [ ] backup and restore drill proves restored services can run the verification workflow
+- [ ] backup and restore drill proves catalog metadata, Iceberg metadata files, manifests, and object data are recovered consistently
 - [ ] observability dashboards expose service health, pipeline state, quality state, policy state, and backup age
+- [ ] Iceberg metadata health signals are visible for file count, average file size, snapshots, manifests, delete files, and orphan cleanup
 - [ ] incident drills are complete and evidence is attached
 - [ ] runbooks have named owners and escalation paths
 - [ ] open risks are documented, owned, and accepted
@@ -525,7 +556,7 @@ After this gate passes, Phase 1 can onboard controlled production datasets or pr
 
 ### Restore drill starts services but verification fails
 
-- Confirm restored Polaris metadata resolves tables to the original MinIO paths.
+- Confirm restored Polaris metadata resolves tables to the original Ceph RGW paths.
 - Confirm restored Airflow DAG code matches the restored metadata database state.
 - Confirm restored Ranger policies reference current FreeIPA groups.
 - Confirm restored Keycloak signing keys and clients match service expectations.
@@ -542,7 +573,7 @@ After this gate passes, Phase 1 can onboard controlled production datasets or pr
 
 - Main architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
 - Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Increment 1 - MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 - Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 - Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 - Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 - Airflow: [increment4_airflow.md](increment4_airflow.md)

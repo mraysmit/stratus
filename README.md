@@ -37,7 +37,7 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
                                           │
                                           ▼
                           ┌───────────────────────────────┐
-                          │       MinIO Object Storage    │
+                          │       Ceph RGW Object Storage │
                           │  raw files + Iceberg data /   │
                           │  metadata files + manifests   │
                           └───────────────────────────────┘
@@ -62,7 +62,7 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 
 | Component | Role |
 |---|---|
-| **MinIO** | S3-compatible durable object storage for raw files, Iceberg data and metadata |
+| **Ceph RGW** | S3-compatible durable object storage for raw files, Iceberg data and metadata |
 | **Apache Iceberg** | Open table format — schema/partition evolution, snapshots, time travel, multi-engine access |
 | **Apache Polaris** | Central REST catalog — multi-engine metadata control point for Spark, Flink, Trino |
 | **Apache Spark** | Batch ETL/ELT, backfills, historical reprocessing, quality checks, silver/gold materialisation |
@@ -105,7 +105,7 @@ Overrides are explicit, require a named data steward, and are written as auditab
 ## Architecture Principles
 
 1. **Open formats over proprietary lock-in** — Iceberg tables on object storage, not vendor-specific formats.
-2. **Storage and table semantics are separated** — MinIO stores files; Iceberg provides the semantic contract.
+2. **Storage and table semantics are separated** — Ceph RGW stores files through the S3 API; Iceberg provides the semantic contract.
 3. **Streaming and batch are separate compute concerns** — Flink for unbounded streams, Spark for bounded workloads.
 4. **Governance is first-class** — Metadata, lineage, ownership, and classification are built in from day one.
 5. **Orchestration is not streaming** — Airflow orchestrates finite workflows; Flink runs continuous pipelines.
@@ -115,7 +115,7 @@ Overrides are explicit, require a named data steward, and are written as auditab
 
 The design explicitly separates three planes:
 
-- **Data Plane** — MinIO, Iceberg tables, Apache Polaris, Spark, Flink, Kafka + Kafka Connect + Debezium, Trino, Firebolt
+- **Data Plane** — Ceph RGW, Iceberg tables, Apache Polaris, Spark, Flink, Kafka + Kafka Connect + Debezium, Trino, Firebolt
 - **Metadata & Governance Plane** — Atlas, Ranger, glossary, lineage, classification, stewardship
 - **Orchestration & Operations Plane** — Airflow, retries, alerts, maintenance scheduling, promotion gates
 
@@ -133,7 +133,7 @@ The platform is Linux-only with no Windows dependencies.
 
 | Phase | Delivers | Outcome |
 |---|---|---|
-| **1 — Foundation** | MinIO, Iceberg, Polaris, Spark, Trino, Airflow, Atlas, Ranger, FreeIPA, Keycloak, bronze/silver/gold | Governed batch lakehouse |
+| **1 — Foundation** | Ceph RGW, Iceberg, Polaris, Spark, Trino, Airflow, Atlas, Ranger, FreeIPA, Keycloak, bronze/silver/gold | Governed batch lakehouse |
 | **2 — Streaming** | Kafka, Kafka Connect, Debezium, Flink, CDC pipelines, Atlas on platform Kafka, lineage automation | Near-real-time ingestion |
 | **3 — Serving** | Firebolt Core, curated business marts, semantic views, domain data products | Low-latency consumption |
 | **4 — Self-Service** | Policy-driven classification, dataset discovery, domain templates | Scalable operating model |

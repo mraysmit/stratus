@@ -7,7 +7,7 @@ This document is the technical implementation plan for Increment 6 of the Stratu
 Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classification plane, and Apache Ranger as the access policy and audit plane. When this increment is complete, Iceberg datasets created by Spark and queried through Trino have Atlas entities with ownership, schema, zone, quality status, and lineage. Ranger policies enforce zone and classification-based access through Trino. A Java verification suite confirms that governance is not decorative: metadata is searchable, lineage exists, classifications can be applied, Trino allow/deny behavior follows Ranger policy, and Ranger audit logs record the decisions.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
+- Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark jobs create and maintain bronze, silver, and gold Iceberg tables
 - Increment 4 complete — Airflow orchestrates Spark jobs, quality checks, promotion gates, and maintenance
@@ -74,7 +74,7 @@ trino-coordinator.stratus.local
 └──────────────────────────────────────────────┘
           │
           ▼
-Polaris REST catalog → MinIO Iceberg data
+Polaris REST catalog → Ceph RGW Iceberg data
 ```
 
 Atlas is not an enforcement layer. Ranger is the enforcement layer. Increment 6 must prove the loop:
@@ -211,6 +211,8 @@ atlas.cluster.name=stratus-lab
 ### Start Atlas
 
 ```bash
+export STRATUS_RANGER_DB_PASSWORD=<ranger-db secret from approved secret store>
+
 podman run -d \
   --name atlas \
   --hostname atlas.stratus.local \
@@ -248,7 +250,7 @@ podman run -d \
   --hostname ranger-postgres \
   --network host \
   -e POSTGRES_USER=ranger \
-  -e POSTGRES_PASSWORD=ranger \
+  -e POSTGRES_PASSWORD="$STRATUS_RANGER_DB_PASSWORD" \
   -e POSTGRES_DB=ranger \
   -v /data/ranger/postgres:/var/lib/postgresql/data:z \
   --restart unless-stopped \
@@ -266,10 +268,10 @@ RANGER_DB_HOST=localhost
 RANGER_DB_PORT=5432
 RANGER_DB_NAME=ranger
 RANGER_DB_USER=ranger
-RANGER_DB_PASSWORD=ranger
+RANGER_DB_PASSWORD=<ranger-db secret from approved secret store>
 
 RANGER_ADMIN_USER=admin
-RANGER_ADMIN_PASSWORD=change-me-before-use
+RANGER_ADMIN_PASSWORD=<bootstrap secret from approved secret store>
 RANGER_HTTP_PORT=6080
 ```
 
@@ -320,11 +322,11 @@ podman run -d \
 ### Verify Ranger
 
 ```bash
-curl -s -u admin:change-me-before-use \
+curl -s -u "${RANGER_ADMIN_USER}:${RANGER_ADMIN_PASSWORD}" \
   http://ranger.stratus.local:6080/service/public/v2/api/service
 ```
 
-Expected: a JSON response. Open `http://ranger.stratus.local:6080` and log in with the lab admin user.
+Expected: a JSON response. Open `http://ranger.stratus.local:6080` and log in with the bootstrap admin user. Increment 7 replaces local/bootstrap authentication with FreeIPA-backed identity.
 
 ---
 
@@ -382,7 +384,7 @@ governance/atlas/stratus-atlas-types.json
 Register it:
 
 ```bash
-curl -s -u admin:change-me-before-use \
+curl -s -u "${STRATUS_ATLAS_USERNAME}:${STRATUS_ATLAS_PASSWORD}" \
   -X POST http://atlas.stratus.local:21000/api/atlas/v2/types/typedefs \
   -H "Content-Type: application/json" \
   --data @governance/atlas/stratus-atlas-types.json
@@ -802,10 +804,10 @@ class GovernanceVerificationTest {
 ```bash
 export STRATUS_ATLAS_BASE_URL=http://atlas.stratus.local:21000
 export STRATUS_ATLAS_USERNAME=admin
-export STRATUS_ATLAS_PASSWORD=change-me-before-use
+export STRATUS_ATLAS_PASSWORD=<bootstrap secret from approved secret store>
 export STRATUS_RANGER_BASE_URL=http://ranger.stratus.local:6080
 export STRATUS_RANGER_USERNAME=admin
-export STRATUS_RANGER_PASSWORD=change-me-before-use
+export STRATUS_RANGER_PASSWORD=<bootstrap secret from approved secret store>
 export STRATUS_TRINO_JDBC_URL=jdbc:trino://trino-coordinator.stratus.local:8080/stratus
 export STRATUS_TRINO_ALLOWED_USER=analyst_crm
 export STRATUS_TRINO_DENIED_USER=analyst_crm
@@ -954,7 +956,7 @@ When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardeni
 ### Metadata publisher leaks secrets into Atlas
 
 - Stop the publisher and inspect the payload mapping
-- Atlas entities must not contain MinIO secrets, Polaris client secrets, keytabs, or JDBC passwords
+- Atlas entities must not contain Ceph RGW secrets, Polaris client secrets, keytabs, or JDBC passwords
 - Rotate any leaked credential and remove the attribute from Atlas
 
 ---
@@ -969,7 +971,7 @@ When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardeni
 - Trino documentation: https://trino.io/docs/current/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)

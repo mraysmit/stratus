@@ -9,7 +9,7 @@ Increment 7 hardens the working platform from Increments 1 through 6. It introdu
 This is a migration and hardening increment, not a greenfield install. The existing platform must continue to work after identity is made real.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO storage running with all buckets and service accounts
+- Increment 1 complete — Ceph RGW storage running with all buckets and service accounts
 - Increment 2 complete — Polaris and Iceberg tables operational
 - Increment 3 complete — Spark jobs and quality gates operational
 - Increment 4 complete — Airflow DAGs operational
@@ -26,7 +26,7 @@ This is a migration and hardening increment, not a greenfield install. The exist
 - DNS resolution:
   - `ipa.stratus.local`
   - `keycloak.stratus.local`
-  - `minio.stratus.local`
+  - `Ceph RGW.stratus.local`
   - `polaris.stratus.local`
   - `airflow.stratus.local`
   - `trino-coordinator.stratus.local`
@@ -109,7 +109,7 @@ Increment 7 is primarily a protocol integration increment. The platform succeeds
 | LDAP / LDAPS | Keycloak, Ranger usersync, Atlas, SSSD | user and group lookup from FreeIPA |
 | OIDC / OAuth2 | browser users, CLI clients, Trino, Airflow, Polaris where supported | token-based authentication for REST-facing services |
 | HTTPS / TLS | every service endpoint | transport encryption and server identity verification |
-| S3 API over HTTPS | Spark, Trino, Polaris, Airflow, verification tools | object access to MinIO-managed Iceberg data and platform objects |
+| S3 API over HTTPS | Spark, Trino, Polaris, Airflow, verification tools | object access to Ceph RGW-managed Iceberg data and platform objects |
 | Iceberg REST catalog over HTTPS | Spark, Trino, verification tools | namespace and table metadata resolution through Polaris |
 | Ranger plugin policy REST | Trino coordinator to Ranger Admin | policy download and refresh |
 | Ranger audit | Trino/Ranger plugin to audit destination | allowed and denied access audit records |
@@ -124,9 +124,9 @@ DNS, certificates, and Kerberos are coupled. The hostname used by a client must 
 | Host enrollment | HTTPS, LDAP, Kerberos, DNS | platform hosts join FreeIPA, receive identity configuration, and resolve users through SSSD |
 | User login to Trino | HTTPS, OIDC, LDAP | user authenticates to Keycloak; Keycloak reads FreeIPA user/groups; Trino accepts OIDC-authenticated session |
 | Trino query authorization | JDBC/HTTPS, Ranger REST, LDAP-derived groups | Trino executes the query only after Ranger policy permits the authenticated user and group set |
-| Trino table resolution | Iceberg REST over HTTPS | Trino resolves schemas, tables, and snapshots from Polaris, not from raw MinIO paths |
-| Trino data read | S3 API over HTTPS | Trino reads Iceberg data and metadata files from MinIO using the approved service credential |
-| Spark job execution | Kerberos where enabled, Iceberg REST, S3 API | Airflow submits Spark jobs under the approved service identity; Spark resolves tables through Polaris and reads/writes MinIO |
+| Trino table resolution | Iceberg REST over HTTPS | Trino resolves schemas, tables, and snapshots from Polaris, not from raw Ceph RGW paths |
+| Trino data read | S3 API over HTTPS | Trino reads Iceberg data and metadata files from Ceph RGW using the approved service credential |
+| Spark job execution | Kerberos where enabled, Iceberg REST, S3 API | Airflow submits Spark jobs under the approved service identity; Spark resolves tables through Polaris and reads/writes Ceph RGW |
 | Airflow operator access | HTTPS, OIDC | operators authenticate through Keycloak before viewing DAGs, task logs, and API state |
 | Ranger user sync | LDAPS | Ranger imports FreeIPA users and groups; policies target groups, not local users |
 | Atlas user access | LDAPS, HTTPS | Atlas authenticates users through FreeIPA and serves metadata over HTTPS |
@@ -139,7 +139,7 @@ DNS, certificates, and Kerberos are coupled. The hostname used by a client must 
 | Browser or BI client to platform | always HTTPS; user identity comes from Keycloak OIDC |
 | Platform service to identity provider | LDAPS or HTTPS only; no plaintext LDAP binds across the network |
 | Compute engine to Polaris | HTTPS; catalog access must authenticate and must not bypass Polaris |
-| Compute/query engine to MinIO | HTTPS S3 API; no direct filesystem access to object data |
+| Compute/query engine to Ceph RGW | HTTPS S3 API; no direct filesystem access to object data |
 | Trino to Ranger | HTTPS in the hardened target state; policy refresh failure should fail closed for protected resources |
 | Container to host trust store | containers must mount or bake the FreeIPA CA; insecure flags are not acceptable |
 
@@ -164,7 +164,7 @@ Increment 7 does not collapse every credential into one mechanism. That would be
 | Human access to UIs and SQL | Keycloak OIDC backed by FreeIPA |
 | Linux host and service identity | FreeIPA, SSSD, Kerberos principals, keytabs where used |
 | Iceberg catalog access | Polaris-supported OAuth2/OIDC or approved Polaris principal model |
-| Object storage access | MinIO service accounts unless the selected MinIO/AIStor deployment supports a verified external identity integration |
+| Object storage access | Ceph RGW service accounts unless the selected Ceph RGW deployment supports a verified external identity integration |
 | Ranger policy administration | FreeIPA-backed users/groups and Ranger admin roles |
 | Atlas metadata access | FreeIPA-backed LDAP users/groups |
 
@@ -191,7 +191,7 @@ Existing service ports from earlier increments remain in place, but their TLS an
 
 | Service | Hardened behavior |
 |---|---|
-| MinIO | TLS chain trusted; SSE enabled on sensitive buckets |
+| Ceph RGW | TLS chain trusted; SSE enabled on sensitive buckets |
 | Polaris | HTTPS with trusted certificate; OIDC integration where supported |
 | Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.2.2 |
 | Trino | HTTPS coordinator endpoint; Keycloak/OIDC client auth |
@@ -321,7 +321,7 @@ Issue certificates for:
 
 | Hostname | Service |
 |---|---|
-| `minio.stratus.local` and MinIO node names | MinIO S3 and console endpoints |
+| `Ceph RGW.stratus.local` and Ceph RGW node names | Ceph RGW S3 and console endpoints |
 | `polaris.stratus.local` | Polaris REST catalog |
 | `airflow.stratus.local` | Airflow UI/API |
 | `trino-coordinator.stratus.local` | Trino coordinator UI/JDBC |
@@ -588,10 +588,10 @@ Ranger plugin ──HTTPS REST──► Ranger Admin
 Trino Iceberg connector ──HTTPS REST──► Polaris
       │ table metadata
       ▼
-Trino workers ──HTTPS S3 API──► MinIO
+Trino workers ──HTTPS S3 API──► Ceph RGW
 ```
 
-The user identity used for authorization is the authenticated Trino user. The MinIO credential used for object reads is still the approved Trino service credential unless a future object-storage identity integration replaces it. This distinction is important: Ranger governs user access at the query layer; MinIO bucket policy governs service-level object access.
+The user identity used for authorization is the authenticated Trino user. The Ceph RGW credential used for object reads is still the approved Trino service credential unless a future object-storage identity integration replaces it. This distinction is important: Ranger governs user access at the query layer; Ceph RGW bucket policy governs service-level object access.
 
 ### Airflow authentication
 
@@ -611,10 +611,10 @@ Operator browser ──HTTPS/OIDC──► Airflow UI
 Airflow scheduler ──local metadata DB protocol──► Airflow PostgreSQL
 Airflow task ──spark-submit / cluster protocol──► Spark
 Spark ──HTTPS REST──► Polaris
-Spark ──HTTPS S3 API──► MinIO
+Spark ──HTTPS S3 API──► Ceph RGW
 ```
 
-Airflow authenticates operators and API clients. It should not become the source of data authorization. Data access still flows through Spark, Polaris, MinIO credentials, Ranger/Trino for query, and Atlas/Ranger governance metadata.
+Airflow authenticates operators and API clients. It should not become the source of data authorization. Data access still flows through Spark, Polaris, S3 credentials, Ranger/Trino for query, and Atlas/Ranger governance metadata.
 
 ### Polaris authentication
 
@@ -636,38 +636,38 @@ Spark / Trino / verification client
 Polaris REST catalog
       │ table metadata locations
       ▼
-MinIO object storage
+Ceph RGW object storage
 ```
 
-Polaris is the catalog control point. It decides which catalog, namespace, and table metadata a principal can resolve. It is not the object store and should not hold MinIO root credentials.
+Polaris is the catalog control point. It decides which catalog, namespace, and table metadata a principal can resolve. It is not the object store and should not hold Ceph RGW root credentials.
 
 ---
 
-## 12. MinIO Encryption and Credential Posture
+## 12. Ceph RGW Encryption and Credential Posture
 
-Increment 7 does not replace MinIO S3 access keys unless the selected MinIO/AIStor deployment supports an approved external identity integration for the platform. It does harden their posture:
+Increment 7 does not replace Ceph RGW S3 access keys unless the selected Ceph RGW deployment supports an approved external identity integration for the platform. It does harden their posture:
 
-- MinIO TLS certificates are FreeIPA-issued and trusted
-- MinIO service accounts remain named per service
+- Ceph RGW TLS certificates are FreeIPA-issued and trusted
+- Ceph RGW service accounts remain named per service
 - credentials have owners and rotation procedures
 - `stratus-gold` and `stratus-platform` use server-side encryption
 - verification confirms Spark and Trino still read/write/query expected Iceberg tables after TLS and encryption changes
 
 Do not imply Kerberos replaces S3 access keys unless that integration is explicitly implemented and verified.
 
-MinIO protocol flow:
+Ceph RGW protocol flow:
 
 ```text
 Spark / Trino / Polaris / Airflow
       │ HTTPS S3 API
       ▼
-MinIO
+Ceph RGW
       │ bucket policy + service account
       ▼
 Iceberg data, metadata, manifests, platform objects
 ```
 
-MinIO enforces object-level service-account policy. It does not know the human analyst who submitted a Trino query unless a future integration explicitly carries that identity into object-storage authorization. Human-level data authorization in this phase is enforced at Trino/Ranger and Polaris/catalog layers.
+Ceph RGW enforces object-level service-account policy. It does not know the human analyst who submitted a Trino query unless a future integration explicitly carries that identity into object-storage authorization. Human-level data authorization in this phase is enforced at Trino/Ranger and Polaris/catalog layers.
 
 ---
 
@@ -681,7 +681,7 @@ Increment 7 must retire lab bootstrap credentials from normal operation.
 | Keycloak bootstrap admin | emergency admin only; not used by services |
 | Keycloak client secrets | stored in secret manager or protected host files |
 | Kerberos keytabs | owner-only permissions; rotation procedure |
-| MinIO service account secrets | named owner and rotation procedure |
+| Ceph RGW service account secrets | named owner and rotation procedure |
 | Polaris bootstrap principal | disabled or locked away after service principals exist |
 | Airflow admin bootstrap user | replaced by Keycloak-authenticated platform admins |
 | Ranger/Atlas local lab users | removed or disabled after LDAP migration |
@@ -1089,7 +1089,7 @@ When all gates are checked, the Phase 1 batch, query, governance, and identity f
 ### Spark jobs fail after certificate replacement
 
 - Confirm the Spark image or mounted truststore includes the FreeIPA CA
-- Confirm Polaris and MinIO certificates include correct SANs
+- Confirm Polaris and Ceph RGW certificates include correct SANs
 - Confirm Spark catalog and S3 client settings no longer disable certificate validation
 - Re-run the Increment 3 Spark verification suite
 
@@ -1142,7 +1142,7 @@ When all gates are checked, the Phase 1 batch, query, governance, and identity f
 - Apache Atlas: https://atlas.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
 - Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)

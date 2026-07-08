@@ -91,6 +91,9 @@ This section exists because "S3-compatible" is not specific enough for a product
 | S3-compatible client contract | Polaris, Iceberg, Spark, Trino, Airflow, and Java verification use an S3-style object API. | Required S3 operations pass through the verification suite. |
 | Iceberg table safety | Iceberg writes metadata and data files and relies on predictable read-after-write/list behavior. | Iceberg create/write/read/snapshot/maintenance tests pass through Polaris and Spark. |
 | Multipart upload behavior | Iceberg and Spark may use multipart upload for larger parquet files. | Multipart create, complete, abort, list parts, and retry behavior verified. |
+| Concurrent engine access | Spark, Trino, Polaris, and Airflow can all touch the storage layer during normal operation. | Concurrent read/write/list tests run without throttling, stale reads, or authorization leakage. |
+| Metadata-heavy Iceberg behavior | Iceberg creates many metadata files, manifests, and object listings as tables grow. | Object count, listing latency, bucket-index behavior, and metadata file growth are tested with representative table counts. |
+| Large scan and ingestion throughput | Storage must sustain initial batch ingestion and analytical scans without becoming the first bottleneck. | Baseline throughput, request latency, request error rate, and retry rate are recorded under Spark and Trino smoke loads. |
 | Path-style endpoint support | Internal DNS and lab deployments often use endpoint overrides rather than AWS-style virtual-hosted buckets. | Spark, Trino, Java SDK, and Polaris configs work with `STRATUS_S3_PATH_STYLE_ACCESS=true`. |
 | Service identity isolation | Platform services must not share one storage credential. | `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino` access tests pass and cross-bucket denies are proven. |
 | TLS and CA trust | Production traffic must not rely on insecure TLS bypass. | HTTPS endpoint works with trusted CA; plaintext and untrusted connections fail. |
@@ -98,7 +101,23 @@ This section exists because "S3-compatible" is not specific enough for a product
 | Operational observability | Operators need health, capacity, request/error, and recovery visibility. | Dashboard/CLI/metrics checks are part of acceptance. |
 | Backup, recovery, and failure drills | Production readiness requires proof that loss and recovery procedures work. | Disk/node/gateway failure drills and restore tests complete successfully. |
 | Upgrade and lifecycle model | The storage platform will need patching and upgrades after Phase 1. | Release pinning, upgrade path, and rollback constraints are documented. |
+| Cost and operating model | On-prem storage shifts cost into hardware, power, capacity planning, and operator effort. | Capacity model, growth assumptions, replication/erasure-coding overhead, and operational ownership are recorded before production onboarding. |
 | Governance integration path | Increment 6 adds Ranger/Atlas; storage must not block identity and policy integration. | Authz boundary is defined: storage service credentials at layer 1; analytical user policy through Polaris/Trino/Ranger later. |
+
+#### 2.8.1.1 Measurable storage acceptance evidence
+
+The storage decision must include measured evidence, not only product features. The following acceptance matrix applies to both Ceph RGW and Apache Ozone during proof-of-fit. Exact numeric targets are environment-specific, but each run must record the target, observed result, error budget, test dataset size, object count, concurrency level, hardware profile, and operator effort.
+
+| Evidence area | Required workload | Required metrics | Minimum acceptance rule |
+|---|---|---|---|
+| Concurrent engine access | Spark writes Iceberg data, Trino reads an existing table, Polaris resolves namespaces/tables, and an operator S3 client lists representative prefixes at the same time. | p50/p95/p99 request latency, 4xx/5xx rate, retry rate, stale-read incidents, authz failures, failed Iceberg commits. | No stale reads, no authorization leakage, no failed committed writes, and request/error metrics remain within the pre-declared smoke-test threshold. |
+| Large scan/read throughput | Trino scans a scaled gold table while Spark reads the same table or a representative silver table. | Sustained read throughput, query elapsed time, request latency, retry rate, RGW/S3 gateway CPU/network saturation. | Throughput baseline is recorded and the object store is not the first saturated component unless explicitly accepted with a capacity plan. |
+| Ingestion/write throughput | Spark writes a scaled bronze/silver dataset using the same S3 client settings intended for production. | Sustained write throughput, multipart upload success/abort behavior, commit duration, request error rate, retry count. | Writes complete without multipart leaks, failed commits, or elevated retry/error rates beyond the declared threshold. |
+| Metadata-heavy listing behavior | Create representative Iceberg table layouts with many snapshots, manifests, partition prefixes, and metadata files. | List latency by prefix, object count, bucket-index health, metadata-file growth, manifest count, snapshot chain length. | Listing and metadata resolution remain predictable enough for maintenance and query planning; any degraded behavior has a documented object-count threshold and mitigation. |
+| Small-file/object-count stress | Generate small-file debt, then run compaction and orphan cleanup through Iceberg maintenance. | Object count before/after, average file size, compaction duration, orphan count, delete-file count, request latency/error rate during maintenance. | Maintenance reduces file-count debt and does not destabilize concurrent reads or catalog operations. |
+| Request latency and error budget | Run mixed read/write/list/head/delete/multipart operations through the selected S3 endpoint. | p50/p95/p99 latency by operation, 4xx/5xx rate, timeout rate, retry rate. | Candidate must meet the declared Phase 1 smoke-test SLO or produce a remediation plan before implementation proceeds. |
+| Cost and capacity model | Model usable capacity for the selected replication/erasure-coding profile and expected growth. | Raw-to-usable ratio, metadata overhead, bucket-index overhead, projected 12/24/36-month capacity, power/rack assumptions where known. | Capacity model shows usable headroom for onboarding and defines expansion triggers before production data is accepted. |
+| Operator effort | Execute install, upgrade rehearsal, failure drill, restore drill, credential rotation, and dashboard/alert setup. | Operator steps, elapsed operator time, specialist skills, automation gaps, runbook defects. | Operational burden is recorded and accepted by the owning operations team, including any staffing or automation gaps. |
 
 #### 2.8.2 Candidate screen
 
@@ -133,10 +152,13 @@ Scoring scale:
 | Kerberos/Ranger alignment | Possible through adjacent identity/policy integrations, but not the native center of the object-store contract. | 3 | Stronger integration options if Stratus later requires storage-layer Ranger/Kerberos enforcement. | 4 | Ozone gains weight only if storage-layer policy enforcement becomes an explicit requirement. |
 | Analytical user authorization model | Storage layer uses service credentials; analytical user policy is enforced later through Polaris/Trino/Ranger. | 4 | Can support stronger storage-layer authorization, but that is not required by the current Phase 1 storage contract. | 4 | Both are acceptable if user-facing authorization stays above storage. |
 | Operational model | Strong but complex. Ceph has mature health, dashboard, metrics, CRUSH placement, recovery, and cephadm lifecycle management. | 4 | Strong but also complex. Ozone has OM/SCM HA, Recon, Datanodes, security, and object-store operational patterns. | 4 | Team skill set matters; both require real operators. |
+| Performance evidence path | Strong tooling and metrics path through RGW, Ceph Dashboard, Prometheus, and client-side S3 measurements; still must be measured on target hardware. | 4 | Viable through Ozone Recon, S3 Gateway metrics, and client-side S3 measurements; proof-of-fit must validate the selected gateway release. | 3 | Ceph has the lower measurement-risk baseline, but neither candidate is approved without workload evidence. |
+| Metadata and small-object behavior | Mature RGW/bucket-index behavior, but Iceberg metadata and small-file stress must be measured explicitly. | 4 | Viable, but S3 Gateway list behavior and metadata-heavy Iceberg layouts need stronger proof before approval. | 3 | Metadata-heavy behavior is a required decision gate, not a later tuning task. |
+| Cost/capacity and operator effort | Strong capacity and failure-domain modeling through Ceph pool/CRUSH design; operator skill requirement is material. | 4 | Strong storage-specific model with its own operational complexity; operator skill requirement is material. | 4 | Both require an accepted cost/capacity model and named operating team. |
 | Failure-domain and recovery controls | Strong. CRUSH, pools, OSD health, backfill/recovery behavior are central Ceph concepts. | 5 | Strong. Ozone has replication/erasure coding and service HA patterns. | 4 | Both viable; prove via drills. |
 | Encryption and key management | Supported through Ceph/RGW encryption options and storage-layer controls; exact mode must be release-validated. | 4 | Supported through Ozone/KMS/transparent data encryption path; exact mode must be release-validated. | 4 | Both viable; neither should be assumed from AWS S3 semantics. |
 | Future multi-protocol storage | Strong if Stratus later needs object plus block/file from one storage substrate. | 5 | Strong for object storage; less relevant if Stratus later needs block/file from the same storage substrate. | 3 | Ceph has broader infrastructure-storage optionality. |
-| **Total** |  | **39 / 45** |  | **35 / 45** | Ceph scores higher under the current Stratus requirements because the comparison scores stated storage, S3 compatibility, security, operations, and recovery needs. |
+| **Total** |  | **51 / 60** |  | **44 / 60** | Ceph scores higher under the current Stratus requirements because the comparison scores stated storage, S3 compatibility, security, operations, recovery, performance evidence, metadata behavior, and cost/operator needs. |
 
 The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is treated as the lower-risk S3 API target for the selected Iceberg/Spark/Trino/Polaris path, while Ozone remains viable if its S3 Gateway passes the same proof-of-fit and its security or operational model is preferred.
 
@@ -150,6 +172,12 @@ Ceph RGW can remain the baseline only after the following evidence exists:
 - Iceberg `S3FileIO` can create, write, read, update, expire snapshots, compact, and remove orphan files against RGW.
 - Spark can read from landing and write Iceberg tables through Polaris using the RGW endpoint.
 - Trino can query Iceberg tables using the same object-store endpoint and path-style configuration.
+- Concurrent Spark write, Trino read, Polaris catalog resolution, and operator S3 listing tests complete within the declared request-latency and error-rate thresholds.
+- Large scan/read and ingestion/write throughput baselines are recorded with dataset size, object count, hardware profile, and bottleneck analysis.
+- Metadata-heavy Iceberg layouts prove acceptable list latency, bucket-index health, manifest growth, and snapshot-chain behavior.
+- Small-file/object-count stress proves compaction and orphan cleanup reduce debt without destabilizing concurrent reads or catalog operations.
+- Cost/capacity model records raw-to-usable ratio, growth assumptions, metadata overhead, expansion triggers, and operator ownership.
+- Operator effort is recorded for install, upgrade rehearsal, failure drill, restore drill, credential rotation, and observability setup.
 - Service credentials prove least privilege across `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino`.
 - TLS, encryption-at-rest, logging, metrics, backup, restore, and failure drills pass in a production-like topology.
 - Apache Ozone is either rejected with specific evidence or retained as an alternate with explicit trigger conditions.
@@ -920,6 +948,16 @@ If the platform later needs Git-like branching, tagging, and data-environment wo
 ### Design rule
 Spark, Flink, Trino, and all maintenance workflows must be configured to use the central Apache Polaris REST catalog. Engine-local catalog configurations that bypass Polaris are not permitted in governed environments.
 
+### Production catalog requirements
+The catalog is not just a lookup service. It is the control point for table namespace, current metadata location, transactional commits, and engine coordination. Production readiness therefore requires evidence for:
+
+- catalog availability and latency under concurrent Spark, Trino, and maintenance access
+- an approved external Polaris metadata store with backup, restore, and ownership defined
+- auditability for namespace, table, credential, and metadata-location changes
+- identity integration, scoped service principals, and a documented credential model
+- restore drills that recover catalog state, Iceberg metadata files, manifests, and object data consistently
+- compatibility checks for every engine that reads or writes governed tables
+
 ---
 
 ## 9. Governance Model
@@ -1002,9 +1040,24 @@ Iceberg maintenance is not optional.
 
 The platform must schedule:
 - snapshot expiration — target cadence: daily for active tables, weekly for archival
-- compaction / file rewrite — target: keep file counts within 2× the optimal range for each table's typical query pattern
+- compaction / file rewrite — target: keep file counts within 2x the optimal range for each table's typical query pattern
 - orphan file cleanup — run at least weekly; alert if orphan volume exceeds a configurable threshold
-- metadata health checks — verify manifest list depth and metadata.json file count; compact metadata when thresholds are breached
+- metadata health checks — verify manifest list depth, metadata.json file count, delete-file count, and manifest growth; compact metadata when thresholds are breached
+
+Maintenance must be metadata-driven. Jobs should inspect Iceberg metadata tables such as `files`, `snapshots`, `manifests`, and `history` before deciding whether to compact, expire snapshots, or raise an alert. Fixed schedules are acceptable as triggers, but the action taken should depend on table-specific policy and current table state.
+
+Each governed table must have a maintenance policy before production onboarding. The policy must define at least:
+
+| Policy field | Purpose |
+|---|---|
+| table owner and maintenance owner | identifies who approves thresholds and who responds to alerts |
+| target file size and minimum average file size | drives rewrite/compaction decisions from the `files` metadata table |
+| maximum file count and small-file count | prevents unbounded small-file growth and planning overhead |
+| maximum snapshot-chain length and snapshot retention | drives snapshot expiry from the `snapshots` and `history` metadata tables |
+| maximum manifest count or manifest growth rate | drives manifest rewrite or alerting from the `manifests` metadata table |
+| maximum delete-file count | triggers delete-file cleanup or rewrite for tables with row-level deletes |
+| orphan-file threshold and cleanup cadence | controls cleanup and alerting for unreferenced objects |
+| alert severity and allowed maintenance window | prevents disruptive maintenance during critical serving windows |
 
 **Ownership**: The platform / infrastructure team owns the maintenance jobs and their scheduling. Domain teams do not run ad-hoc maintenance. Compaction ownership must be explicitly assigned per table (normally the platform team); no table should be left without a designated maintenance owner.
 
