@@ -903,7 +903,7 @@ When all gates are checked, Increment 9 (Kafka Connect and Debezium CDC) can beg
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Phase 1 operational readiness: [phase1_operational_readiness.md](phase1_operational_readiness.md)
+- Phase 1 operational readiness: [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md)
 - Increment 7 - Identity and Security: [increment7_identity_security.md](increment7_identity_security.md)
 - Apache Kafka downloads: https://downloads.apache.org/kafka/
 - Apache Kafka documentation: https://kafka.apache.org/documentation/

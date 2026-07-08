@@ -1456,7 +1456,7 @@ QA for the platform is not a separate after-the-fact activity. Each platform lay
 
 Every completion gate should have an automated verification suite where practical and an operational checklist for conditions that cannot be fully automated in the lab.
 
-Phase 1 operational acceptance is captured in [phase1_operational_readiness.md](phase1_operational_readiness.md). That document is the closeout gate for Increments 1 through 7: it verifies integrated function, recovery, observability, runbooks, security posture, governance controls, quality gates, and operational ownership before production dataset onboarding or Phase 2 work begins.
+Phase 1 operational acceptance is captured in [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md). That document is the closeout gate for Increments 1 through 7: it verifies integrated function, recovery, observability, runbooks, security posture, governance controls, quality gates, and operational ownership before production dataset onboarding or Phase 2 work begins.
 
 ### 14.7 Upstream reference audit and version discipline
 
@@ -1492,9 +1492,9 @@ Current Phase 1 target baseline as of 2026-07-05:
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| Ceph RGW | latest supported release approved for the environment, pinned by image digest or package version |
-| Apache Atlas / Ranger | latest approved Apache releases, built as pinned internal images after plugin/database compatibility review |
-| FreeIPA | latest supported package stream from the selected Linux distribution or vendor-supported IdM documentation |
+| Ceph RGW | approved Ceph release pinned by package version or image tag plus digest in the environment version matrix |
+| Apache Atlas / Ranger | approved Apache releases built as internal images and pinned by tag plus digest after plugin/database compatibility review |
+| FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |
 
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
 
@@ -1558,7 +1558,7 @@ Primary outcome:
 - governed batch lakehouse foundation
 
 Phase 1 acceptance:
-- completed through the operational readiness gate in [phase1_operational_readiness.md](phase1_operational_readiness.md), which validates integrated function, recovery, observability, security, governance, quality, and runbook ownership
+- completed through the operational readiness gate in [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md), which validates integrated function, recovery, observability, security, governance, quality, and runbook ownership
 
 ### Phase 1 scope note
 Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after Ceph RGW, Iceberg, Spark, Airflow, and Atlas are stable.

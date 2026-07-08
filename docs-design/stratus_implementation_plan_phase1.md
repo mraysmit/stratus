@@ -354,7 +354,7 @@ The following are explicitly deferred and belong to later increments:
 - **Multi-environment promotion** — development, staging, and production environment separation is an operational maturity concern for after the single-environment foundation works.
 - **Self-service data discovery** — policy-driven glossary workflows and self-service onboarding follow after Atlas and Ranger are operating reliably.
 
-Operational production-readiness signoff is covered by [phase1_operational_readiness.md](phase1_operational_readiness.md). It is not a separate platform increment because it validates Increments 1 through 7 rather than adding a new capability.
+Operational production-readiness signoff is covered by [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md). It is not a separate platform increment because it validates Increments 1 through 7 rather than adding a new capability.
 
 ---
 
@@ -368,6 +368,6 @@ Operational production-readiness signoff is covered by [phase1_operational_readi
 - [increment5_trino.md](increment5_trino.md) — Increment 5 interactive query implementation plan
 - [increment6_atlas_ranger.md](increment6_atlas_ranger.md) — Increment 6 metadata and governance implementation plan
 - [increment7_identity_security.md](increment7_identity_security.md) — Increment 7 identity and security hardening implementation plan
-- [phase1_operational_readiness.md](phase1_operational_readiness.md) — Phase 1 operational acceptance and production readiness checklist
+- [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md) — Phase 1 operational acceptance and production readiness checklist
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) — Phase 2 streaming and operational maturity implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) — Phase 3 query acceleration and data products implementation plan

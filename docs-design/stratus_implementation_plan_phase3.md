@@ -335,7 +335,7 @@ The following remain deferred to Phase 4 or later:
 - [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) - Phase 2 streaming implementation plan
-- [phase1_operational_readiness.md](phase1_operational_readiness.md) - Phase 1 operational acceptance gate
+- [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate
 
 ---
 

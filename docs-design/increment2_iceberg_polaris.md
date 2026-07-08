@@ -848,7 +848,7 @@ Common causes:
 
 ### Iceberg cannot write to Ceph RGW
 
-- Confirm `s3.path-style-access=true` is set — Ceph RGW requires path-style access
+- Confirm `s3.path-style-access=true` is set unless virtual-hosted bucket access has been explicitly validated for the environment
 - Confirm the `svc-polaris` credentials have write access to the target bucket in Ceph RGW
 - Confirm the Ceph RGW endpoint in Polaris storage config matches the running Ceph cluster
 - Test Ceph RGW access directly: `aws --endpoint-url https://object-store.stratus.local s3 ls s3://stratus-bronze/`
