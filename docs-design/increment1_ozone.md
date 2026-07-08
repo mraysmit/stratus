@@ -4,11 +4,11 @@
 
 This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. The production target for this revised increment is **Apache Ozone**.
+Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. This variant describes the **Apache Ozone** implementation path.
 
 When this increment is complete:
 
-- Apache Ozone is the selected production storage target.
+- Apache Ozone has been approved by the architecture decision for the target environment.
 - The platform exposes an HTTPS S3-compatible endpoint through Ozone S3 Gateway.
 - The five Stratus storage buckets exist.
 - Platform service identities are isolated.
@@ -25,9 +25,9 @@ This document intentionally separates two concerns:
 
 ## 2. Storage Decision
 
-### Baseline production target
+The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is an implementation variant for **Apache Ozone** and applies only if the architecture decision selects Ozone as the Increment 1 storage target.
 
-The baseline production storage target for Stratus Phase 1 is **Apache Ozone**.
+### Implementation target
 
 | Decision area | Baseline choice |
 |---|---|
@@ -40,37 +40,6 @@ The baseline production storage target for Stratus Phase 1 is **Apache Ozone**.
 | Governance alignment | Kerberos, Ranger integration, ACLs, audit-capable security model |
 | Operations | Ozone Manager, Storage Container Manager, Datanodes, Recon |
 | Production DNS alias | `object-store.stratus.local` |
-
-### Why Ozone
-
-Ozone fits this platform better than a small standalone S3 appliance because Stratus is an on-prem lakehouse/data-fabric design. Ozone is built for large-scale distributed object storage while still exposing S3-compatible access for Iceberg and other object-store clients.
-
-Relevant strengths:
-
-- open-source Apache project
-- on-prem distributed storage design
-- S3 Gateway for S3-compatible clients
-- S3 Gateway access path for the Stratus lakehouse engine contract
-- strong consistency
-- replication and erasure coding
-- Kerberos security model
-- Ranger integration path
-- TLS support
-- transparent data encryption path
-- Recon for operational visibility
-
-### Control candidate: Ceph RGW
-
-Ceph RGW is the control candidate for this decision. It is a mature open-source S3 object-store option and should be used as the comparison point if Ozone fails a required Stratus validation.
-
-Ozone remains the baseline unless validation proves one of the following:
-
-- Ozone S3 Gateway cannot satisfy Polaris/Iceberg/Spark/Trino requirements.
-- Ozone operational complexity is unacceptable for the target team.
-- Required S3 behavior is materially better supported by Ceph RGW.
-- Security, recovery, or performance testing identifies a blocker.
-
-If Ozone fails, create a storage ADR comparing Ozone and Ceph RGW before replacing this increment plan.
 
 ### Known Ozone S3 caveat
 

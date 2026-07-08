@@ -16,23 +16,11 @@ MinIO OSS may be used for disposable developer and lab validation only when the 
 
 ---
 
-## 2. Key Decision: Production Path First
+## 2. Storage Decision
 
-### Current upstream warning
+The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This document is a legacy implementation variant for a MinIO/AIStor path and applies only if a future architecture decision explicitly selects that target.
 
-Reference baseline: 2026-07-05.
-
-The Apache Polaris MinIO guide explicitly warns that its MinIO OSS example is for local testing only. It also states that MinIO OSS is in maintenance mode and that MinIO container images may no longer receive updates or security fixes.
-
-Therefore, this plan does not treat MinIO OSS as the production storage product for Stratus.
-
-### Production target
-
-The baseline production target for Stratus Phase 1 is **MinIO AIStor**, the supported MinIO object-storage distribution, deployed as an on-prem multi-node, erasure-coded S3-compatible object-storage cluster.
-
-This is an explicit design decision. Stratus keeps the S3 storage contract product-neutral enough to test and integrate cleanly, but the production implementation target for this plan is not an unnamed S3-compatible store. It is MinIO AIStor unless a later architecture decision record replaces it.
-
-Production target summary:
+### Implementation target
 
 | Decision area | Baseline choice |
 |---|---|
@@ -45,27 +33,7 @@ Production target summary:
 | Stratus endpoint name | `object-store.stratus.local` or environment-specific DNS alias |
 | Lab compatibility target | MinIO OSS may emulate the API for disposable developer/lab validation only when AIStor remains the production target |
 
-Non-baseline targets such as Ceph RGW, Dell ECS, NetApp StorageGRID, Cloudian, Apache Ozone S3 gateway, or an internally maintained MinIO-compatible artifact are not the default production path. They are replacement storage targets and require a superseding storage architecture decision record before use. That record must explain why MinIO AIStor is not being used and must prove the replacement target passes the same Stratus storage contract and downstream Polaris/Iceberg/Spark/Trino verification gates.
-
-If a replacement storage target is selected, the lab should use that target's own development or non-production deployment path. A MinIO OSS lab is no longer representative in that case because it validates MinIO behavior, not the operational, security, policy, TLS, compatibility, and failure behavior of the replacement product.
-
-### Decision record required
-
-Before any shared, long-lived, regulated, or production-like environment is declared ready, create a storage decision record containing:
-
-- selected object-storage product and edition
-- support owner and support contract or internal ownership model
-- approved version, appliance release, image tag, or image digest
-- topology and capacity model
-- TLS and certificate trust model
-- identity and credential management model
-- bucket, lifecycle, retention, encryption, backup, and recovery model
-- monitoring, alerting, and log integration
-- upgrade and patch process
-- known deviations from the lab reference implementation
-- verification evidence from the Java storage suite
-
-Increment 1 lab completion can unblock Increment 2 engineering work. It does not by itself approve production dataset onboarding.
+Selection of this target, rejection of other candidates, and production readiness approval must be recorded in the architecture-level storage decision. Increment 1 lab completion can unblock Increment 2 engineering work only after the architecture decision accepts this target for the relevant environment; it does not by itself approve production dataset onboarding.
 
 ---
 
@@ -81,7 +49,7 @@ Every storage target must satisfy this contract.
 | Transport | HTTPS only |
 | Endpoint variable | `STRATUS_S3_ENDPOINT` |
 | Path-style access | Required unless every downstream client has been verified with virtual-hosted style |
-| Region | Use `us-east-1` for the baseline AIStor target unless a verified client configuration requires a different fixed value |
+| Region | Use `us-east-1` for the AIStor implementation target unless a verified client configuration requires a different fixed value |
 | CA trust | Clients must trust the issuing CA; routine commands must not require `--insecure` or `-k` |
 
 ### Bucket contract
@@ -138,8 +106,8 @@ The lab reference implementation below exercises some failure behavior, but prod
 |---|---|---|
 | Developer | local command and client validation | optional Docker Compose MinIO OSS only for the AIStor path; otherwise use the selected target's dev image/appliance/sandbox |
 | Lab | early integrated Stratus build and Increment 2 unblocker | AIStor non-production deployment, or MinIO OSS only as an AIStor API stand-in; replacement targets must use their own lab deployment |
-| Production-like | shared, long-lived, regulated, performance, or pre-production validation | MinIO AIStor unless superseded by approved storage ADR |
-| Production | real production dataset onboarding | MinIO AIStor with operational signoff unless superseded by approved storage ADR |
+| Production-like | shared, long-lived, regulated, performance, or pre-production validation | MinIO AIStor only if approved by the architecture-level storage decision |
+| Production | real production dataset onboarding | MinIO AIStor with operational signoff only if approved by the architecture-level storage decision |
 
 The rest of this document contains a production contract plus a lab reference implementation. Do not confuse the lab reference implementation with production approval.
 
@@ -157,9 +125,9 @@ For production-like environments, implement MinIO AIStor using the approved AISt
 6. Confirm path-style or virtual-hosted-style S3 behavior for all downstream clients.
 7. Configure production-required encryption, retention, lifecycle, monitoring, alerting, audit logging, backup, and restore.
 8. Run the Java verification suite against the production-like endpoint.
-9. Record evidence in the storage decision record and operational readiness checklist.
+9. Record evidence in the architecture-level storage decision and operational readiness checklist.
 
-If a superseding ADR selects a non-AIStor production target, skip the AIStor/MinIO container sections and replace them with that product's deployment runbook. Keep the bucket, identity, TLS, and verification sections.
+If the architecture-level storage decision selects a non-AIStor production target, skip the AIStor/MinIO container sections and use that product's deployment runbook. Keep the bucket, identity, TLS, and verification sections.
 
 ---
 
@@ -167,7 +135,7 @@ If a superseding ADR selects a non-AIStor production target, skip the AIStor/Min
 
 This section is a reference implementation for the AIStor production path. Use a supported AIStor artifact if the lab is shared or long-lived. Use MinIO OSS only for disposable local or internal validation where the goal is to validate the AIStor/MinIO API shape before moving to supported AIStor.
 
-If the production target is changed away from AIStor, skip this section and use the replacement product's own lab deployment. Do not use MinIO OSS as a generic stand-in for a non-MinIO production object store.
+If the architecture-level storage decision selects a target other than AIStor, skip this section and use the selected product's own lab deployment. Do not use MinIO OSS as a generic stand-in for a non-MinIO production object store.
 
 ### Topology
 
@@ -343,7 +311,7 @@ sudo journalctl -u stratus-minio -f
 
 Docker Compose is included only as a single-host developer topology for the AIStor/MinIO path. It is useful for command validation and client testing when AIStor is the production target. It is not a deployment topology, not a resilience test, and not a substitute for the lab or production gates.
 
-If a superseding ADR selects a non-AIStor production target, remove this Compose topology from the active implementation path and use that product's developer or non-production environment instead.
+If the architecture-level storage decision selects a non-AIStor production target, remove this Compose topology from the active implementation path and use that product's developer or non-production environment instead.
 
 Use it to:
 
@@ -515,7 +483,7 @@ Only `minio1` publishes host ports. Other nodes are reachable inside the Docker 
 
 ## 11. Bucket and Identity Provisioning
 
-Provision buckets and service identities on the AIStor production target or on the MinIO/AIStor lab reference target. The commands below use the MinIO client. If a superseding ADR selects another production storage product, use that product's equivalent administrative interface and preserve the same bucket names and access boundaries.
+Provision buckets and service identities on the AIStor production target or on the MinIO/AIStor lab reference target. The commands below use the MinIO client. If the architecture-level storage decision selects another production storage product, use that product's equivalent administrative interface and preserve the same bucket names and access boundaries.
 
 ### Configure client access
 
@@ -555,7 +523,7 @@ mc admin user add stratus svc-airflow $(openssl rand -base64 32)
 mc admin user add stratus svc-trino $(openssl rand -base64 32)
 ```
 
-For production-like AIStor, prefer the supported service-account or external identity model approved in the storage decision record and document the mapping to the four Stratus service principals.
+For production-like AIStor, prefer the supported service-account or external identity model approved in the architecture-level storage decision and document the mapping to the four Stratus service principals.
 
 ### Apply lab access policies
 
@@ -737,7 +705,7 @@ mc admin info stratus
 
 Expected: all four nodes online and drives healthy.
 
-If a superseding ADR selects another production storage product, use its supported health command or console and attach evidence to the decision record.
+If the architecture-level storage decision selects another production storage product, use its supported health command or console and attach evidence to the architecture decision record.
 
 ### Bucket visibility
 
@@ -787,7 +755,7 @@ sudo systemctl start stratus-minio
 mc admin info stratus
 ```
 
-If a superseding ADR selects a different production target, perform that product's supported failure drill and record the result.
+If the architecture-level storage decision selects a different production target, perform that product's supported failure drill and record the result.
 
 ---
 
@@ -813,8 +781,8 @@ When the lab gate passes, Increment 2 engineering work can begin.
 
 The storage foundation is production-ready only when:
 
-- [ ] storage decision record is approved
-- [ ] MinIO AIStor support model is approved, or a superseding storage ADR approves a replacement target
+- [ ] architecture-level storage decision is approved
+- [ ] MinIO AIStor support model is approved if this variant is selected
 - [ ] production topology, capacity, monitoring, backup, recovery, patching, and rotation runbooks exist
 - [ ] TLS works without insecure client flags
 - [ ] service credentials are stored in the approved secret-management location

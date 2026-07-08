@@ -4,10 +4,10 @@
 
 This document is the technical implementation plan for Increment 3 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 3 delivers an Apache Spark standalone cluster running on Podman containers. Spark is configured to use Apache Polaris as its Iceberg catalog and MinIO as object storage. When this increment is complete, data flows from a raw source file in the landing zone through bronze, silver, and gold Iceberg tables. Quality checks run against each dataset and gate promotion between zones. A Java verification suite submits real Spark jobs and confirms the full batch compute pipeline works end to end.
+Increment 3 delivers an Apache Spark standalone cluster running on Podman containers. Spark is configured to use Apache Polaris as its Iceberg catalog and Ceph RGW as object storage. When this increment is complete, data flows from a raw source file in the landing zone through bronze, silver, and gold Iceberg tables. Quality checks run against each dataset and gate promotion between zones. A Java verification suite submits real Spark jobs and confirms the full batch compute pipeline works end to end.
 
 **Prerequisites:**
-- Increment 1 complete — MinIO cluster running, all buckets and service accounts in place
+- Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 
 ---
@@ -18,8 +18,8 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 - Podman 4.x installed on each Spark node
 - JDK 21+ and Maven 3.9+ on the development and verification host
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
-- Nodes can reach MinIO on port 9000 and Polaris on port 8181
-- `svc-spark` MinIO credentials and Polaris principal credentials from earlier increments are available
+- Nodes can reach Ceph RGW on port 9000 and Polaris on port 8181
+- `svc-spark` S3 credentials and Polaris principal credentials from earlier increments are available
 
 ### Reference documentation audit
 
@@ -53,10 +53,10 @@ spark-worker1          spark-worker2
           └──────┬───────┘
                  │  reads/writes Iceberg tables
                  ▼
-  Polaris (Increment 2)  ←→  MinIO (Increment 1)
+  Polaris (Increment 2)  ←→  Ceph RGW (Increment 1)
 ```
 
-Spark jobs are submitted to the master via `spark-submit` or the Spark Java API. The master distributes work to the workers. Workers read and write Iceberg data files directly to MinIO using the `svc-spark` credentials. All table metadata is resolved through Polaris.
+Spark jobs are submitted to the master via `spark-submit` or the Spark Java API. The master distributes work to the workers. Workers read and write Iceberg data files directly to Ceph RGW using the `svc-spark` credentials. All table metadata is resolved through Polaris.
 
 ---
 
@@ -92,7 +92,7 @@ USER root
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar \
     /opt/spark/jars/
 
-# AWS bundle — provides S3FileIO for MinIO connectivity
+# AWS bundle — provides S3FileIO for Ceph RGW connectivity
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar \
     /opt/spark/jars/
 
@@ -125,7 +125,7 @@ podman load < ~/stratus-spark.tar.gz
 
 ## 6. Spark Configuration
 
-Create `/etc/stratus/spark-defaults.conf` on each node. This file is mounted into every container and configures Spark's connection to Polaris and MinIO.
+Create `/etc/stratus/spark-defaults.conf` on each node. This file is mounted into every container and configures Spark's connection to Polaris and Ceph RGW.
 
 ```properties
 # /etc/stratus/spark-defaults.conf
@@ -139,7 +139,7 @@ spark.sql.catalog.stratus.credential            svc-spark:<client-secret>
 spark.sql.catalog.stratus.scope                 PRINCIPAL_ROLE:ALL
 spark.sql.catalog.stratus.warehouse             stratus
 spark.sql.catalog.stratus.io-impl               org.apache.iceberg.aws.s3.S3FileIO
-spark.sql.catalog.stratus.s3.endpoint           https://minio1.stratus.local:9000
+spark.sql.catalog.stratus.s3.endpoint           https://object-store.stratus.local
 spark.sql.catalog.stratus.s3.access-key-id      svc-spark
 spark.sql.catalog.stratus.s3.secret-access-key  <svc-spark secret>
 spark.sql.catalog.stratus.s3.path-style-access  true
@@ -148,7 +148,7 @@ spark.sql.catalog.stratus.s3.path-style-access  true
 spark.sql.defaultCatalog                        stratus
 
 # S3A filesystem (used by Spark internals for staging)
-spark.hadoop.fs.s3a.endpoint                    https://minio1.stratus.local:9000
+spark.hadoop.fs.s3a.endpoint                    https://object-store.stratus.local
 spark.hadoop.fs.s3a.access.key                  svc-spark
 spark.hadoop.fs.s3a.secret.key                  <svc-spark secret>
 spark.hadoop.fs.s3a.path.style.access           true
@@ -401,9 +401,9 @@ The verification suite submits real Spark jobs to the live cluster and confirms 
 | `STRATUS_POLARIS_CLIENT_ID` | `svc-spark` |
 | `STRATUS_POLARIS_CLIENT_SECRET` | svc-spark client secret |
 | `STRATUS_POLARIS_CATALOG` | `stratus` |
-| `STRATUS_MINIO_ENDPOINT` | MinIO S3 endpoint |
-| `STRATUS_MINIO_ACCESS_KEY` | `svc-spark` access key |
-| `STRATUS_MINIO_SECRET_KEY` | `svc-spark` secret key |
+| `STRATUS_S3_ENDPOINT` | Ceph RGW S3 endpoint |
+| `STRATUS_S3_ACCESS_KEY` | `svc-spark` access key |
+| `STRATUS_S3_SECRET_KEY` | `svc-spark` secret key |
 
 ### Shared Spark session helper
 
@@ -422,9 +422,9 @@ public class SparkTestSession {
         String clientId    = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog     = System.getenv("STRATUS_POLARIS_CATALOG");
-        String minioEndpoint = System.getenv("STRATUS_MINIO_ENDPOINT");
-        String accessKey   = System.getenv("STRATUS_MINIO_ACCESS_KEY");
-        String secretKey   = System.getenv("STRATUS_MINIO_SECRET_KEY");
+        String s3Endpoint = System.getenv("STRATUS_S3_ENDPOINT");
+        String accessKey   = System.getenv("STRATUS_S3_ACCESS_KEY");
+        String secretKey   = System.getenv("STRATUS_S3_SECRET_KEY");
 
         return SparkSession.builder()
             .appName("stratus-verification")
@@ -440,12 +440,12 @@ public class SparkTestSession {
             .config("spark.sql.catalog." + catalog + ".warehouse", catalog)
             .config("spark.sql.catalog." + catalog + ".io-impl",
                 "org.apache.iceberg.aws.s3.S3FileIO")
-            .config("spark.sql.catalog." + catalog + ".s3.endpoint", minioEndpoint)
+            .config("spark.sql.catalog." + catalog + ".s3.endpoint", s3Endpoint)
             .config("spark.sql.catalog." + catalog + ".s3.access-key-id", accessKey)
             .config("spark.sql.catalog." + catalog + ".s3.secret-access-key", secretKey)
             .config("spark.sql.catalog." + catalog + ".s3.path-style-access", "true")
             .config("spark.sql.defaultCatalog", catalog)
-            .config("spark.hadoop.fs.s3a.endpoint", minioEndpoint)
+            .config("spark.hadoop.fs.s3a.endpoint", s3Endpoint)
             .config("spark.hadoop.fs.s3a.access.key", accessKey)
             .config("spark.hadoop.fs.s3a.secret.key", secretKey)
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
@@ -757,9 +757,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-export STRATUS_MINIO_ACCESS_KEY=svc-spark
-export STRATUS_MINIO_SECRET_KEY=<svc-spark secret>
+export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+export STRATUS_S3_ACCESS_KEY=svc-spark
+export STRATUS_S3_SECRET_KEY=<svc-spark secret>
 
 mvn test -pl . -Dtest=SparkPipelineVerificationTest
 ```
@@ -801,12 +801,12 @@ podman exec spark-master \
 
 Expected output: `Pi is roughly 3.14...`
 
-### Confirm Iceberg tables visible in MinIO after test run
+### Confirm Iceberg tables visible in Ceph RGW after test run
 
 ```bash
-mc ls --recursive stratus/stratus-bronze/ | head -20
-mc ls --recursive stratus/stratus-silver/ | head -20
-mc ls --recursive stratus/stratus-gold/   | head -20
+aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-bronze/ | head -20
+aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-silver/ | head -20
+aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-gold/   | head -20
 ```
 
 Each zone must show `metadata/` and `data/` directories containing `.json`, `.avro`, and `.parquet` files.
@@ -820,12 +820,12 @@ Increment 3 is complete when all of the following are true:
 - [ ] Spark master container running and managed by systemd on `spark-master.stratus.local`
 - [ ] Both Spark workers running and showing `ALIVE` in the master web UI
 - [ ] Spark connects to Polaris and resolves all four namespaces
-- [ ] Spark connects to MinIO via S3A and can read and write all platform buckets
+- [ ] Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
 - [ ] `SparkPipelineVerificationTest` — all eleven tests pass against the live cluster
-- [ ] Bronze, silver, and gold Iceberg tables created and visible in MinIO
+- [ ] Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
 - [ ] Quality results written to `platform.quality_check_results` and queryable via Spark SQL
 - [ ] Promotion gate correctly blocks silver promotion when a blocking quality check fails
-- [ ] Table maintenance (snapshot expiry + compaction) runs without error
+- [ ] Table maintenance runs without error and records the metadata signals used to choose snapshot expiry and compaction actions
 - [ ] `spark-submit` test job executes successfully on the standalone cluster
 
 When all gates are checked, Increment 4 (Apache Airflow) can begin.
@@ -842,15 +842,15 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 
 ### Spark cannot connect to Polaris
 
-- Confirm the Polaris REST API is reachable from the Spark nodes: `curl -k https://polaris.stratus.local:8181/api/catalog/v1/config`
+- Confirm the Polaris REST API is reachable from the Spark nodes: `curl --cacert /etc/stratus/certs/ca.crt https://polaris.stratus.local:8181/api/catalog/v1/config`
 - Confirm the `credential` format is `clientId:clientSecret` with no spaces
 - Check Polaris logs for authentication failures: `podman logs polaris`
 
-### Spark cannot write to MinIO
+### Spark cannot write to Ceph RGW
 
 - Confirm `s3.path-style-access=true` and `fs.s3a.path.style.access=true` are both set in `spark-defaults.conf`
-- Confirm the MinIO endpoint includes the port: `https://minio1.stratus.local:9000`
-- Test MinIO access from a Spark node directly: `curl -k https://minio1.stratus.local:9000/stratus-bronze`
+- Confirm the S3 endpoint is `https://object-store.stratus.local` or the environment-approved equivalent
+- Test Ceph RGW access from a Spark node directly: `aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls s3://stratus-bronze/`
 
 ### `ClassNotFoundException` for Iceberg or S3 classes
 
@@ -865,7 +865,7 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 ### `AnalysisException: Table not found` on silver or gold
 
 - Confirm the bronze table was created and written successfully before running the transform job
-- Confirm the target namespace exists in Polaris: `curl -k ... /api/catalog/v1/stratus/namespaces`
+- Confirm the target namespace exists in Polaris using the trusted CA bundle and an authenticated Polaris token
 
 ---
 
@@ -878,5 +878,5 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 - Apache Spark Docker images: https://hub.docker.com/r/apache/spark
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

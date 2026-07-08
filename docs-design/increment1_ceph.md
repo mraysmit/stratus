@@ -8,7 +8,7 @@ Increment 1 delivers the on-prem object-storage foundation consumed by Apache Po
 
 When this increment is complete:
 
-- Ceph RGW is the selected production object-storage target.
+- Ceph RGW has been approved by the architecture decision for the target environment.
 - The platform exposes an HTTPS S3-compatible endpoint through RGW.
 - The five Stratus storage buckets exist.
 - Platform service identities are isolated.
@@ -345,6 +345,23 @@ The runbook must define:
 - minimum-size and degraded-write behavior
 
 For Iceberg workloads, validate small-file and metadata-heavy behavior. Iceberg metadata can create many small objects and list operations, so the RGW pool and bucket-index behavior must be part of testing.
+
+### Performance, metadata, and cost evidence
+
+Before Increment 1 can unblock Polaris and Iceberg implementation, the Ceph evidence bundle must include measurable results for the same workload categories used in the architecture decision:
+
+| Evidence area | Ceph-specific evidence to capture |
+|---|---|
+| Concurrent engine access | Run Spark write, Trino read, Polaris table/namespace resolution, and operator S3 list/head checks together. Record p50/p95/p99 request latency, 4xx/5xx rate, retry rate, failed commits, stale-read incidents, and any denied or over-broad access. |
+| Large scan/read throughput | Run representative Trino and Spark scans over scaled Iceberg data. Record sustained read throughput, elapsed time, RGW request latency, client retry rate, OSD/RGW CPU and network saturation, and whether Ceph is the bottleneck. |
+| Ingestion/write throughput | Run representative Spark writes using the production-intended S3 settings. Record sustained write throughput, multipart create/complete/abort behavior, Iceberg commit duration, retry rate, and failed multipart cleanup. |
+| Metadata-heavy listing behavior | Build representative Iceberg metadata layouts with many snapshots, manifests, and partition prefixes. Record object count, prefix list latency, bucket-index health, manifest count, metadata.json count, and snapshot-chain length. |
+| Small-file/object-count stress | Generate small-file debt, run compaction and orphan cleanup, then record object count before/after, average file size, orphan count, delete-file count, compaction duration, and concurrent query impact. |
+| Request latency and error budget | Run mixed S3 put/get/head/list/delete/multipart operations. Record p50/p95/p99 latency by operation, timeout rate, retry rate, and 4xx/5xx rate. |
+| Cost and capacity model | Record raw capacity, usable capacity, replication or erasure-code overhead, metadata/bucket-index overhead assumptions, 12/24/36-month growth estimate, expansion trigger, and expected hardware/operator ownership. |
+| Operator effort | Record operator steps and elapsed effort for install, health review, failure drill, restore drill, upgrade rehearsal, credential rotation, alert setup, and runbook correction. |
+
+The first run does not need to prove final production scale, but it must establish a baseline and expose whether Ceph RGW is already the limiting component. Any failed threshold must either stop the increment or produce a dated ADR with mitigation, owner, and retest criteria.
 
 ### RGW service
 
@@ -785,6 +802,19 @@ mvn test -pl . -Dtest=S3StorageVerificationTest
 ```
 
 All tests must pass before Increment 2 begins.
+
+### Evidence bundle
+
+Store the Increment 1 evidence bundle with the implementation record. It must include:
+
+- selected Ceph release, deployment method, node/drive profile, pool profile, and RGW topology
+- declared smoke-test thresholds for latency, error rate, retry rate, throughput, and concurrent access
+- raw command or job references for the concurrency, throughput, metadata-heavy, and small-file stress runs
+- observed p50/p95/p99 latency and 4xx/5xx/timeout/retry rates by operation where available
+- Iceberg object-count, file-size, manifest, snapshot, delete-file, and orphan-cleanup measurements
+- capacity model showing raw-to-usable ratio, growth assumptions, metadata overhead, and expansion trigger
+- operator-effort record for install, failure drill, restore drill, credential rotation, observability setup, and any runbook fixes
+- explicit pass/fail decision and any ADRs raised for failed thresholds
 
 ---
 

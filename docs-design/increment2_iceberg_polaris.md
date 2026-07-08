@@ -4,20 +4,20 @@
 
 This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the MinIO storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
+Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the Ceph RGW storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
 
-**Prerequisite:** Increment 1 must be complete. All five MinIO buckets must exist and all Increment 1 gate tests must pass before starting this increment.
+**Prerequisite:** Increment 1 must be complete. All five Ceph RGW buckets must exist and all Increment 1 gate tests must pass before starting this increment.
 
 ---
 
 ## 2. Assumptions and Prerequisites
 
-- Increment 1 complete — MinIO cluster running, buckets and service accounts in place
+- Increment 1 complete — Ceph RGW cluster running, buckets and service accounts in place
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the Polaris host
 - JDK 21+ and Maven 3.9+ installed on the verification host
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
-- `svc-polaris` MinIO credentials from Increment 1 are available
+- `svc-polaris` S3 credentials from Increment 1 are available
 
 ### Reference documentation audit
 
@@ -25,28 +25,36 @@ Reference baseline: 2026-07-05.
 
 The current Apache Polaris documentation line lists Polaris 1.5.0. This increment therefore uses a pinned Polaris 1.5.0 image and Iceberg 1.11.0 Java dependencies, aligned with the Spark 4.1 target in Increment 3. Before implementation, verify the exact Polaris, Iceberg, Spark, and Trino versions together and update all increment documents as a set if any upstream release changes the compatibility matrix.
 
-Polaris quickstart-style examples are lab bootstrap guidance, not a production deployment pattern. Production-like deployment must use an external metadata store, hardened credentials, TLS trusted by all engines, and pinned artifacts.
+Polaris quickstart-style examples are developer bootstrap guidance, not the active Stratus deployment pattern. Increment 2 uses a production-ready catalog topology: external catalog metadata store, hardened credentials, TLS trusted by all engines, pinned artifacts, catalog audit logging, and a tested backup/restore path.
 
 ---
 
 ## 3. Topology
 
-Polaris runs as a single Podman container on a dedicated host. For Increment 2 it uses an embedded H2 database as its metadata store. H2 will be replaced with PostgreSQL in a later operational maturity increment.
+Polaris runs as the central Iceberg REST catalog on a dedicated host or approved service placement. The active Increment 2 topology uses an approved external metadata store for catalog state. Embedded H2 is permitted only for disposable developer validation and cannot satisfy the Increment 2 completion gate.
+
+The external metadata store must be one supported by the selected Polaris release and approved for the environment. It must have a named owner, backup schedule, restore procedure, retention policy, monitoring, and an HA/failover posture or explicit RTO/RPO exception before Increment 2 can unblock downstream engines.
 
 ```text
-  Polaris host
   ┌─────────────────────────────────────────┐
-  │  Podman: polaris container              │
-  │  REST Catalog API  :8181 (TLS)          │
-  │  Embedded H2 metadata store            │
+  │  Polaris REST Catalog API :8181 (TLS)   │
+  │  catalog authn/authz + table commits    │
   └─────────────────────────────────────────┘
-           │  catalog metadata
-           │  (namespace, table, schema, snapshot location)
+           │
+           │ catalog state
+           │ namespaces, principals, roles,
+           │ table identifiers, metadata locations
            ▼
   ┌─────────────────────────────────────────┐
-  │  MinIO cluster  (Increment 1)           │
-  │  stratus-bronze / silver / gold /       │
-  │  platform  ← Iceberg data files        │
+  │  Approved external metadata store       │
+  │  backup + restore + monitoring + HA     │
+  └─────────────────────────────────────────┘
+           │
+           │ Iceberg metadata locations point to
+           ▼
+  ┌─────────────────────────────────────────┐
+  │  Ceph RGW endpoint (Increment 1)        │
+  │  data files, metadata files, manifests  │
   └─────────────────────────────────────────┘
 ```
 
@@ -64,7 +72,7 @@ All compute engines added in later increments (Spark, Trino, Flink) connect to P
 
 ## 5. TLS Certificates
 
-Use the same self-signed CA created in Increment 1.
+Use the approved CA chain established in Increment 1. A self-signed CA is acceptable only for disposable developer validation; production-like and readiness runs must use a CA trusted by Polaris clients without `-k` or `--insecure`.
 
 ```bash
 cd ~/stratus-certs
@@ -85,16 +93,28 @@ scp polaris.key polaris.crt ca.crt polaris.stratus.local:/etc/stratus/certs/
 
 ---
 
-## 6. Polaris Container Configuration
+## 6. Polaris Production Configuration
 
-### Data directory
+### Catalog metadata store
 
-Polaris needs a persistent directory for the embedded H2 database files:
+Create or allocate the approved external metadata store before starting Polaris. This may be a PostgreSQL-compatible database or another metadata-store backend explicitly supported by the selected Polaris release and accepted by the platform architecture decision.
+
+The implementation record must capture:
+
+- metadata store product, version, endpoint, database/schema name, and owner
+- service account used by Polaris, without recording secret values
+- backup schedule, retention period, restore command, and last restore-test result
+- HA/failover posture, RTO, RPO, and known operational limits
+- monitoring signals for connectivity, latency, storage growth, lock/contention errors, failed commits, and authentication failures
+- encryption, TLS, and credential-rotation procedure
+
+Example preparation for a PostgreSQL-compatible metadata store:
 
 ```bash
-# On the Polaris host
-sudo mkdir -p /data/polaris
-sudo chown $USER:$USER /data/polaris
+# Example only. Use the approved database host and secret-management process.
+create database polaris;
+create user svc_polaris with password '<stored outside source control>';
+grant all privileges on database polaris to svc_polaris;
 ```
 
 ### Environment file
@@ -105,19 +125,23 @@ Create `/etc/stratus/polaris.env` on the Polaris host:
 # /etc/stratus/polaris.env
 
 # Bootstrap credentials for the Polaris root principal
-# Change before any non-lab use
+# Rotate immediately after bootstrap and store in the approved secret store
 POLARIS_BOOTSTRAP_PRINCIPAL_NAME=stratus-root
-POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL=change-me-before-use
+POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL=<bootstrap secret from approved secret store>
 
-# MinIO connection — used by Polaris to read/write Iceberg metadata files
-MINIO_ENDPOINT=https://minio1.stratus.local:9000
-MINIO_ACCESS_KEY=svc-polaris
-MINIO_SECRET_KEY=<svc-polaris secret from Increment 1>
-MINIO_PATH_STYLE_ACCESS=true
+# External catalog metadata store
+# Exact property names must match the selected Polaris release and backend.
+POLARIS_PERSISTENCE=external
+POLARIS_METADATA_STORE_TYPE=<approved backend type>
+POLARIS_METADATA_STORE_URI=<metadata store JDBC/API URI>
+POLARIS_METADATA_STORE_USER=svc_polaris
+POLARIS_METADATA_STORE_PASSWORD=<svc_polaris secret from approved secret store>
 
-# H2 persistence
-POLARIS_PERSISTENCE=h2
-POLARIS_H2_DATA_DIR=/data/polaris
+# Ceph RGW connection — used by Polaris to read/write Iceberg metadata files
+STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+STRATUS_S3_ACCESS_KEY=svc-polaris
+STRATUS_S3_SECRET_KEY=<svc-polaris secret from Increment 1>
+STRATUS_S3_PATH_STYLE_ACCESS=true
 ```
 
 ### Run Polaris
@@ -128,7 +152,6 @@ podman run -d \
   --hostname polaris.stratus.local \
   --network host \
   --env-file /etc/stratus/polaris.env \
-  -v /data/polaris:/data/polaris:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
   apache/polaris:1.5.0 \
@@ -137,6 +160,19 @@ podman run -d \
 ```
 
 If a different Polaris release is approved, update this image tag and the Iceberg dependency versions in §9 together. Do not use `latest`.
+
+### Optional developer H2 mode
+
+Embedded H2 may be used only for local command validation and disposable developer tests. It is not a lab, production-like, or readiness topology. Do not use H2 evidence to satisfy Increment 2, Phase 1 readiness, backup/restore, HA, or recovery gates.
+
+If a developer needs this mode, keep it in a separate environment file such as `/etc/stratus/polaris-dev-h2.env`:
+
+```bash
+POLARIS_PERSISTENCE=h2
+POLARIS_H2_DATA_DIR=/data/polaris
+```
+
+Any result produced with this mode must be labelled `developer-only` in the evidence record.
 
 ### Verify the container started
 
@@ -150,7 +186,8 @@ Look for `Polaris REST Catalog started` and the API listening on port 8181.
 ### Quick API health check
 
 ```bash
-curl -k https://polaris.stratus.local:8181/api/catalog/v1/config
+curl --cacert /etc/stratus/certs/ca.crt \
+  https://polaris.stratus.local:8181/api/catalog/v1/config
 ```
 
 Expected: a JSON response containing the catalog configuration. A 200 response confirms Polaris is reachable.
@@ -176,12 +213,14 @@ All setup commands use the Polaris REST API directly via `curl`. Replace the bea
 ### Authenticate and obtain a token
 
 ```bash
-TOKEN=$(curl -sk -X POST \
+export POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL=<bootstrap secret from approved secret store>
+
+TOKEN=$(curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/catalog/v1/oauth/tokens \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials" \
   -d "client_id=stratus-root" \
-  -d "client_secret=change-me-before-use" \
+  -d "client_secret=${POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL}" \
   -d "scope=PRINCIPAL_ROLE:ALL" \
   | jq -r '.access_token')
 
@@ -191,7 +230,7 @@ echo "Token acquired: ${TOKEN:0:20}..."
 ### Create the Stratus catalog
 
 ```bash
-curl -sk -X POST \
+curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/management/v1/catalogs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -210,7 +249,7 @@ curl -sk -X POST \
         "s3://stratus-gold",
         "s3://stratus-platform"
       ],
-      "s3.endpoint": "https://minio1.stratus.local:9000",
+      "s3.endpoint": "https://object-store.stratus.local",
       "s3.access-key-id": "svc-polaris",
       "s3.secret-access-key": "<svc-polaris secret>",
       "s3.path-style-access": "true"
@@ -222,7 +261,7 @@ curl -sk -X POST \
 
 ```bash
 for NS in bronze silver gold platform; do
-  curl -sk -X POST \
+  curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
     https://polaris.stratus.local:8181/api/catalog/v1/stratus/namespaces \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -243,14 +282,14 @@ Each compute engine that connects to Polaris needs a Polaris principal with appr
 
 ```bash
 # Create principal for Spark
-curl -sk -X POST \
+curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/management/v1/principals \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "svc-spark", "type": "SERVICE"}'
 
 # Create principal for Trino (read-only to queryable namespaces)
-curl -sk -X POST \
+curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/management/v1/principals \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -327,7 +366,7 @@ Add to `pom.xml`:
     <version>1.13.1</version>
 </dependency>
 
-<!-- AWS S3 FileIO — used by Iceberg to read/write MinIO -->
+<!-- AWS S3 FileIO — used by Iceberg to read/write Ceph RGW -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-aws</artifactId>
@@ -355,9 +394,9 @@ The verification suite reads all connection details from environment variables:
 | `STRATUS_POLARIS_CLIENT_ID` | Polaris principal client id |
 | `STRATUS_POLARIS_CLIENT_SECRET` | Polaris principal client secret |
 | `STRATUS_POLARIS_CATALOG` | Catalog name — `stratus` |
-| `STRATUS_MINIO_ENDPOINT` | e.g. `https://minio1.stratus.local:9000` |
-| `STRATUS_MINIO_ACCESS_KEY` | `svc-polaris` access key |
-| `STRATUS_MINIO_SECRET_KEY` | `svc-polaris` secret key |
+| `STRATUS_S3_ENDPOINT` | e.g. `https://object-store.stratus.local` |
+| `STRATUS_S3_ACCESS_KEY` | `svc-polaris` access key |
+| `STRATUS_S3_SECRET_KEY` | `svc-polaris` secret key |
 
 ### Shared catalog client helper
 
@@ -379,9 +418,9 @@ public class PolarisTestClient {
         String clientId     = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog      = System.getenv("STRATUS_POLARIS_CATALOG");
-        String minioEndpoint = System.getenv("STRATUS_MINIO_ENDPOINT");
-        String accessKey    = System.getenv("STRATUS_MINIO_ACCESS_KEY");
-        String secretKey    = System.getenv("STRATUS_MINIO_SECRET_KEY");
+        String s3Endpoint = System.getenv("STRATUS_S3_ENDPOINT");
+        String accessKey    = System.getenv("STRATUS_S3_ACCESS_KEY");
+        String secretKey    = System.getenv("STRATUS_S3_SECRET_KEY");
 
         Map<String, String> properties = new HashMap<>();
         properties.put(CatalogProperties.URI, uri);
@@ -389,7 +428,7 @@ public class PolarisTestClient {
         properties.put("scope", "PRINCIPAL_ROLE:ALL");
         properties.put(CatalogProperties.WAREHOUSE_LOCATION, "s3://stratus-bronze");
         properties.put(CatalogProperties.FILE_IO_IMPL, "org.apache.iceberg.aws.s3.S3FileIO");
-        properties.put("s3.endpoint", minioEndpoint);
+        properties.put("s3.endpoint", s3Endpoint);
         properties.put("s3.access-key-id", accessKey);
         properties.put("s3.secret-access-key", secretKey);
         properties.put("s3.path-style-access", "true");
@@ -693,9 +732,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_MINIO_ENDPOINT=https://minio1.stratus.local:9000
-export STRATUS_MINIO_ACCESS_KEY=svc-polaris
-export STRATUS_MINIO_SECRET_KEY=<svc-polaris secret>
+export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
+export STRATUS_S3_ACCESS_KEY=svc-polaris
+export STRATUS_S3_SECRET_KEY=<svc-polaris secret>
 
 mvn test -pl . -Dtest=IcebergPolarisVerificationTest
 ```
@@ -708,30 +747,31 @@ All ten tests must pass before Increment 2 is considered complete.
 
 Once the verification suite passes, perform these additional checks before signing off Increment 2.
 
-### Confirm table metadata is stored in MinIO
+### Confirm table metadata is stored in Ceph RGW
 
 Iceberg metadata files (`.metadata.json`, manifest lists, manifests) should be visible in the bronze bucket:
 
 ```bash
-mc ls --recursive stratus/stratus-bronze/
+aws --endpoint-url "$STRATUS_S3_ENDPOINT" \
+  s3 ls --recursive s3://stratus-bronze/
 ```
 
 Expect to see:
 - `metadata/` directory with `.metadata.json` and `.avro` manifest files
 - `data/` directory with `.parquet` data files
 
-This confirms Polaris is correctly directing Iceberg to write metadata and data into MinIO.
+This confirms Polaris is correctly directing Iceberg to write metadata and data into the approved Ceph RGW S3 endpoint.
 
 ### Confirm namespace properties in Polaris
 
 ```bash
-TOKEN=$(curl -sk -X POST \
+TOKEN=$(curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/catalog/v1/oauth/tokens \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=stratus-root&client_secret=change-me-before-use&scope=PRINCIPAL_ROLE:ALL" \
+  -d "grant_type=client_credentials&client_id=stratus-root&client_secret=${POLARIS_BOOTSTRAP_PRINCIPAL_CREDENTIAL}&scope=PRINCIPAL_ROLE:ALL" \
   | jq -r '.access_token')
 
-curl -sk \
+curl --cacert /etc/stratus/certs/ca.crt -s \
   https://polaris.stratus.local:8181/api/catalog/v1/stratus/namespaces \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
@@ -741,7 +781,7 @@ All four namespaces (`bronze`, `silver`, `gold`, `platform`) must be listed.
 ### Confirm `platform.quality_check_results` table
 
 ```bash
-curl -sk \
+curl --cacert /etc/stratus/certs/ca.crt -s \
   https://polaris.stratus.local:8181/api/catalog/v1/stratus/namespaces/platform/tables \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
@@ -750,25 +790,44 @@ The `quality_check_results` table must appear in the response.
 
 ---
 
-## 11. Completion Gate
+## 11. Catalog Production Evidence
+
+Increment 2 must produce production-readiness evidence for the catalog control plane before Increment 3 begins:
+
+- approved external Polaris metadata store, with product/version, endpoint, schema/database, owner, backup schedule, retention, and restore procedure documented
+- restore test proving catalog metadata, Iceberg metadata files, manifests, and object data can be recovered to a consistent point
+- validation that restored Polaris resolves table identifiers to the expected Iceberg metadata locations in Ceph RGW
+- catalog audit logging for namespace, table, principal, role, credential, and metadata-location changes
+- metrics and alerts for authentication failure, commit failure, catalog latency, metadata-store connectivity, metadata-store latency, and storage growth
+- HA/failover posture for Polaris and the metadata store, or a documented RTO/RPO exception accepted by platform operations
+- credential vending if supported and approved, or an explicit service-credential model that prevents engines from bypassing the catalog and object-store policy contract
+- rotation test for Polaris bootstrap/root credential, service principal credentials, and metadata-store credentials
+
+---
+
+## 12. Completion Gate
 
 Increment 2 is complete when all of the following are true:
 
 - [ ] Polaris container running and managed by systemd on `polaris.stratus.local`
 - [ ] Polaris REST API responding at `https://polaris.stratus.local:8181` with TLS
+- [ ] Polaris uses the approved external metadata store; embedded H2 is not used for completion evidence
+- [ ] Metadata-store backup, restore, monitoring, and HA/failover posture are documented and tested
 - [ ] `stratus` catalog created in Polaris
 - [ ] Four namespaces exist: `bronze`, `silver`, `gold`, `platform`
 - [ ] `svc-spark` and `svc-trino` principals created in Polaris with correct roles
 - [ ] `platform.quality_check_results` Iceberg table created with correct schema
 - [ ] `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
-- [ ] Iceberg metadata files visible in MinIO buckets via `mc ls`
+- [ ] Iceberg metadata files visible in Ceph RGW buckets through the approved S3 client
+- [ ] Restored Polaris resolves table identifiers to the same expected Iceberg metadata locations in Ceph RGW
+- [ ] Catalog audit logging and catalog/metadata-store alerts are configured
 - [ ] Polaris logs show no errors during the verification test run
 
 When all gates are checked, Increment 3 (Apache Spark) can begin.
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Polaris container exits on startup
 
@@ -778,7 +837,7 @@ podman logs polaris
 
 Common causes:
 - Certificate path mismatch — confirm the `--tls-certificate` and `--tls-key` paths match the volume mount
-- H2 data directory not writable — confirm `/data/polaris` is owned by the running user
+- Metadata-store connection failure — confirm endpoint, credentials, TLS trust, database/schema permissions, and network route
 - Port 8181 already in use — `ss -tlnp | grep 8181`
 
 ### `401 Unauthorized` from Polaris API
@@ -787,12 +846,12 @@ Common causes:
 - Confirm the `scope` parameter is included in the token request: `scope=PRINCIPAL_ROLE:ALL`
 - Check that the token has not expired (default TTL is typically 1 hour)
 
-### Iceberg cannot write to MinIO
+### Iceberg cannot write to Ceph RGW
 
-- Confirm `s3.path-style-access=true` is set — MinIO requires path-style access
-- Confirm the `svc-polaris` credentials have write access to the target bucket in MinIO
-- Confirm the MinIO endpoint in Polaris storage config matches the running MinIO cluster
-- Test MinIO access directly: `mc ls stratus/stratus-bronze/`
+- Confirm `s3.path-style-access=true` is set unless virtual-hosted bucket access has been explicitly validated for the environment
+- Confirm the `svc-polaris` credentials have write access to the target bucket in Ceph RGW
+- Confirm the S3 endpoint in Polaris storage config matches the running Ceph RGW cluster
+- Test Ceph RGW access directly: `aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls s3://stratus-bronze/`
 
 ### `NoSuchTableException` in verification test
 
@@ -802,19 +861,18 @@ Common causes:
 ### Verification test runs but parquet read returns zero rows
 
 - The Iceberg snapshot may not have been committed — ensure `.commit()` was called after `newAppend()`
-- Confirm the FileIO properties (MinIO endpoint, credentials) are correctly set in `PolarisTestClient`
+- Confirm the FileIO properties (S3 endpoint, credentials) are correctly set in `PolarisTestClient`
 
 ---
 
-## 13. References
+## 14. References
 
 - Apache Polaris documentation: https://polaris.apache.org/
 - Apache Polaris GitHub: https://github.com/apache/polaris
-- Apache Polaris MinIO guide: https://polaris.apache.org/guides/minio/
 - Apache Iceberg Java API: https://iceberg.apache.org/docs/latest/java-api-quickstart/
 - Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
-- MinIO S3 compatibility: https://min.io/docs/minio/linux/reference/s3-api-compatibility.html
+- Ceph RGW S3 compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [on_prem_data_fabric_architecture.md](on_prem_data_fabric_architecture.md)
-- Increment 1 — MinIO: [increment1_minio.md](increment1_minio.md)
+- Increment 1 — Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
