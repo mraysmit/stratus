@@ -19,8 +19,8 @@ The Stratus platform is built in layers. Each layer depends on the one below it 
 ```text
 Layer 7 — Identity and Security      FreeIPA · Keycloak · TLS hardening
 Layer 6 — Governance                 Apache Atlas · Apache Ranger
-Layer 5 — Orchestration              Apache Airflow
-Layer 4 — Query                      Trino
+Layer 5 — Query                      Trino
+Layer 4 — Orchestration              Apache Airflow
 Layer 3 — Compute                    Apache Spark
 Layer 2 — Tables and Catalog         Apache Iceberg · Apache Polaris
 Layer 1 — Storage                    Ceph RGW object storage
@@ -32,7 +32,100 @@ After Layer 7, Phase 1 closes with an operational acceptance and production-read
 
 ---
 
-## 3. Increment 1 — Storage Foundation
+## 3. Progress Tracking Model
+
+The increment sections below define the implementation sequence and acceptance intent. Day-to-day progress should be tracked at the work-package level, not at the command or checklist-line level. A work package is the smallest unit that can be owned, blocked, reviewed, and accepted with evidence.
+
+Use the following status values consistently:
+
+| Status | Meaning |
+|---|---|
+| Not started | Work has not begun. Dependencies may still be open. |
+| In progress | Implementation work is underway. |
+| Blocked | Work cannot continue without a decision, dependency, environment, credential, or external fix. |
+| Built | The implementation artifact exists, but verification evidence is not complete. |
+| Verified | Required tests and evidence are complete. |
+| Accepted | The owning reviewer has accepted the evidence and the next dependent work can proceed. |
+
+Every work package should have:
+
+- a named owner
+- a dependency or explicit statement that no dependency remains
+- an expected artifact
+- verification evidence
+- an acceptance reviewer
+- current status
+- any blocker or material risk
+
+The implementation tracker should use this shape:
+
+| ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
+|---|---|---|---|---|---|---|
+| P1-1.1 | Example work package | Delivery owner role | Prior accepted gate or external prerequisite | Link to command output, test report, config snapshot, dashboard screenshot, ADR, or runbook section | Acceptance owner role | Not started |
+
+Evidence should be durable enough that another engineer can understand what passed without rerunning the whole platform. Acceptable evidence includes test reports, command transcripts, query output, dashboard exports or screenshots, configuration snapshots, run IDs, ADRs, benchmark results, and signed-off runbook entries.
+
+### Phase 1 Work-Package Tracker
+
+| ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
+|---|---|---|---|---|---|---|
+| P1-1.1 | Storage decision and due-diligence evidence | Platform architect | Architecture storage requirements | Completed Ceph RGW vs Apache Ozone decision record, scoring, proof-of-fit targets, and accepted production path | Architecture owner | Not started |
+| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | Not started |
+| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | Not started |
+| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | Not started |
+| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | Not started |
+| P1-1.6 | Storage performance and cost evidence | Storage owner | P1-1.4 | Concurrent access, scan throughput, write throughput, metadata-heavy, small-file, latency/error, capacity, and operator-effort results | Platform owner | Not started |
+| P1-2.1 | Polaris production metadata store | Data platform owner | P1-1 accepted | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Not started |
+| P1-2.2 | Polaris service deployment | Data platform owner | P1-2.1 | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | Not started |
+| P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2, P1-1.4 | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | Not started |
+| P1-2.4 | Iceberg verification tables | Data platform owner | P1-2.3 | Bronze/silver/gold test tables and `platform.quality_check_results` created and readable | Data engineering owner | Not started |
+| P1-2.5 | Metadata-driven maintenance verification | Data platform owner | P1-2.4 | Metadata table queries and threshold-based maintenance decisions for files, snapshots, manifests, delete files, and orphan files | Data engineering owner | Not started |
+| P1-2.6 | Catalog backup, restore, and audit | Data platform owner | P1-2.4 | Restore drill proving catalog, Iceberg metadata, manifests, and objects return to a consistent point; audit events captured | Operations owner | Not started |
+| P1-3.1 | Spark runtime and cluster | Data engineering owner | P1-2 accepted | Spark standalone services running on Podman, image/artifact pin evidence, Spark UI or service health | Platform owner | Not started |
+| P1-3.2 | Spark catalog and object-store configuration | Data engineering owner | P1-3.1, P1-2.3 | Spark resolves Polaris tables and reads/writes Ceph RGW with `svc-spark` | Data platform owner | Not started |
+| P1-3.3 | Bronze ingestion job | Data engineering owner | P1-3.2 | Landing file produces bronze Iceberg table with expected schema and row count | Data owner | Not started |
+| P1-3.4 | Silver and gold transformation jobs | Data engineering owner | P1-3.3 | Deduplicated silver output and aggregated gold output validated against expected results | Data owner | Not started |
+| P1-3.5 | Quality and promotion gate | Data engineering owner | P1-3.4 | Passing and failing quality cases written to `platform.quality_check_results`; failed promotion blocked | Data owner | Not started |
+| P1-3.6 | Spark maintenance and lineage payloads | Data engineering owner | P1-3.5 | Metadata-driven maintenance run evidence and logged lineage payloads for each job | Data platform owner | Not started |
+| P1-4.1 | Airflow platform deployment | Operations owner | P1-3 accepted | Airflow services and PostgreSQL metadata database healthy; DAG directory/version recorded | Platform owner | Not started |
+| P1-4.2 | Spark submission from Airflow | Operations owner | P1-4.1, P1-3.1 | Airflow task submits a Spark job with approved service credentials | Data engineering owner | Not started |
+| P1-4.3 | Batch pipeline DAGs | Data engineering owner | P1-4.2 | Ingestion, bronze-to-silver, and silver-to-gold DAG run evidence with run IDs | Data owner | Not started |
+| P1-4.4 | Quality gates in orchestration | Data engineering owner | P1-4.3, P1-3.5 | DAG success path and deliberate quality-failure halt evidence | Data owner | Not started |
+| P1-4.5 | Maintenance DAG and alerts | Operations owner | P1-4.3, P1-3.6 | Metadata-threshold maintenance DAG evidence, task failure alert, Deadline Alert evidence | Operations owner | Not started |
+| P1-5.1 | Trino cluster deployment | Query platform owner | P1-4 accepted | Trino coordinator/worker health, version pin, configuration snapshot | Platform owner | Not started |
+| P1-5.2 | Trino Polaris and Ceph access | Query platform owner | P1-5.1, P1-2.3 | Trino resolves Polaris tables and reads Ceph-backed Iceberg data through approved credentials | Data platform owner | Not started |
+| P1-5.3 | Bronze/silver/gold query validation | Query platform owner | P1-5.2, P1-3.4 | Row counts, schemas, joins, and aggregates match Spark-produced outputs | Data owner | Not started |
+| P1-5.4 | Quality-results query validation | Query platform owner | P1-5.2, P1-3.5 | `platform.quality_check_results` visible through Trino with expected pass/fail rows | Data owner | Not started |
+| P1-5.5 | JDBC verification suite | Query platform owner | P1-5.3 | `TrinoQueryVerificationTest` report against the live cluster | Platform owner | Not started |
+| P1-6.1 | Atlas deployment and model setup | Governance owner | P1-5 accepted | Atlas health, entity type registration, authentication mode, graph/search state evidence | Governance owner | Not started |
+| P1-6.2 | Ranger deployment and baseline policies | Security owner | P1-5 accepted | Ranger health, usersync source, policy export for bronze/silver/gold zones | Security owner | Not started |
+| P1-6.3 | Dataset registration and lineage publication | Governance owner | P1-6.1, P1-3.6 | Atlas entities and lineage for source-to-bronze-to-silver-to-gold runs | Data owner | Not started |
+| P1-6.4 | Quality status metadata | Governance owner | P1-6.3, P1-3.5 | Atlas entity quality status reflects latest quality run | Data owner | Not started |
+| P1-6.5 | Ranger allow/deny and classification tests | Security owner | P1-6.2, P1-6.3 | Allow, deny, and PII classification enforcement evidence through Trino | Security owner | Not started |
+| P1-7.1 | FreeIPA deployment and service identities | Security owner | P1-6 accepted | FreeIPA health, groups, service principals, keytab validation | Security owner | Not started |
+| P1-7.2 | Keycloak federation and OIDC clients | Security owner | P1-7.1 | Keycloak realm/client export, token issuance, issuer/claim validation | Security owner | Not started |
+| P1-7.3 | Service authentication migration | Security owner | P1-7.2 | Polaris, Airflow, Trino, Ranger, and Atlas use approved FreeIPA/Keycloak paths | Platform owner | Not started |
+| P1-7.4 | TLS certificate replacement | Security owner | P1-7.1 | FreeIPA Dogtag-issued certificates deployed and validated for all service endpoints | Security owner | Not started |
+| P1-7.5 | Encryption-at-rest and credential rotation | Security owner | P1-7.1, P1-1.4 | Ceph/RGW encryption evidence for gold/platform zones and rotation runbook test | Security owner | Not started |
+| P1-7.6 | Integrated security verification | Security owner | P1-7.3, P1-7.4, P1-7.5 | Positive and negative authentication, authorization, TLS, and no-shared-credential evidence | Platform owner | Not started |
+| P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
+
+### Phase 1 Gate Tracker
+
+| Gate | Required evidence | Accepted by | Status |
+|---|---|---|---|
+| Increment 1 accepted | Storage decision, Ceph health, RGW TLS, bucket/credential tests, compatibility tests, performance/cost evidence | Platform architecture and operations owners | Not started |
+| Increment 2 accepted | Polaris production metadata store, namespace/table tests, Iceberg maintenance tests, catalog/object restore drill, audit evidence | Platform architecture and data platform owners | Not started |
+| Increment 3 accepted | Spark runtime, ingestion, transformation, materialisation, quality, promotion, maintenance, and lineage-payload evidence | Data engineering owner | Not started |
+| Increment 4 accepted | Airflow deployment, DAG runs, quality gate halt, maintenance DAG, retry and alert evidence | Platform operations and data engineering owners | Not started |
+| Increment 5 accepted | Trino deployment, Polaris table resolution, query correctness, quality-results access, JDBC test evidence | Query platform owner | Not started |
+| Increment 6 accepted | Atlas registration/lineage, Ranger policies, classification enforcement, allow/deny evidence | Governance and security owners | Not started |
+| Increment 7 accepted | FreeIPA, Keycloak, TLS, service authentication, encryption, credential rotation, positive/negative security tests | Security owner | Not started |
+| Phase 1 production-readiness accepted | Integrated backup/restore, DR, observability, security, performance, support, and operational acceptance evidence | Platform owner, operations owner, security owner, and data owner | Not started |
+
+---
+
+## 4. Increment 1 — Storage Foundation
 
 ### What we are building
 Ceph Object Gateway (RGW) backed by a Ceph storage cluster — the production on-prem object-storage substrate for all platform data.
@@ -83,7 +176,7 @@ Object storage is operational. A file written to `stratus-landing` through Ceph 
 
 ---
 
-## 4. Increment 2 — Tables and Catalog
+## 5. Increment 2 — Tables and Catalog
 
 ### What we are building
 Apache Iceberg table format and Apache Polaris REST catalog — the semantic layer that turns Ceph-backed object storage into a governed, multi-engine table platform.
@@ -123,7 +216,7 @@ Iceberg tables exist in Ceph-backed object storage, managed by Polaris. A parque
 
 ---
 
-## 5. Increment 3 — Batch Compute
+## 6. Increment 3 — Batch Compute
 
 ### What we are building
 Apache Spark — the primary batch ETL and transformation engine.
@@ -164,7 +257,7 @@ Data flows from a raw source file through bronze, silver, and gold Iceberg table
 
 ---
 
-## 6. Increment 4 — Orchestration
+## 7. Increment 4 — Orchestration
 
 ### What we are building
 Apache Airflow — the scheduler and control-plane for batch workflows.
@@ -203,7 +296,7 @@ The batch pipeline runs on a schedule without manual intervention. Quality gates
 
 ---
 
-## 7. Increment 5 — Interactive Query
+## 8. Increment 5 — Interactive Query
 
 ### What we are building
 Trino — the shared interactive SQL query plane over governed Iceberg datasets.
@@ -239,7 +332,7 @@ An analyst can run SQL against curated Iceberg datasets via Trino without touchi
 
 ---
 
-## 8. Increment 6 — Metadata and Governance
+## 9. Increment 6 — Metadata and Governance
 
 ### What we are building
 Apache Atlas and Apache Ranger — the metadata, lineage, classification, and access control plane.
@@ -284,7 +377,7 @@ Every dataset in the platform has an Atlas entry with ownership, lineage, and qu
 
 ---
 
-## 9. Increment 7 — Identity and Security Hardening
+## 10. Increment 7 — Identity and Security Hardening
 
 ### What we are building
 FreeIPA and Keycloak — the Linux-native identity foundation — and full TLS hardening across all platform services.
@@ -331,7 +424,7 @@ The platform is fully secured. Every service authenticates via FreeIPA Kerberos 
 
 ---
 
-## 10. Increment Summary
+## 11. Increment Summary
 
 | Increment | Builds | Demonstrated outcome |
 |---|---|---|
@@ -342,10 +435,11 @@ The platform is fully secured. Every service authenticates via FreeIPA Kerberos 
 | **5 — Interactive Query** | Trino | Analysts query curated Iceberg data via SQL without touching infrastructure |
 | **6 — Governance** | Atlas + Ranger | Lineage recorded; classifications enforced; access policy controls data zone access |
 | **7 — Identity** | FreeIPA + Keycloak | All services secured; Kerberos and OIDC authentication; no shared credentials |
+| **Readiness gate** | Operational acceptance | Backup/restore, observability, security, DR, support, and production-readiness evidence accepted |
 
 ---
 
-## 11. What This Plan Does Not Cover
+## 12. What This Plan Does Not Cover
 
 The following are explicitly deferred and belong to later increments:
 
@@ -358,7 +452,7 @@ Operational production-readiness signoff is covered by [stratus_phase1_operation
 
 ---
 
-## 12. Design Documents
+## 13. Design Documents
 
 - [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
 - [increment1_ceph.md](increment1_ceph.md) — Increment 1 Ceph object storage foundation implementation plan
