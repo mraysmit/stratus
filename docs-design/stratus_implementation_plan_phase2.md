@@ -9,7 +9,7 @@ Phase 1 establishes the governed batch lakehouse foundation: Ceph RGW, Iceberg, 
 The Phase 2 goal is simple: **make governed data movement continuous where continuous movement is justified**. Batch remains the right tool for bounded workloads. Streaming is added for CDC, event streams, replay, low-latency ingestion, and stateful processing.
 
 References:
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md)
 
@@ -56,22 +56,22 @@ Phase 2 uses fast-moving projects. Before implementation, the platform team must
 
 | Component | Phase 2 target |
 |---|---|
-| Apache Kafka | 4.3.1, latest ASF release artifact visible in the Apache download index |
+| Apache Kafka | 4.3.1, pinned by artifact checksum or internal image digest in the Phase 2 version matrix |
 | Kafka Connect | bundled with the selected Kafka release |
-| Debezium | 3.6 latest stable series |
-| Apache Flink | latest stable line is 2.3.0; Phase 2 implementation pin is 2.1.1 until Kafka connector and Iceberg runtime compatibility move together |
-| Apache Flink CDC | 3.6.0 latest stable, if direct Flink CDC connectors are used |
-| Apache Iceberg | 1.11.0 unless superseded by a newer release before implementation |
+| Debezium | 3.6 series, with exact patch version and connector artifact pinned in the Phase 2 version matrix |
+| Apache Flink | 2.1.1 implementation pin until Kafka connector and Iceberg runtime compatibility move together |
+| Apache Flink CDC | 3.6.0 if direct Flink CDC connectors are used; exact artifact pinned in the Phase 2 version matrix |
+| Apache Iceberg | 1.11.0 unless a newer approved release is selected and all dependent runtime artifacts are updated together |
 | Iceberg Flink runtime | must match the selected Flink major/minor line; Iceberg 1.11.0 publishes Flink 2.1, 2.0, and 1.20 runtime jars |
 | Apache Polaris | 1.5.0 unless superseded by a newer approved release before implementation |
 | Apache Atlas | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Apache Ranger | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Java | 21 where supported; do not introduce Java 8 or Java 11-era examples |
 
-Important compatibility rule: do not select Flink solely by latest version number if the selected Iceberg release does not publish or document a compatible Flink runtime. The implementation owner must choose either:
+Important compatibility rule: do not select Flink solely by release recency if the selected Iceberg release does not publish or document a compatible Flink runtime. The implementation owner must choose either:
 
-- the latest stable Flink release with an officially compatible Iceberg runtime, or
-- the latest stable Flink release plus a documented, tested Iceberg connector build path approved by platform engineering.
+- a pinned Flink release with an officially compatible Iceberg runtime, or
+- a pinned Flink release plus a documented, tested Iceberg connector build path approved by platform engineering.
 
 No Phase 2 increment should use floating image tags, unverified connector versions, copied quickstart defaults, or ZooKeeper-era Kafka assumptions.
 
@@ -376,7 +376,7 @@ Phase 2 should hand off:
 
 ## 14. Design Documents
 
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) - Phase 3 query acceleration and data products implementation plan
 - [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate

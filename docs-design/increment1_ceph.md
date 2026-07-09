@@ -51,7 +51,7 @@ The main tradeoff is operational complexity. Ceph is a real storage platform, no
 
 ## 3. Storage Decision
 
-The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This increment implements the current candidate baseline selected there: **Ceph Object Gateway (RGW)** on a production Ceph cluster.
+The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This increment implements the current candidate baseline selected there: **Ceph Object Gateway (RGW)** on a production Ceph cluster.
 
 ### Implementation target
 
@@ -1548,4 +1548,4 @@ No production dataset should be onboarded based only on a single-node or non-sec
 - Apache Iceberg S3 FileIO documentation: https://iceberg.apache.org/docs/latest/aws/
 - Trino S3 file system support: https://trino.io/docs/current/object-storage/file-system-s3.html
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)

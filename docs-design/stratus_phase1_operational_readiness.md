@@ -13,7 +13,7 @@ Phase 1 is accepted only when the platform can prove three things:
 3. Security, governance, and quality controls remain enforced during normal operations and failure scenarios.
 
 Reference:
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 
 ---
@@ -571,7 +571,7 @@ After this gate passes, Phase 1 can onboard controlled production datasets or pr
 
 ## 19. References
 
-- Main architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Main architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Increment 1 - Ceph RGW: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 - Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

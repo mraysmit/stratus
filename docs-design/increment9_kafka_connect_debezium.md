@@ -41,7 +41,7 @@ DNS names used in this increment:
 
 Reference baseline: 2026-07-05.
 
-Debezium 3.6 is the latest stable series and its tested-version table lists Java 17+ for connectors, Kafka Connect 3.1 and later, and PostgreSQL 14 through 18 with `pgoutput`. Increment 9 targets Debezium 3.6 with Kafka Connect bundled from the selected Kafka 4.3.1 runtime.
+The approved Debezium compatibility target for this increment is the Debezium 3.6 series with Kafka Connect bundled from the selected Kafka 4.3.1 runtime. The exact Debezium patch artifact must be pinned in the Phase 2 version matrix.
 
 Before implementation, confirm the exact Debezium 3.6 patch artifact, Kafka Connect compatibility notes, PostgreSQL connector properties, source database versions, and connector image build path. If a newer Debezium stable series is selected, update this document, plugin artifacts, test expectations, and connector templates together.
 

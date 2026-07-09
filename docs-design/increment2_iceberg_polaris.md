@@ -874,5 +874,5 @@ Common causes:
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
 - Ceph RGW S3 API compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)

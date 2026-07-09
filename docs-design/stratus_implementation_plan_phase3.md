@@ -9,7 +9,7 @@ Phase 1 establishes the governed batch lakehouse foundation. Phase 2 adds stream
 Phase 3 should not be treated as "install Firebolt." Firebolt Core is optional. The phase succeeds when curated data products are reliable, governed, discoverable, measurable, and useful to consuming teams. Query acceleration is added only where Trino and Iceberg evidence show a real serving need.
 
 References:
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 
@@ -332,7 +332,7 @@ The following remain deferred to Phase 4 or later:
 
 ## 14. Design Documents
 
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) - full architecture specification and component decisions
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) - Phase 2 streaming implementation plan
 - [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate

@@ -835,7 +835,7 @@ Common causes:
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
 - Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
