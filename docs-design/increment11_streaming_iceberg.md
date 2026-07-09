@@ -87,7 +87,7 @@ Ceph RGW data files
       └── Ranger policy enforcement through Trino
 ```
 
-Flink must use Polaris as the Iceberg catalog. Direct table paths, local Hadoop catalogs, ad hoc metadata locations, and engine-local catalogs are not accepted for governed tables.
+Flink must use Polaris as the Iceberg catalog. Direct table paths, file-backed local catalogs, ad hoc metadata locations, and engine-local catalogs are not accepted for governed tables.
 
 ---
 

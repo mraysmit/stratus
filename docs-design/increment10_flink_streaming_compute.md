@@ -41,7 +41,7 @@ DNS names used in this increment:
 
 Reference baseline: 2026-07-05.
 
-The Apache Flink downloads page lists Flink 2.3.0 as the latest release, but the connector compatibility needed for this phase matters more than the headline version. Flink Kafka Connector 5.0.0 is listed as compatible with Flink 2.1.x and 2.2.x, and Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact for streaming table writes in Increment 11. Increment 10 therefore targets Flink 2.1.1 with Flink Kafka Connector 5.0.0 as the current compatible implementation pin for the Kafka-to-Iceberg Phase 2 path.
+The approved Flink compatibility target for this increment is Flink 2.1.1 with Flink Kafka Connector 5.0.0. Connector compatibility matters more than release recency: Flink Kafka Connector 5.0.0 is listed as compatible with Flink 2.1.x and 2.2.x, and Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact for streaming table writes in Increment 11.
 
 Do not target Flink 2.3.0 for this increment until the Kafka connector, Iceberg runtime, and verification jobs are confirmed compatible with that line.
 

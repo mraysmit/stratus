@@ -25,9 +25,9 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 
 Reference baseline: 2026-07-05.
 
-The current Apache Spark release line includes Spark 4.1.2 as the latest stable 4.1 maintenance release, while Spark 4.2.0 is still a preview release. This increment therefore targets Spark 4.1.2 with Scala 2.13 and Iceberg 1.11.0's Spark 4.1 runtime artifact. Do not fall back to the older Spark 3.5 / Scala 2.12 examples unless the platform records an explicit compatibility exception.
+The approved Spark compatibility target for this increment is Spark 4.1.2 with Scala 2.13 and Iceberg 1.11.0's Spark 4.1 runtime artifact. Spark 4.2.0 is not part of this increment unless the platform records a new compatibility decision. Do not fall back to the older Spark 3.5 / Scala 2.12 examples unless the platform records an explicit compatibility exception.
 
-Before implementation, confirm the exact container image tags and Maven artifacts still match the latest stable upstream releases. Do not mix a newer Spark major version with older Iceberg runtime artifacts without verifying the upstream compatibility notes and running the Increment 2 and 3 verification suites.
+Before implementation, confirm the exact container image tags and Maven artifacts match the approved version matrix. Do not mix a newer Spark major version with older Iceberg runtime artifacts without verifying the upstream compatibility notes and running the Increment 2 and 3 verification suites.
 
 ---
 
@@ -96,9 +96,9 @@ ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar \
     /opt/spark/jars/
 
-# Hadoop AWS is required only if Spark internals use s3a:// paths outside Iceberg S3FileIO.
-# If enabled, pin hadoop-aws and its AWS SDK dependencies to the Hadoop version bundled in
-# the selected Spark image; do not copy Hadoop 3.3.x jars into a Spark 4.1 image.
+# The s3a connector is required only if Spark internals use s3a:// paths outside Iceberg S3FileIO.
+# If enabled, pin the hadoop-aws artifact and AWS SDK dependencies to the filesystem
+# implementation bundled in the selected Spark image; do not copy unrelated older jars into it.
 
 USER spark
 ```
@@ -155,7 +155,7 @@ spark.hadoop.fs.s3a.path.style.access           true
 spark.hadoop.fs.s3a.connection.ssl.enabled      true
 
 # Event log — write to a mounted local path for job history.
-# If this is changed to s3a://, add hadoop-aws dependencies that match the Spark-bundled Hadoop version.
+# If this is changed to s3a://, add the matching s3a connector dependencies for the selected Spark image.
 spark.eventLog.enabled                          true
 spark.eventLog.dir                              file:///data/spark-events
 
@@ -784,7 +784,7 @@ Spark event logs are written to the mounted local path `/data/spark-events`. Con
 sudo ls -lah /data/spark-events
 ```
 
-Expected: application event log files exist after the test run. If the environment changes this path to `s3a://`, the Spark image must include `hadoop-aws` and AWS SDK dependencies that match the Hadoop version bundled in the selected Spark image.
+Expected: application event log files exist after the test run. If the environment changes this path to `s3a://`, the Spark image must include the matching s3a connector and AWS SDK dependencies for the selected Spark image.
 
 ### Submit a test job via spark-submit
 
@@ -877,6 +877,6 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 - Iceberg Spark SQL extensions: https://iceberg.apache.org/docs/latest/spark-ddl/
 - Apache Spark Docker images: https://hub.docker.com/r/apache/spark
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+- Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
 - Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)

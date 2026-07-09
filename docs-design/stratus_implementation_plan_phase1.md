@@ -8,7 +8,7 @@ The architecture document defines what the platform is and why each component ex
 
 The guiding principle is simple: **build the stack from the bottom up**. Storage before tables. Tables before compute. Compute before orchestration. Query before governance. Identity last, hardening what already works. Each increment should leave the platform in a working, demonstrable state.
 
-Reference: [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
+Reference: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 
 ---
 
@@ -133,7 +133,7 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 
 ### What is delivered
 
-- Apache Spark cluster deployed (standalone or YARN mode for initial deployment)
+- Apache Spark standalone cluster deployed on Podman containers
 - Spark configured to use Apache Polaris as its Iceberg catalog
 - Spark configured to read and write to Ceph RGW using approved `svc-spark` S3 credentials
 - An ingestion job: reads a CSV or JSON file from `stratus-landing`, writes it as an Iceberg table in `stratus-bronze`
@@ -360,7 +360,7 @@ Operational production-readiness signoff is covered by [stratus_phase1_operation
 
 ## 12. Design Documents
 
-- [on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
+- [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
 - [increment1_ceph.md](increment1_ceph.md) — Increment 1 Ceph object storage foundation implementation plan
 - [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) — Increment 2 table and catalog implementation plan
 - [increment3_spark.md](increment3_spark.md) — Increment 3 batch compute implementation plan
