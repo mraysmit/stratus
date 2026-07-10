@@ -21,7 +21,7 @@ Kafka is not the data lake, the catalog, the governance system, or the scheduler
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Kafka host
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - FreeIPA manages or delegates DNS for the Kafka hostnames
 - FreeIPA Dogtag PKI issues Kafka TLS certificates
 - Kafka brokers can reach each other on the broker and controller ports
@@ -110,7 +110,7 @@ Use a pinned Kafka image or internally built image from the approved Apache Kafk
 The image must include:
 
 - Apache Kafka 4.3.1 or the approved replacement release
-- JDK 21 runtime where supported by the selected image
+- Java 25 runtime using the latest approved patch version; Kafka 4.3 fully supports Java 25 and recommends the most recent LTS
 - JMX exporter Java agent compatible with the selected Kafka release
 - no embedded ZooKeeper dependency or startup path
 
@@ -119,6 +119,8 @@ Example internal build tag:
 ```bash
 podman build -t stratus/kafka:4.3.1 docker/kafka
 ```
+
+Run this only as a build-pipeline step on an approved worker. The pipeline tests, scans, publishes, and records the image digest; Kafka hosts only pull and run the published image.
 
 For a lab using a vetted Kafka image from an internal registry:
 
@@ -530,6 +532,8 @@ Minimum alerts:
 
 ## 15. Java Verification Suite
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite proves Kafka behavior through the same client protocols that Phase 2 services will use.
 
 ### Maven dependencies
@@ -740,7 +744,10 @@ export STRATUS_KAFKA_CONSUMER_PASSWORD=<consumer password>
 export STRATUS_KAFKA_DENIED_USER=svc-denied-verification
 export STRATUS_KAFKA_DENIED_PASSWORD=<denied password>
 
-mvn test -Dtest=KafkaEventBackboneVerificationTest
+export STRATUS_KAFKA_EVENT_BACKBONE_VERIFIER_IMAGE=registry.stratus.local/stratus/kafka-event-backbone-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/kafka-event-backbone.env \
+  -v /data/stratus/evidence/increment8:/evidence:z \
+  ${STRATUS_KAFKA_EVENT_BACKBONE_VERIFIER_IMAGE}
 ```
 
 Expected: all tests pass, and Kafka broker logs show successful authenticated client connections with no unexpected authorization grants.

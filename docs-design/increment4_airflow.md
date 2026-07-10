@@ -17,7 +17,7 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the Airflow host
-- JDK 21+ and Maven 3.9+ on the development and verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
 - DNS resolution: `airflow.stratus.local` resolves to the Airflow host
 - Airflow host can reach:
   - Spark master on port 7077
@@ -114,13 +114,10 @@ RUN apt-get update \
        openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-ARG SPARK_VERSION=4.1.2
-ARG HADOOP_VERSION=3
-
-RUN curl -fsSL \
-      https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz \
-      -o /tmp/spark.tgz \
-    && mkdir -p /opt/spark \
+# The build system downloads the pinned Spark distribution, verifies its
+# recorded checksum, and places it in the build context before this build.
+COPY artifacts/spark-4.1.2-bin-hadoop3.tgz /tmp/spark.tgz
+RUN mkdir -p /opt/spark \
     && tar -xzf /tmp/spark.tgz -C /opt/spark --strip-components=1 \
     && rm /tmp/spark.tgz
 
@@ -136,7 +133,13 @@ RUN pip install --no-cache-dir \
     boto3==1.43.40
 ```
 
-### Build and tag the image
+The Airflow image carries Java 21 only as the Spark 4.1 client runtime because Spark 4.1 supports Java 17/21 and not Java 25. Stratus application and verifier builds use JDK 25; Spark-submitted job artifacts use the compatible `--release 17` target defined by Increment 3.
+
+The build system resolves the Python packages from the approved package repository using a locked, hash-verified dependency set. The abbreviated `pip install` fragment above shows the required contents, not permission to resolve mutable dependencies on a runtime host.
+
+### Build-system image publication
+
+The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Airflow runtime hosts.
 
 ```bash
 cd docker/airflow
@@ -158,11 +161,7 @@ sudo mkdir -p /data/airflow/postgres
 sudo chown -R $USER:$USER /data/airflow
 ```
 
-Copy the Stratus application fat JAR built in Increment 3 into `/data/airflow/jars`:
-
-```bash
-cp target/stratus-*.jar /data/airflow/jars/stratus.jar
-```
+The deployment pipeline retrieves the accepted Increment 3 application JAR from the approved artifact repository, verifies its recorded checksum, and stages it at `/data/airflow/jars/stratus.jar`. It must not copy from a local `target/` directory or build on the Airflow host. The deployment record captures the artifact coordinates, checksum, source repository, and deployed path.
 
 The mounted directory layout is:
 
@@ -427,10 +426,10 @@ podman exec airflow-scheduler airflow connections add stratus_landing \
   --conn-type aws \
   --conn-login "$STRATUS_AIRFLOW_S3_ACCESS_KEY" \
   --conn-password "$STRATUS_AIRFLOW_S3_SECRET_KEY" \
-  --conn-extra "{\"endpoint_url\": \"${STRATUS_S3_ENDPOINT}\", \"verify\": false}"
+  --conn-extra "{\"endpoint_url\": \"${STRATUS_S3_ENDPOINT}\", \"verify\": \"/etc/stratus/pki/stratus-ca.crt\"}"
 ```
 
-`verify=false` is acceptable only while using the self-signed lab CA. Once the CA is trusted in the Airflow image, set `verify` to the CA bundle path or remove the flag.
+The CA bundle must be mounted read-only into the Airflow containers and must validate the certificate presented by `STRATUS_S3_ENDPOINT`. Do not disable certificate verification, including during routine lab verification.
 
 ---
 
@@ -827,6 +826,8 @@ Each failure alert must include:
 
 ## 13. Java Verification Suite
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite uses the Airflow REST API to trigger DAGs, poll DAG run state, and confirm side effects through Spark/Iceberg tables. It does not replace the DAGs themselves; it verifies Airflow coordinates the already-working Increment 3 jobs correctly.
 
 ### Maven dependencies
@@ -1093,7 +1094,10 @@ export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
 export STRATUS_S3_ACCESS_KEY=svc-spark
 export STRATUS_S3_SECRET_KEY=<svc-spark secret>
 
-mvn test -pl . -Dtest=AirflowOrchestrationVerificationTest
+export STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE=registry.stratus.local/stratus/airflow-orchestration-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/airflow-orchestration.env \
+  -v /data/stratus/evidence/increment4:/evidence:z \
+  ${STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE}
 ```
 
 All tests must pass before Increment 4 is considered complete.

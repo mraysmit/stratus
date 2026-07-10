@@ -218,7 +218,10 @@ For a smaller lab, roles may be co-located, but the lab must be clearly marked n
 - firewall rules opened for selected Ceph service ports
 - TLS certificates for RGW and dashboard endpoints
 - approved Ceph release and deployment method
-- Maven 3.9+ and JDK 21+ on the verification host
+- Maven 3.9+ and JDK 25 on the approved build worker; the verification host requires only the approved container runtime, registry access, target network access, trust material, protected configuration, and evidence storage
+- approved build pipeline capable of producing the storage verifier artifact and immutable verifier image
+- approved artifact repository and container registry with checksum, digest, scan, and provenance retention
+- approved read-only trust-material path, protected verifier environment-file path, and writable evidence destination
 
 ### Version discipline
 
@@ -444,24 +447,36 @@ The runbook must define:
 - capacity overhead
 - minimum-size and degraded-write behavior
 
-For Iceberg workloads, validate small-file and metadata-heavy behavior. Iceberg metadata can create many small objects and list operations, so the RGW pool and bucket-index behavior must be part of testing.
+Increment 1 uses synthetic small-object and prefix-listing workloads to establish the RGW and bucket-index baseline. Real Iceberg metadata and small-file behavior is qualified in Increments 2 and 3 when those capabilities exist.
 
 ### Performance, metadata, and cost evidence
 
-Before Increment 1 can unblock Polaris and Iceberg implementation, the Ceph evidence bundle must include measurable results for the same workload categories used in the architecture decision:
+Before Increment 1 can unblock Polaris and Iceberg implementation, the Ceph evidence bundle must include these storage-only results:
 
 | Evidence area | Ceph-specific evidence to capture |
 |---|---|
-| Concurrent engine access | Run Spark write, Trino read, Polaris table/namespace resolution, and operator S3 list/head checks together. Record p50/p95/p99 request latency, 4xx/5xx rate, retry rate, failed commits, stale-read incidents, and any denied or over-broad access. |
-| Large scan/read throughput | Run representative Trino and Spark scans over scaled Iceberg data. Record sustained read throughput, elapsed time, RGW request latency, client retry rate, OSD/RGW CPU and network saturation, and whether Ceph is the bottleneck. |
-| Ingestion/write throughput | Run representative Spark writes using the production-intended S3 settings. Record sustained write throughput, multipart create/complete/abort behavior, Iceberg commit duration, retry rate, and failed multipart cleanup. |
-| Metadata-heavy listing behavior | Build representative Iceberg metadata layouts with many snapshots, manifests, and partition prefixes. Record object count, prefix list latency, bucket-index health, manifest count, metadata.json count, and snapshot-chain length. |
-| Small-file/object-count stress | Generate small-file debt, run compaction and orphan cleanup, then record object count before/after, average file size, orphan count, delete-file count, compaction duration, and concurrent query impact. |
+| Concurrent S3 client access | Run mixed put/get/head/list/delete workloads using multiple isolated verifier identities. Record p50/p95/p99 request latency, 4xx/5xx rate, retry rate, stale-read incidents, throttling, and denied or over-broad access. |
+| Multipart throughput | Run scaled multipart writes and reads using the storage verifier. Record sustained throughput, create/complete/abort behavior, retry rate, cleanup of abandoned uploads, and RGW/OSD saturation. |
+| Small-object and prefix-listing behavior | Generate representative synthetic object and prefix counts. Record object count, prefix list latency, bucket-index health, retry rate, error rate, and resource saturation. |
 | Request latency and error budget | Run mixed S3 put/get/head/list/delete/multipart operations. Record p50/p95/p99 latency by operation, timeout rate, retry rate, and 4xx/5xx rate. |
 | Cost and capacity model | Record raw capacity, usable capacity, replication or erasure-code overhead, metadata/bucket-index overhead assumptions, 12/24/36-month growth estimate, expansion trigger, and expected hardware/operator ownership. |
 | Operator effort | Record operator steps and elapsed effort for install, health review, failure drill, restore drill, upgrade rehearsal, credential rotation, alert setup, and runbook correction. |
 
-The first run does not need to prove final production scale, but it must establish a baseline and expose whether Ceph RGW is already the limiting component. Any failed threshold must either stop the increment or produce a dated ADR with mitigation, owner, and retest criteria.
+The first run does not need to prove final production scale, but it must establish a storage-only baseline. Any failed threshold must either stop the increment or produce a dated ADR with mitigation, owner, and retest criteria.
+
+### Deferred cross-increment storage qualification
+
+These tests remain mandatory but cannot block Increment 1 because their required components are delivered later:
+
+| Owning gate | Deferred storage evidence |
+|---|---|
+| Increment 2 | Polaris storage binding plus Iceberg S3FileIO, metadata, manifest, snapshot, and listing behavior |
+| Increment 3 | Spark ingestion/write throughput, multipart behavior, small-file generation, compaction, and orphan cleanup |
+| Increment 4 | Airflow credential use and submission of the accepted Spark artifact without bypassing storage controls |
+| Increment 5 | Trino scan throughput, retry behavior, and query correctness against Spark-produced tables |
+| Phase 1 readiness | Concurrent Spark write, Trino read, Polaris resolution, operator listing, recovery, and integrated performance/error thresholds |
+
+A deferred failure reopens the storage qualification with an owner, impact assessment, remediation or ADR, and retest criteria. It does not retroactively make the Increment 1 sequencing circular.
 
 ### RGW service
 
@@ -781,9 +796,9 @@ Developer prerequisites:
 - network access to `object-store.stratus.local` or the selected RGW endpoint
 - developer workstation trusts the Stratus lab CA
 - `CEPH_RGW_ENDPOINT`, `CEPH_RGW_ACCESS_KEY`, and `CEPH_RGW_SECRET_KEY` are stored in a local `.env` file outside source control
-- the Java verification source tree is available on the workstation
+- the pinned storage verifier image is available from the approved registry
 
-For Windows workstations, run Docker Compose from PowerShell or WSL, but keep path handling consistent. If the repository is mounted from Windows into Linux containers, confirm line endings and volume paths before running the Java verification suite.
+For Windows workstations, run Docker Compose from PowerShell or WSL, but keep path handling consistent for the certificate and evidence directories. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
 
 ### Developer Podman setup
 
@@ -827,9 +842,10 @@ S3_PATH_STYLE_ACCESS=true
 # Compose implementation. Allowed values: docker, podman, auto.
 COMPOSE_RUNTIME=auto
 
-# Optional image overrides for pinned internal registry images.
+# Pinned internal registry images. The verifier image is produced by the build system
+# and contains the already-built storage verifier artifact.
 S3CLIENT_IMAGE=REPLACE_WITH_PINNED_RCLONE_IMAGE
-VERIFIER_IMAGE=maven:3.9-eclipse-temurin-21
+VERIFIER_IMAGE=REPLACE_WITH_PINNED_STRATUS_STORAGE_VERIFIER_IMAGE
 ```
 
 ### `.env`
@@ -843,7 +859,7 @@ CEPH_RGW_SECRET_KEY=REPLACE_WITH_VERIFICATION_RGW_SECRET_KEY
 S3_PATH_STYLE_ACCESS=true
 COMPOSE_RUNTIME=auto
 S3CLIENT_IMAGE=REPLACE_WITH_PINNED_RCLONE_IMAGE
-VERIFIER_IMAGE=maven:3.9-eclipse-temurin-21
+VERIFIER_IMAGE=REPLACE_WITH_PINNED_STRATUS_STORAGE_VERIFIER_IMAGE
 ```
 
 ### `compose.yaml`
@@ -866,28 +882,31 @@ services:
 
   verifier:
     image: ${VERIFIER_IMAGE}
-    working_dir: /workspace
+    read_only: true
+    tmpfs:
+      - /tmp
     entrypoint: ["/bin/bash", "-lc"]
     command: >
-      cp "$JAVA_HOME/lib/security/cacerts" /tmp/stratus-cacerts &&
+      cp "$$JAVA_HOME/lib/security/cacerts" /tmp/stratus-cacerts &&
       keytool -importcert
       -alias stratus-lab-ca
       -file /certs/stratus-ca.crt
       -keystore /tmp/stratus-cacerts
       -storepass changeit
-      -noprompt || true;
-      sleep infinity
+      -noprompt &&
+      exec java -jar /opt/stratus/verifiers/stratus-storage-verifier.jar
     environment:
       CEPH_RGW_ENDPOINT: ${CEPH_RGW_ENDPOINT}
       CEPH_RGW_ACCESS_KEY: ${CEPH_RGW_ACCESS_KEY}
       CEPH_RGW_SECRET_KEY: ${CEPH_RGW_SECRET_KEY}
       S3_PATH_STYLE_ACCESS: ${S3_PATH_STYLE_ACCESS}
+      STRATUS_EVIDENCE_DIR: /evidence
       JAVA_TOOL_OPTIONS: >-
         -Djavax.net.ssl.trustStore=/tmp/stratus-cacerts
         -Djavax.net.ssl.trustStorePassword=changeit
     volumes:
-      - ../..:/workspace:ro
       - ./certs/stratus-ca.crt:/certs/stratus-ca.crt:ro
+      - ./evidence:/evidence
 ```
 
 ### Compose parameter contract
@@ -902,7 +921,7 @@ The Compose harness is intentionally small, but every parameter must be explicit
 | `S3_PATH_STYLE_ACCESS` | Yes | `s3client`, `verifier` | `true` | Forces path-style bucket addressing such as `https://object-store.stratus.local/stratus-landing`. Keep enabled until all clients pass virtual-hosted-style validation. |
 | `COMPOSE_RUNTIME` | No | scripts | `auto` | Selects Docker Compose or Podman Compose for scripts. `auto` prefers Docker when available and falls back to Podman. |
 | `S3CLIENT_IMAGE` | Yes | `s3client` | `REPLACE_WITH_PINNED_RCLONE_IMAGE` | Pinned S3-compatible client image. Replace with an internally mirrored image where required. |
-| `VERIFIER_IMAGE` | Yes | `verifier` | `maven:3.9-eclipse-temurin-21` | Pinned Maven/JDK image for the Java verification suite. Replace with an internally mirrored image where required. |
+| `VERIFIER_IMAGE` | Yes | `verifier` | `registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>` | Pinned runtime image produced by the build system. It contains the prebuilt storage verifier JAR and a compatible JRE, but no source tree or build toolchain. |
 | `RCLONE_CONFIG_CEPHRGW_TYPE` | Yes | `s3client` | `s3` | Declares the `cephrgw` rclone remote as S3-compatible storage. |
 | `RCLONE_CONFIG_CEPHRGW_PROVIDER` | Yes | `s3client` | `Ceph` | Selects Ceph-specific S3 client behavior where rclone supports it. |
 | `RCLONE_CONFIG_CEPHRGW_ENDPOINT` | Derived | `s3client` | `${CEPH_RGW_ENDPOINT}` | Maps the Ceph RGW endpoint into the rclone remote. |
@@ -911,8 +930,9 @@ The Compose harness is intentionally small, but every parameter must be explicit
 | `RCLONE_CONFIG_CEPHRGW_FORCE_PATH_STYLE` | Derived | `s3client` | `${S3_PATH_STYLE_ACCESS}` | Keeps the rclone remote aligned with the Stratus path-style default. |
 | `RCLONE_CA_CERT` | Yes | `s3client` | `/certs/stratus-ca.crt` | CA bundle used by the S3 client to validate the Ceph RGW TLS certificate. Do not bypass TLS verification. |
 | `JAVA_TOOL_OPTIONS` | Yes | `verifier` | `-Djavax.net.ssl.trustStore=/tmp/stratus-cacerts ...` | Injects the temporary Java truststore so SDK tests validate RGW TLS. |
+| `STRATUS_EVIDENCE_DIR` | Yes | `verifier` | `/evidence` | Directory where the prebuilt verifier writes its machine-readable result bundle. |
 | `/certs/stratus-ca.crt` | Yes | `s3client`, `verifier` | mounted from `./certs/stratus-ca.crt` | CA certificate that issued or anchors the RGW endpoint certificate. |
-| `/workspace` | Yes | `verifier` | mounted from `../..` | Read-only mount of the repository so the Maven verification suite can run inside the container. |
+| `/evidence` | Yes | `verifier` | mounted from `./evidence` | Dedicated writable output location for machine-readable verification results. The verifier artifact and container filesystem remain read-only where practical. |
 
 Parameter rules:
 
@@ -925,6 +945,7 @@ Parameter rules:
 - `S3_PATH_STYLE_ACCESS=true` is the default developer setting because internal RGW endpoints often use endpoint overrides instead of virtual-hosted bucket names.
 - If `CEPH_RGW_ENDPOINT` points to a shared lab, the credentials must be scoped so the developer harness cannot mutate unrelated buckets or production data.
 - `S3CLIENT_IMAGE` and `VERIFIER_IMAGE` must be pinned by version or digest. Do not use floating `latest` tags.
+- `VERIFIER_IMAGE` must be built, tested, scanned, and published by the approved build system. Do not mount the repository or run Maven inside the verifier container.
 
 ### Certificate setup for developer clients
 
@@ -1047,7 +1068,7 @@ $compose_cmd exec -T s3client rclone lsf cephrgw:stratus-landing
 
 ### `scripts/verify-java.sh`
 
-The Java verification script is also safe to run repeatedly. It reuses the running verifier container and executes the storage verification test suite with the same environment and truststore configured by Compose.
+The Java verification script is also safe to run repeatedly. It starts the pinned verifier image, which executes the prebuilt storage verifier artifact with the environment and truststore configured by Compose. Artifact construction and publication happen in the build system before this script is run.
 
 ```bash
 #!/usr/bin/env bash
@@ -1071,7 +1092,7 @@ else
   compose_cmd="podman compose"
 fi
 
-$compose_cmd exec -T verifier mvn test -Dtest=S3StorageVerificationTest
+$compose_cmd run --rm verifier
 ```
 
 ### `scripts/shutdown.sh`
@@ -1138,7 +1159,7 @@ Stop the harness:
 scripts/shutdown.sh
 ```
 
-The verifier container copies the base JVM truststore to `/tmp/stratus-cacerts`, imports `stratus-ca.crt`, and points Java at that temporary truststore through `JAVA_TOOL_OPTIONS`. Do not add `--no-verify-ssl` or disable Java TLS validation in routine tests; that would bypass a core Increment 1 requirement.
+The verifier container copies the base JVM truststore to `/tmp/stratus-cacerts`, imports `stratus-ca.crt`, and points Java at that temporary truststore through `JAVA_TOOL_OPTIONS` before executing the prebuilt verifier JAR. Do not add `--no-verify-ssl` or disable Java TLS validation in routine tests; that would bypass a core Increment 1 requirement.
 
 For Docker Desktop, expected developer evidence is:
 
@@ -1278,15 +1299,14 @@ Do not assume this exact JSON is sufficient until RGW policy behavior is tested 
 
 ## 14. Polaris and Iceberg Compatibility Requirements
 
-Increment 2 depends on this storage layer. Before Increment 2 starts, prove that Ceph RGW works with:
+Increment 2 depends on this storage layer. Before Increment 2 starts, prove the storage-only client contract with:
 
 - the Java S3-compatible client used by the verification suite
-- Iceberg `S3FileIO`
 - path-style access
 - configured endpoint override
 - object create/read/delete
 - multipart upload behavior for larger files
-- listing behavior required by Iceberg metadata operations
+- deterministic list and read-after-write behavior using synthetic objects and prefixes
 - credentials used by `svc-polaris`
 
 Expected Polaris/Ceph storage settings will look conceptually like:
@@ -1302,6 +1322,8 @@ Increment 2 must be updated to refer to Ceph/object storage and the `STRATUS_S3_
 ---
 
 ## 15. Java Verification Module
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system compiles and tests the module, packages the executable verifier, creates and scans the verifier image, publishes it by immutable digest, and records provenance. Operators execute that image; they do not build the module on the verification host or inside the verification container.
 
 The verification suite proves the Stratus S3 storage contract against Ceph RGW.
 
@@ -1362,7 +1384,11 @@ export S3_PATH_STYLE_ACCESS=true
 export CEPH_RGW_AIRFLOW_ACCESS_KEY=REPLACE_WITH_SVC_AIRFLOW_RGW_ACCESS_KEY
 export CEPH_RGW_AIRFLOW_SECRET_KEY=REPLACE_WITH_SVC_AIRFLOW_RGW_SECRET_KEY
 
-mvn test -pl . -Dtest=S3StorageVerificationTest
+podman run --rm \
+  --env-file /etc/stratus/verifiers/storage.env \
+  -v /etc/stratus/pki/stratus-ca.crt:/certs/stratus-ca.crt:ro,z \
+  -v /data/stratus/evidence/increment1:/evidence:z \
+  registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
 ```
 
 All tests must pass before Increment 2 begins.
@@ -1452,6 +1478,7 @@ For production-like:
 Increment 1 lab is complete when:
 
 - [ ] approved Ceph release is selected and pinned
+- [ ] the build pipeline publishes the storage verifier image by immutable digest with scan and provenance evidence
 - [ ] lab runtime profile is recorded as Podman, Docker Engine, or Docker Desktop client harness only
 - [ ] Ceph lab cluster is running
 - [ ] RGW is reachable over HTTPS
@@ -1460,6 +1487,8 @@ Increment 1 lab is complete when:
 - [ ] platform service identities or lab equivalents exist
 - [ ] access boundaries are enforced through RGW policy/user controls
 - [ ] Java S3 verification suite passes
+- [ ] concurrent synthetic S3, multipart, and small-object/prefix-listing baselines pass without later engines
+- [ ] verifier execution uses the published image, protected configuration injection, read-only trust material, and dedicated evidence mount without source or build tools
 - [ ] Ceph health checks show expected state
 - [ ] lab failure drill behavior is documented
 

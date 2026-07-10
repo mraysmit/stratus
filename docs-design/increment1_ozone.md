@@ -215,7 +215,7 @@ For a smaller lab, co-locate roles on fewer hosts only if the runbook labels the
 - firewall rules opened for selected Ozone service ports
 - TLS certificates for S3 Gateway and Ozone web endpoints
 - Kerberos and Ranger planned for production-like environments
-- Maven 3.9+ and JDK 21+ on the verification host
+- Maven 3.9+ and JDK 25 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 
 ### Version discipline
 
@@ -439,14 +439,13 @@ Do not rely on AWS IAM policy examples unless Ozone S3 Gateway behavior for the 
 
 ## 11. Polaris and Iceberg Compatibility Requirements
 
-Increment 2 depends on this storage layer. Before Increment 2 starts, prove that the selected Ozone S3 Gateway works with:
+Increment 2 depends on this storage layer. Before Increment 2 starts, prove the storage-only client contract with:
 
 - AWS SDK for Java S3 client
-- Iceberg `S3FileIO`
 - path-style access
 - configured endpoint override
 - object create/read/delete
-- listing behavior required by Iceberg metadata operations
+- deterministic list and read-after-write behavior using synthetic objects and prefixes
 - credentials used by `svc-polaris`
 
 Expected Polaris/Ozone storage settings will look conceptually like:
@@ -459,9 +458,13 @@ warehouse / base locations = s3://stratus-bronze, s3://stratus-silver, s3://stra
 
 Increment 2 must be updated to refer to Ozone/object storage.
 
+Polaris binding, Iceberg metadata behavior, Spark write throughput, Trino scan throughput, and concurrent engine access are deferred to their owning increments and Phase 1 readiness. Any failure reopens the storage qualification with an impact assessment, remediation or ADR, and retest criteria.
+
 ---
 
 ## 12. Java Verification Module
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite proves the Stratus S3 storage contract against Ozone S3 Gateway.
 
@@ -517,7 +520,10 @@ export STRATUS_S3_SECRET_KEY=<verification secret key>
 export STRATUS_S3_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
 export STRATUS_S3_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
 
-mvn test -pl . -Dtest=S3StorageVerificationTest
+export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/storage.env \
+  -v /data/stratus/evidence/increment1:/evidence:z \
+  ${STRATUS_STORAGE_VERIFIER_IMAGE}
 ```
 
 All tests must pass before Increment 2 begins.

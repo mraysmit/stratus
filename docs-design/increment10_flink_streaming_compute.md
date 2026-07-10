@@ -22,7 +22,7 @@ Flink is not the batch ETL engine and it is not the scheduler. Spark remains the
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Flink host
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Flink job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Flink runtime.
 - Kafka client truststore from Increment 8 is available
 - `svc-flink` can read the verification event and CDC topics
 - `svc-flink` can write to the approved checkpoint and savepoint storage path
@@ -95,7 +95,7 @@ Restrict JobManager UI and REST API to platform operators and automation.
 
 ## 5. Flink Image and Artifact Policy
 
-Build a pinned internal image for Flink and the connector set.
+The approved build system builds a pinned internal image for Flink and the connector set. Flink runtime hosts never download connectors or build the image.
 
 Target artifacts:
 
@@ -103,7 +103,7 @@ Target artifacts:
 |---|---|
 | Apache Flink | 2.1.1 |
 | Flink Kafka Connector | 5.0.0 |
-| JDK | 21 where supported by the selected image |
+| JDK | Java 17 runtime for Flink 2.1; Java 25 build toolchain with Flink job modules compiled using `--release 17` |
 | Prometheus metrics reporter | bundled or pinned compatible reporter |
 
 Example image tag:
@@ -111,6 +111,8 @@ Example image tag:
 ```bash
 podman build -t stratus/flink:2.1.1-kafka5.0.0 docker/flink
 ```
+
+This is a build-pipeline command. The pipeline tests, scans, publishes, and records the image digest before deployment.
 
 The image must include:
 
@@ -121,6 +123,8 @@ The image must include:
 - no plugin downloads at container startup
 
 The implementation runbook must record image tag, digest, Flink version, connector version, JDK version, and artifact checksums.
+
+Java 25 is the Stratus build and verifier baseline. Flink 2.1 recommends Java 17 and supports Java 21, but does not document Java 25 support; its runtime therefore remains Java 17 until an approved Flink release supports Java 25. This exception must be retested when the Flink version changes.
 
 ---
 
@@ -394,6 +398,8 @@ Expected: lag is low or zero after the job catches up.
 ---
 
 ## 12. Java Verification Suite
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite uses Flink REST, Kafka admin/producer APIs, and consumer group checks.
 

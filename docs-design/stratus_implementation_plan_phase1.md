@@ -69,20 +69,21 @@ Evidence should be durable enough that another engineer can understand what pass
 
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
+| P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | Not started |
 | P1-1.1 | Storage decision and due-diligence evidence | Platform architect | Architecture storage requirements | Completed Ceph RGW vs Apache Ozone decision record, scoring, proof-of-fit targets, and accepted production path | Architecture owner | Not started |
 | P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | Not started |
 | P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | Not started |
 | P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | Not started |
 | P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | Not started |
-| P1-1.6 | Storage performance and cost evidence | Storage owner | P1-1.4 | Concurrent access, scan throughput, write throughput, metadata-heavy, small-file, latency/error, capacity, and operator-effort results | Platform owner | Not started |
+| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | Not started |
 | P1-2.1 | Polaris production metadata store | Data platform owner | P1-1 accepted | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Not started |
 | P1-2.2 | Polaris service deployment | Data platform owner | P1-2.1 | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | Not started |
 | P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2, P1-1.4 | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | Not started |
-| P1-2.4 | Iceberg verification tables | Data platform owner | P1-2.3 | Bronze/silver/gold test tables and `platform.quality_check_results` created and readable | Data engineering owner | Not started |
+| P1-2.4 | Iceberg verification tables and storage qualification | Data platform owner | P1-2.3 | Bronze/silver/gold test tables and `platform.quality_check_results` created and readable; Iceberg metadata, snapshot, manifest, listing, and S3FileIO evidence attached to storage qualification | Data engineering owner | Not started |
 | P1-2.5 | Metadata-driven maintenance verification | Data platform owner | P1-2.4 | Metadata table queries and threshold-based maintenance decisions for files, snapshots, manifests, delete files, and orphan files | Data engineering owner | Not started |
 | P1-2.6 | Catalog backup, restore, and audit | Data platform owner | P1-2.4 | Restore drill proving catalog, Iceberg metadata, manifests, and objects return to a consistent point; audit events captured | Operations owner | Not started |
 | P1-3.1 | Spark runtime and cluster | Data engineering owner | P1-2 accepted | Spark standalone services running on Podman, image/artifact pin evidence, Spark UI or service health | Platform owner | Not started |
-| P1-3.2 | Spark catalog and object-store configuration | Data engineering owner | P1-3.1, P1-2.3 | Spark resolves Polaris tables and reads/writes Ceph RGW with `svc-spark` | Data platform owner | Not started |
+| P1-3.2 | Spark catalog, object-store configuration, and storage qualification | Data engineering owner | P1-3.1, P1-2.3 | Spark resolves Polaris tables and reads/writes Ceph RGW with `svc-spark`; ingestion/write throughput and multipart evidence attached to storage qualification | Data platform owner | Not started |
 | P1-3.3 | Bronze ingestion job | Data engineering owner | P1-3.2 | Landing file produces bronze Iceberg table with expected schema and row count | Data owner | Not started |
 | P1-3.4 | Silver and gold transformation jobs | Data engineering owner | P1-3.3 | Deduplicated silver output and aggregated gold output validated against expected results | Data owner | Not started |
 | P1-3.5 | Quality and promotion gate | Data engineering owner | P1-3.4 | Passing and failing quality cases written to `platform.quality_check_results`; failed promotion blocked | Data owner | Not started |
@@ -94,7 +95,7 @@ Evidence should be durable enough that another engineer can understand what pass
 | P1-4.5 | Maintenance DAG and alerts | Operations owner | P1-4.3, P1-3.6 | Metadata-threshold maintenance DAG evidence, task failure alert, Deadline Alert evidence | Operations owner | Not started |
 | P1-5.1 | Trino cluster deployment | Query platform owner | P1-4 accepted | Trino coordinator/worker health, version pin, configuration snapshot | Platform owner | Not started |
 | P1-5.2 | Trino Polaris and Ceph access | Query platform owner | P1-5.1, P1-2.3 | Trino resolves Polaris tables and reads Ceph-backed Iceberg data through approved credentials | Data platform owner | Not started |
-| P1-5.3 | Bronze/silver/gold query validation | Query platform owner | P1-5.2, P1-3.4 | Row counts, schemas, joins, and aggregates match Spark-produced outputs | Data owner | Not started |
+| P1-5.3 | Bronze/silver/gold query and storage validation | Query platform owner | P1-5.2, P1-3.4 | Row counts, schemas, joins, and aggregates match Spark-produced outputs; Trino scan throughput evidence attached to storage qualification | Data owner | Not started |
 | P1-5.4 | Quality-results query validation | Query platform owner | P1-5.2, P1-3.5 | `platform.quality_check_results` visible through Trino with expected pass/fail rows | Data owner | Not started |
 | P1-5.5 | JDBC verification suite | Query platform owner | P1-5.3 | `TrinoQueryVerificationTest` report against the live cluster | Platform owner | Not started |
 | P1-6.1 | Atlas deployment and model setup | Governance owner | P1-5 accepted | Atlas health, entity type registration, authentication mode, graph/search state evidence | Governance owner | Not started |
@@ -108,13 +109,13 @@ Evidence should be durable enough that another engineer can understand what pass
 | P1-7.4 | TLS certificate replacement | Security owner | P1-7.1 | FreeIPA Dogtag-issued certificates deployed and validated for all service endpoints | Security owner | Not started |
 | P1-7.5 | Encryption-at-rest and credential rotation | Security owner | P1-7.1, P1-1.4 | Ceph/RGW encryption evidence for gold/platform zones and rotation runbook test | Security owner | Not started |
 | P1-7.6 | Integrated security verification | Security owner | P1-7.3, P1-7.4, P1-7.5 | Positive and negative authentication, authorization, TLS, and no-shared-credential evidence | Platform owner | Not started |
-| P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
+| P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, concurrent Spark/Trino/Polaris/storage qualification, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
 
 ### Phase 1 Gate Tracker
 
 | Gate | Required evidence | Accepted by | Status |
 |---|---|---|---|
-| Increment 1 accepted | Storage decision, Ceph health, RGW TLS, bucket/credential tests, compatibility tests, performance/cost evidence | Platform architecture and operations owners | Not started |
+| Increment 1 accepted | Candidate decision, Ceph health, RGW TLS, buckets and credential isolation, core S3 and multipart tests, concurrent synthetic client load, small-object/prefix listing behavior, failure drill, observability, and preliminary performance/capacity/operator evidence | Platform architecture and operations owners | Not started |
 | Increment 2 accepted | Polaris production metadata store, namespace/table tests, Iceberg maintenance tests, catalog/object restore drill, audit evidence | Platform architecture and data platform owners | Not started |
 | Increment 3 accepted | Spark runtime, ingestion, transformation, materialisation, quality, promotion, maintenance, and lineage-payload evidence | Data engineering owner | Not started |
 | Increment 4 accepted | Airflow deployment, DAG runs, quality gate halt, maintenance DAG, retry and alert evidence | Platform operations and data engineering owners | Not started |
@@ -148,7 +149,7 @@ Every other component in the stack writes to or reads from object storage. Nothi
 - Service identities and scoped S3 credentials created for platform services (Spark, Polaris, Airflow, Trino)
 - Ceph Dashboard enabled for operational visibility
 - Ceph pool, CRUSH, placement group, and failure-domain assumptions documented for the deployment
-- Measured storage evidence bundle completed for concurrency, throughput, metadata-heavy behavior, small-file stress, request latency/error rates, capacity cost, and operator effort
+- Measured storage-only evidence bundle completed for concurrent synthetic S3 access, multipart behavior, small-object and prefix-listing stress, request latency/error rates, capacity cost, failure behavior, and operator effort
 
 ### Verification
 
@@ -160,12 +161,10 @@ Every other component in the stack writes to or reads from object storage. Nothi
 | Read test | A written file can be read back and content verified |
 | TLS | All connections enforce TLS; plaintext connection is rejected |
 | Credential isolation | Service identity A cannot read or write to a bucket it has no policy for |
-| RGW compatibility | Required S3 operations for Iceberg, Spark, Polaris, Airflow, and Trino are verified against the RGW endpoint |
-| Concurrent engine access | Spark write, Trino read, Polaris resolution, and operator S3 listing run together without stale reads, authz leakage, failed commits, or threshold breach |
-| Large scan/read throughput | Trino and Spark scan representative tables; sustained throughput, elapsed time, latency, retries, and bottleneck analysis are recorded |
-| Ingestion/write throughput | Spark writes representative bronze/silver data; multipart behavior, commit duration, latency, retries, and error rate are recorded |
-| Iceberg metadata behavior | Metadata-heavy table create/write/read/list behavior records object count, list latency, bucket-index health, manifest count, and snapshot-chain behavior |
-| Small-file/object-count stress | Small-file debt is generated and maintenance proves compaction/orphan cleanup reduces debt without destabilizing concurrent access |
+| Core S3 compatibility | The pinned storage verifier passes bucket, put, get, head, list, delete, endpoint override, path-style, and error-handling tests |
+| Multipart behavior | Create, upload, complete, abort, list-parts, retry, and abandoned-upload cleanup behavior passes |
+| Concurrent storage access | Multiple isolated verifier identities run mixed S3 workloads without stale reads, authorization leakage, unexpected throttling, or threshold breach |
+| Small-object and prefix-listing stress | Synthetic objects and prefixes establish object-count, list-latency, bucket-index, retry, and error baselines without requiring Iceberg or later engines |
 | Request latency/error budget | Mixed S3 operations record p50/p95/p99 latency, 4xx/5xx rate, timeout rate, and retry rate against declared thresholds |
 | Cost/capacity/operator model | Raw-to-usable capacity, growth assumptions, metadata overhead, expansion triggers, and operator effort are recorded and accepted |
 | Ceph health | `ceph status` reports a healthy cluster and RGW service health is visible |

@@ -18,7 +18,7 @@ Increment 5 delivers Trino as the shared interactive SQL query plane over Polari
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Trino node
-- JDK 21+ and Maven 3.9+ on the development and verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Trino 482 runs on Java 25 using the latest approved Java 25 patch image.
 - DNS resolution:
   - `trino-coordinator.stratus.local`
   - `trino-worker1.stratus.local`
@@ -448,6 +448,8 @@ Expected: current Iceberg snapshot metadata is visible through Trino metadata ta
 
 ## 11. Java Verification Suite
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite uses Trino JDBC to connect to the live Trino coordinator and validate query behavior. It checks discovery, row counts, aggregate correctness, quality table visibility, schema errors, and metadata table access.
 
 ### Maven dependencies
@@ -662,7 +664,10 @@ class TrinoQueryVerificationTest {
 export STRATUS_TRINO_JDBC_URL=jdbc:trino://trino-coordinator.stratus.local:8080/stratus
 export STRATUS_TRINO_USER=stratus-verifier
 
-mvn test -pl . -Dtest=TrinoQueryVerificationTest
+export STRATUS_TRINO_QUERY_VERIFIER_IMAGE=registry.stratus.local/stratus/trino-query-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/trino-query.env \
+  -v /data/stratus/evidence/increment5:/evidence:z \
+  ${STRATUS_TRINO_QUERY_VERIFIER_IMAGE}
 ```
 
 All nine tests must pass before Increment 5 is considered complete.

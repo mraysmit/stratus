@@ -66,7 +66,7 @@ Phase 2 uses fast-moving projects. Before implementation, the platform team must
 | Apache Polaris | 1.5.0 unless superseded by a newer approved release before implementation |
 | Apache Atlas | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Apache Ranger | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
-| Java | 21 where supported; do not introduce Java 8 or Java 11-era examples |
+| Java | Java 25 LTS for Stratus builds, verifiers, Kafka 4.3, and Trino 482; component-supported runtime exceptions are Java 17 for Spark 4.1 and Flink 2.1 job execution, with job artifacts compiled using the JDK 25 toolchain and the matching `--release` target |
 
 Important compatibility rule: do not select Flink solely by release recency if the selected Iceberg release does not publish or document a compatible Flink runtime. The implementation owner must choose either:
 

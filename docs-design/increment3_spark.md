@@ -16,7 +16,7 @@ Increment 3 delivers an Apache Spark standalone cluster running on Podman contai
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Spark node
-- JDK 21+ and Maven 3.9+ on the development and verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Spark job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Spark runtime.
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
 - Nodes can reach Ceph RGW at `object-store.stratus.local` (HTTPS) and Polaris on port 8181
 - `svc-spark` Ceph RGW credentials and Polaris principal credentials from earlier increments are available
@@ -88,13 +88,10 @@ FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
 
 USER root
 
-# Iceberg Spark runtime — includes Iceberg core, Spark integration, and REST catalog client
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar \
-    /opt/spark/jars/
-
-# AWS bundle — provides S3FileIO for Ceph RGW connectivity
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar \
-    /opt/spark/jars/
+# The build system resolves these pinned artifacts into the build context and
+# verifies their recorded checksums before the container build starts.
+COPY artifacts/iceberg-spark-runtime-4.1_2.13-1.11.0.jar /opt/spark/jars/
+COPY artifacts/iceberg-aws-bundle-1.11.0.jar /opt/spark/jars/
 
 # The s3a connector is required only if Spark internals use s3a:// paths outside Iceberg S3FileIO.
 # If enabled, pin the hadoop-aws artifact and AWS SDK dependencies to the filesystem
@@ -103,7 +100,11 @@ ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/
 USER spark
 ```
 
-### Build and tag the image
+Java 25 is the Stratus build and verifier baseline, but Spark 4.1 supports Java 17 and 21 rather than Java 25. The selected Spark image therefore remains on its supported Java 17 runtime, and Spark job modules are compiled with `--release 17` using the JDK 25 build toolchain. This is a component-runtime compatibility exception, not a change to the platform baseline.
+
+### Build-system image publication
+
+The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Spark runtime hosts.
 
 ```bash
 cd docker/spark
@@ -372,6 +373,8 @@ Override requires an explicit `--override-reason` parameter and a named `--overr
 ---
 
 ## 10. Java Verification Suite
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite submits real Spark jobs to the live cluster and confirms the full batch pipeline works end to end. It uses the Spark Java API for job submission.
 
@@ -761,7 +764,10 @@ export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
 export STRATUS_S3_ACCESS_KEY=svc-spark
 export STRATUS_S3_SECRET_KEY=<svc-spark secret>
 
-mvn test -pl . -Dtest=SparkPipelineVerificationTest
+export STRATUS_SPARK_PIPELINE_VERIFIER_IMAGE=registry.stratus.local/stratus/spark-pipeline-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/spark-pipeline.env \
+  -v /data/stratus/evidence/increment3:/evidence:z \
+  ${STRATUS_SPARK_PIPELINE_VERIFIER_IMAGE}
 ```
 
 All eleven tests must pass before Increment 3 is considered complete.

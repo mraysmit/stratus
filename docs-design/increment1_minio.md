@@ -630,6 +630,8 @@ Store generated credentials in the approved secret location for the environment.
 
 ## 12. Java Verification Module
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite proves the Stratus storage contract against any S3-compatible target. It should avoid product-specific APIs.
 
 ### Maven dependencies
@@ -682,13 +684,18 @@ export STRATUS_S3_SECRET_KEY=change-me-before-use
 export STRATUS_S3_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
 export STRATUS_S3_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
 
-mvn test -pl . -Dtest=S3StorageVerificationTest
+export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/storage.env \
+  -v /data/stratus/evidence/increment1:/evidence:z \
+  ${STRATUS_STORAGE_VERIFIER_IMAGE}
 ```
 
 If the implementation keeps the older class name temporarily, run:
 
 ```bash
-mvn test -pl . -Dtest=MinioVerificationTest
+podman run --rm --env-file /etc/stratus/verifiers/storage.env \
+  -v /data/stratus/evidence/increment1:/evidence:z \
+  ${STRATUS_STORAGE_VERIFIER_IMAGE}
 ```
 
 The class should be renamed to `S3StorageVerificationTest` when implemented so the code matches the product-neutral design.
