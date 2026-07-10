@@ -6,19 +6,23 @@ This document is the technical implementation plan for Increment 5 of the Stratu
 
 Increment 5 delivers Trino as the shared interactive SQL query plane over Polaris-managed Apache Iceberg tables stored in Ceph RGW. When this increment is complete, users and platform operators can discover bronze, silver, gold, and platform tables through Trino, query Spark-produced datasets without touching Spark or Ceph RGW paths, inspect `platform.quality_check_results`, and verify SQL results against the outputs produced and orchestrated by Increments 3 and 4. A Java JDBC verification suite confirms Trino works as an independent query surface over the same table contracts.
 
+The one-coordinator/two-worker Podman layout and HTTP examples are the developer profile. Production retains the same catalog and query contracts but requires the approved multi-host worker topology, coordinator recovery or an accepted RTO/RPO posture, HTTPS/OIDC, Ranger enforcement, managed secrets, trusted certificates, durable logs, capacity testing, and node/coordinator failure drills. Developer HTTP must remain on an isolated network and cannot pass the production gate.
+
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark cluster running, bronze/silver/gold verification tables created by Spark, all Increment 3 gate tests passing
 - Increment 4 complete — Airflow running, DAGs able to orchestrate Spark jobs and quality gates, all Increment 4 gate tests passing
 
+**Track rule:** Developer work requires the developer gates of Increments 1-4. Increment 5 production acceptance requires their production gates, except final identity, TLS, and Ranger-dependent checks close after Increments 6 and 7 as defined by the Phase 1 plan.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Trino node
-- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Trino 482 runs on Java 25 using the latest approved Java 25 patch image.
+- Podman 5.8.2 installed on each Trino node, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Trino 482 runs on Java 25 using the latest approved Java 25 patch image.
 - DNS resolution:
   - `trino-coordinator.stratus.local`
   - `trino-worker1.stratus.local`
@@ -62,6 +66,30 @@ trino-worker1         trino-worker2
 ```
 
 Trino is the consumer-facing query plane. It is not the primary ETL engine. Spark remains responsible for heavy batch transformation, quality checks, and table maintenance unless a later design deliberately assigns a specific SQL workload to Trino.
+
+### Production profile overlay
+
+| Concern | Production requirement |
+|---|---|
+| Coordinator | `node-scheduler.include-coordinator=false`; coordinator sizing, restart automation, and RTO/RPO are recorded; a second coordinator is introduced only through a supported availability design |
+| Workers | workers span approved failure domains and are sized from concurrent-query, scan-throughput, spill, and memory evidence |
+| User/JDBC ingress | HTTPS on the approved endpoint with Keycloak OIDC; plaintext port `8080` is internal-only or disabled |
+| Internal communication | configure the Trino shared secret and supported internal TLS settings so workers authenticate the coordinator and each other |
+| Authorization | Ranger plugin is fail-closed for protected catalogs, consumes FreeIPA-derived groups, and writes allow/deny audit events |
+| Catalog and storage | Iceberg REST over HTTPS to Polaris and S3-compatible HTTPS to Ceph RGW using the scoped `svc-trino` RGW identity; no alternate catalog bypass exists |
+| Operations | durable query/event logs, capacity limits, spill policy where used, graceful worker drain, coordinator restart, worker loss, and rejected-user tests |
+
+Increment 7 applies the OIDC and certificate values to the selected Trino release. The resulting coordinator configuration includes the documented equivalents of:
+
+```properties
+http-server.https.enabled=true
+http-server.https.port=8443
+http-server.authentication.type=OAUTH2
+internal-communication.shared-secret=${ENV:TRINO_INTERNAL_SHARED_SECRET}
+node-scheduler.include-coordinator=false
+```
+
+Keystore/truststore paths, OIDC issuer/client settings, Ranger plugin files, and secrets are rendered from the production environment, not copied from developer configuration. The Increment 5 functional suite is rerun through the HTTPS JDBC endpoint after Increments 6 and 7 apply authorization and identity.
 
 ---
 
@@ -237,10 +265,10 @@ iceberg.security=READ_ONLY
 # Ceph RGW object storage
 fs.s3.enabled=true
 s3.endpoint=https://object-store.stratus.local
-s3.region=us-east-1
+s3.region=${ENV:CEPH_RGW_TRINO_SIGNING_SCOPE}
 s3.path-style-access=true
-s3.aws-access-key=svc-trino
-s3.aws-secret-key=<svc-trino Ceph RGW secret>
+s3.aws-access-key=${ENV:CEPH_RGW_ACCESS_KEY}
+s3.aws-secret-key=${ENV:CEPH_RGW_SECRET_KEY}
 
 # Query behavior
 iceberg.file-format=PARQUET
@@ -251,6 +279,8 @@ iceberg.metadata-cache.enabled=true
 If Polaris uses a self-signed CA from Increment 1, the CA must be trusted by the JVM inside the Trino container. For a lab-only shortcut, a temporary truststore can be added to the image or mounted and referenced through JVM options. The target state is to replace lab certificates with FreeIPA Dogtag-issued certificates in Increment 7.
 
 Reference audit note: Trino 482 documentation confirms the REST catalog, OAuth2 credential, native S3, and Ranger access-control properties used by this design. The Iceberg connector security mode is written as the documented `READ_ONLY` enum value here. If a selected Trino release accepts only lowercase values in a specific catalog example, record that release-specific behavior in the implementation runbook and keep the verification suite as the deciding contract.
+
+`s3.region`, `s3.aws-access-key`, and `s3.aws-secret-key` are Trino's official native S3 property names. They are not renamed because doing so would invent unsupported Trino configuration. `CEPH_RGW_TRINO_SIGNING_SCOPE` is the request-signing value established by the Ceph/Trino compatibility test; it has no default and is not a Stratus region or infrastructure location. The two credential variables hold a scoped Ceph RGW user, never cloud credentials.
 
 ### Access scope
 
@@ -734,13 +764,20 @@ Do not sign off Increment 5 if Trino can still query governed Iceberg tables whi
 
 ---
 
-## 13. Completion Gate
+## 13. Completion Gates
 
-Increment 5 is complete when all of the following are true:
+### Developer gate
+
+- [ ] Reduced Podman cluster and isolated HTTP endpoint pass Polaris/Ceph table resolution, query parity, quality visibility, and JDBC verification.
+- [ ] HTTP, reduced topology, local certificates, and bootstrap identities are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 5 is accepted when all of the following are true:
 
 - [ ] Trino coordinator container running and managed by systemd on `trino-coordinator.stratus.local`
 - [ ] Both Trino worker containers running and managed by systemd
-- [ ] Trino web UI reachable on port 8080
+- [ ] Trino web UI and client endpoint are reachable through trusted HTTPS/OIDC; port 8080 is internal only if retained
 - [ ] Trino reports one coordinator and two active workers
 - [ ] `stratus` catalog configured with the Iceberg connector and Apache Polaris REST catalog
 - [ ] Trino uses native S3 access to Ceph RGW with path-style access enabled
@@ -755,8 +792,9 @@ Increment 5 is complete when all of the following are true:
 - [ ] Iceberg metadata tables, such as `$snapshots`, are queryable through Trino
 - [ ] `TrinoQueryVerificationTest` passes against the live Trino cluster
 - [ ] Trino does not expose an unmanaged catalog path that bypasses Polaris
+- [ ] Ranger enforcement, managed Ceph RGW credentials, durable logs, capacity evidence, and node/coordinator recovery evidence are complete
 
-When all gates are checked, Increment 6 (Apache Atlas and Apache Ranger governance) can begin.
+The developer gate may unblock Increment 6 engineering. Only the production gate marks Increment 5 accepted in the Phase 1 tracker.
 
 ---
 

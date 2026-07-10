@@ -8,6 +8,8 @@ Increment 11 connects the Phase 2 streaming runtime to the Phase 1 lakehouse fou
 
 This increment is not a general Flink deployment and not an Iceberg maintenance increment. Increment 10 proves the Flink runtime. Increment 11 proves streaming table writes, checkpoint-aligned commits, table ownership, reader visibility, and operational guardrails.
 
+The developer profile may write verification tables with reduced Flink parallelism and local checkpoint/savepoint state. The production profile reuses the same jobs and tables but requires Ceph RGW-backed recovery state, managed Polaris/RGW/Kafka credentials, production table locations, streaming-safe maintenance coordination, replay/recovery evidence, and no `file://` state path. Developer table data must remain isolated from production namespaces and buckets.
+
 **Prerequisites:**
 - Increment 8 complete - Kafka event backbone operational
 - Increment 9 complete - Kafka Connect and Debezium CDC operational
@@ -17,16 +19,18 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 - Increment 6 and 7 complete - Atlas/Ranger identity and governance model operational
 - `svc-flink` has approved Kafka, Polaris, and Ceph RGW credentials
 
+**Track rule:** Developer work requires the developer gates of Increments 8-10 and the working Phase 1 contracts. Increment 11 production acceptance requires the production gates of Increments 8-10 and the Phase 1 production foundation.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Flink host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Streaming job artifacts target the Java 17 runtime selected in Increment 10.
-- Flink target is `2.1.1` for this increment because Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact
+- Podman 5.8.2 installed on each Flink host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Streaming job artifacts target the Java 17 runtime selected in Increment 10.
+- Flink target is `2.1.3`, the latest patch in the Iceberg 1.11.0-compatible Flink 2.1 line
 - Iceberg target is `1.11.0`
-- Flink Kafka Connector target is `5.0.0`
+- Flink Kafka Connector target is `5.0.0-2.1`
 - Polaris endpoint is reachable at `https://polaris.stratus.local:8181/api/catalog`
 - Ceph RGW endpoint is reachable at `https://object-store.stratus.local`
 - Kafka verification CDC topic from Increment 9 is populated
@@ -44,17 +48,17 @@ These are verification tables. Production streaming tables must follow the same 
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 Apache Iceberg 1.11.0 is the current Iceberg line used by the Stratus Phase 1 baseline. Its Flink documentation includes REST catalog configuration, writing, reading, Flink writes, table maintenance, and configuration sections. Iceberg 1.11.0 publishes runtime artifacts for Flink 2.1, 2.0, and 1.20. This increment therefore uses:
 
 | Component | Target |
 |---|---|
-| Apache Flink | 2.1.1 |
+| Apache Flink | 2.1.3 |
 | Apache Iceberg | 1.11.0 |
 | Iceberg Flink runtime | `iceberg-flink-runtime-2.1` |
 | Iceberg AWS bundle | `iceberg-aws-bundle` 1.11.0 |
-| Flink Kafka Connector | 5.0.0 |
+| Flink Kafka Connector | 5.0.0-2.1 |
 | Apache Polaris | 1.5.0 or approved newer release |
 | Trino | 482 or approved newer release |
 
@@ -116,7 +120,7 @@ Extend the Increment 10 Flink image with Iceberg runtime artifacts.
 Target image tag:
 
 ```bash
-podman build -t stratus/flink:2.1.1-kafka5.0.0-iceberg1.11.0 docker/flink-iceberg
+podman build -t stratus/flink:2.1.3-kafka5.0.0-2.1-iceberg1.11.0 docker/flink-iceberg
 ```
 
 Run this only as a build-pipeline step on an approved worker. The pipeline tests, scans, publishes, and records the image digest; Flink runtime hosts only pull and run the published image.
@@ -125,15 +129,15 @@ Required artifacts:
 
 | Artifact | Version |
 |---|---|
-| Apache Flink | 2.1.1 |
-| Flink Kafka Connector | 5.0.0 |
+| Apache Flink | 2.1.3 |
+| Flink Kafka Connector | 5.0.0-2.1 |
 | `iceberg-flink-runtime-2.1` | 1.11.0 |
 | `iceberg-aws-bundle` | 1.11.0 |
 
 Example Dockerfile fragment:
 
 ```dockerfile
-FROM stratus/flink:2.1.1-kafka5.0.0
+FROM stratus/flink:2.1.3-kafka5.0.0-2.1
 
 USER root
 
@@ -163,13 +167,13 @@ warehouse=stratus
 credential=svc-flink:<polaris-client-secret>
 scope=PRINCIPAL_ROLE:ALL
 io-impl=org.apache.iceberg.aws.s3.S3FileIO
-s3.endpoint=https://object-store.stratus.local
-s3.access-key-id=svc-flink
-s3.secret-access-key=<svc-flink-ceph-rgw-secret>
+s3.endpoint=${CEPH_RGW_ENDPOINT}
+s3.access-key-id=${CEPH_RGW_ACCESS_KEY}
+s3.secret-access-key=${CEPH_RGW_SECRET_KEY}
 s3.path-style-access=true
 ```
 
-This file contains secrets unless rendered through the approved secret mechanism. Store it in a protected runtime path, not source control.
+This file contains secrets unless rendered through the approved secret mechanism. Store it in a protected runtime path, not source control. `org.apache.iceberg.aws.s3.S3FileIO` and `iceberg-aws-bundle` are official upstream Iceberg identifiers for its S3-compatible client implementation; they do not imply cloud storage or cloud credentials.
 
 Update `/etc/stratus/flink/flink-conf.yaml`:
 
@@ -182,7 +186,7 @@ state.checkpoints.dir: file:///data/flink/checkpoints
 state.savepoints.dir: file:///data/flink/savepoints
 ```
 
-For production, checkpoint and savepoint paths should be moved to approved durable shared storage. The verification lab may use local paths only if restart tests are scoped to the same host set.
+The YAML above is developer-only. Production overrides the paths with `s3://stratus-platform/flink/checkpoints` and `s3://stratus-platform/flink/savepoints`, using the pinned Flink S3 filesystem plugin and scoped Ceph RGW credentials established in Increment 10. Restart, savepoint restore, and replay tests must survive loss of the original JobManager host.
 
 ---
 
@@ -381,7 +385,7 @@ The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris,
 <dependency>
     <groupId>org.apache.flink</groupId>
     <artifactId>flink-streaming-java</artifactId>
-    <version>2.1.1</version>
+    <version>2.1.3</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
@@ -424,7 +428,7 @@ The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris,
 
 | Variable | Example |
 |---|---|
-| `STRATUS_FLINK_REST_URL` | `http://flink-jobmanager.stratus.local:8081` |
+| `STRATUS_FLINK_REST_URL` | developer: `http://127.0.0.1:8081`; production: authenticated `https://flink.stratus.local` |
 | `STRATUS_KAFKA_BOOTSTRAP` | `kafka1.stratus.local:9092,kafka2.stratus.local:9092,kafka3.stratus.local:9092` |
 | `STRATUS_CDC_TOPIC` | `cdc.verification.postgres.public.customer_account` |
 | `STRATUS_POLARIS_URI` | `https://polaris.stratus.local:8181/api/catalog` |
@@ -495,9 +499,16 @@ Minimum alerts:
 
 ---
 
-## 14. Completion Gate
+## 14. Completion Gates
 
-Increment 11 is complete when:
+### Developer gate
+
+- [ ] Isolated verification tables receive CDC records, commit on checkpoints, become visible in Trino, and recover from a local restart without unacceptable duplicates.
+- [ ] Local state, reduced parallelism, test credentials, and developer namespaces are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 11 is accepted when:
 
 - [ ] Flink runtime, Kafka connector, and Iceberg runtime versions are pinned and compatible
 - [ ] Flink Iceberg image includes `iceberg-flink-runtime-2.1` 1.11.0 and `iceberg-aws-bundle` 1.11.0
@@ -514,8 +525,11 @@ Increment 11 is complete when:
 - [ ] Spark/Airflow maintenance conflict rules are documented
 - [ ] Java verification suite passes
 - [ ] operational dashboards and alerts exist
+- [ ] checkpoint/savepoint state is stored in Ceph RGW and no production path uses `file://`
+- [ ] authenticated HTTPS protects Flink operations, and production Polaris/RGW/Kafka credentials are managed and scoped
+- [ ] streaming-safe maintenance and commit ownership have been exercised under concurrent Trino reads and scheduled maintenance
 
-When all gates are checked, Increment 12 (Atlas Event Bus and Lineage Automation) can begin.
+The developer gate may unblock Increment 12 engineering. Only the production gate marks Increment 11 accepted in the Phase 2 tracker.
 
 ---
 

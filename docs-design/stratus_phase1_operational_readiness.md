@@ -12,6 +12,8 @@ Phase 1 is accepted only when the platform can prove three things:
 2. Operators can observe, recover, and support the platform using documented runbooks.
 3. Security, governance, and quality controls remain enforced during normal operations and failure scenarios.
 
+This is exclusively the **production-profile gate**. Developer-profile evidence is useful regression input, but Docker Desktop/Podman convenience topology, reduced replicas, disposable or local-only state, local CA certificates, plaintext endpoints, bootstrap identities, and embedded production dependencies cannot satisfy this document. The evidence bundle must include a promotion manifest mapping every developer shortcut to the production setting that replaced it.
+
 Reference:
 - [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
@@ -53,23 +55,29 @@ At minimum, review current documentation for:
 - Keycloak
 - Prometheus, Grafana, and Loki
 
-Current Phase 1 target baseline as of 2026-07-05:
+Current Phase 1 target baseline as of 2026-07-10:
 
 | Component | Target |
 |---|---|
 | Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch, vendor and image digest recorded |
-| Component runtime exceptions | Spark 4.1 and Flink 2.1 on supported Java 17 runtimes; Airflow Spark client on Java 21; Atlas/Ranger on selected-release-supported runtimes; each exception documented and retested on upgrade |
+| Java build tool | Apache Maven 3.9.16; Maven 4 remains pre-GA and is not the production build baseline |
+| OCI runtime baseline | Podman 5.8.2 preferred; Docker Engine 29.5.3 permitted where selected and component-supported; exact package and patch pinned per environment |
+| Component runtime exceptions | Spark 4.1 on its supported Java 17 runtime; Airflow Spark client on Java 21; Atlas/Ranger on selected-release-supported runtimes; each exception documented and retested on upgrade |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
-| Apache Airflow | 3.2.2 |
+| Apache Airflow | 3.3.0 |
+| Airflow Python runtime | Python 3.14, using the matching official image and constraints/provider compatibility tests |
+| Airflow metadata database | PostgreSQL 17.10, latest patch in Airflow 3.3.0's newest tested PostgreSQL major |
 | Airflow Spark provider | 6.2.0 |
 | Airflow Amazon provider | 9.31.0 |
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| Ceph RGW | approved Ceph release pinned by package version or image tag plus digest in the environment version matrix |
-| Apache Atlas / Ranger | approved Apache releases built as internal images and pinned by tag plus digest after plugin/database compatibility review |
+| Keycloak metadata database | PostgreSQL 18.4, latest patch in Keycloak's newest supported PostgreSQL major |
+| Ceph RGW | Ceph Tentacle 20.2.2, pinned by package version or image tag plus digest |
+| Apache Atlas | 2.5.0, built as an internal image and pinned by tag plus digest after external dependency compatibility review |
+| Apache Ranger | 2.8.0, built as an internal image and pinned by tag plus digest after plugin/database compatibility review |
 | FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |
 
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
@@ -95,7 +103,7 @@ This readiness gate covers:
 
 Out of scope:
 
-- Kafka, Kafka Connect, Debezium, Flink, and streaming ingestion
+- the Phase 2 shared Kafka event backbone, Kafka Connect, Debezium, Flink, and streaming ingestion; an Atlas-dedicated external notification service remains in scope only as an Atlas production dependency
 - Firebolt Core or other serving acceleration layers
 - large-scale multi-environment promotion automation
 - self-service data marketplace workflows
@@ -146,13 +154,15 @@ Acceptance requires proving the system behavior, not merely proving that each co
 | Apache Spark | Spark cluster protocol, Iceberg REST, HTTPS S3 API, JVM truststore | ingestion, transform, materialisation, quality, and maintenance jobs run through Polaris and Ceph RGW |
 | Apache Airflow 3.x | HTTPS UI/API, Airflow public API, metadata database protocol, `spark-submit` | API server, DAG processor, scheduler, and triggerer are healthy; DAGs run, retry, alert, and enforce quality gates |
 | Trino | HTTPS client protocol/JDBC, Iceberg REST, Ranger plugin REST, HTTPS S3 API through connector | curated SQL queries match Spark outputs; unauthorized queries are denied; Trino does not bypass Polaris |
-| Apache Atlas | HTTPS REST API, embedded or configured graph/search stores | metadata entities, lineage, classifications, ownership, and quality attributes are searchable and current |
+| Apache Atlas | HTTPS REST API, external HBase, SolrCloud/ZooKeeper, and external Kafka notification protocol | metadata entities, lineage, classifications, ownership, and quality attributes are searchable and current; Atlas and each backing service survive the declared failure case and restore consistently |
 | Apache Ranger | HTTPS Admin API/UI, usersync LDAP/LDAPS, policy plugin REST, audit storage | FreeIPA groups sync, policies apply through Trino, allow and deny events are audited |
 | FreeIPA | Kerberos, LDAP/LDAPS, Dogtag CA, DNS where used | users, groups, hosts, service principals, keytabs, and certificates are issued and recoverable |
 | Keycloak | HTTPS/OIDC, LDAPS federation, PostgreSQL protocol | realm, clients, token claims, issuer validation, group federation, and key rotation are verified |
 | Observability stack | Prometheus scrape endpoints, Grafana dashboards, Loki log ingestion | dashboards, alerts, log search, and run correlation work across platform services |
 
 No production readiness signoff should pass while routine operational commands require `-k`, `--insecure`, disabled certificate validation, shared human credentials, or local lab users.
+
+No production readiness signoff should pass with Atlas embedded BerkeleyDB, embedded Solr, embedded notifications, or any other dependency identified as developer-only in a Phase 1 increment document.
 
 ---
 

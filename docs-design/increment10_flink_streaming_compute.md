@@ -6,6 +6,8 @@ This document is the technical implementation plan for Increment 10 of the Strat
 
 Increment 10 delivers Apache Flink as the stateful streaming compute runtime for Phase 2. Flink consumes Kafka topics created by Increment 8 and populated by Increment 9, applies event-time and stateful processing, and prepares data for governed Iceberg writes in Increment 11. When this increment is complete, the platform has a secure Flink cluster with checkpointing, savepoints, Kafka consumption, metrics, and a verification streaming job.
 
+The developer profile may use one JobManager, one or two TaskManagers, local volumes, `file://` checkpoint/savepoint paths, and an HTTP REST endpoint restricted to the developer network. The production profile requires the approved high-availability/RTO topology, Ceph RGW-backed checkpoint and savepoint paths, trusted internal transport, authenticated HTTPS operator access, managed secrets, capacity evidence, and TaskManager/JobManager/checkpoint-store failure drills. Job artifacts, Kafka contracts, state semantics, and functional tests are shared across both tracks.
+
 Flink is not the batch ETL engine and it is not the scheduler. Spark remains the batch engine. Airflow remains the orchestrator for bounded workflows and operational control-plane jobs. Flink owns long-running streaming jobs.
 
 **Prerequisites:**
@@ -16,13 +18,15 @@ Flink is not the batch ETL engine and it is not the scheduler. Spark remains the
 - Checkpoint storage path approved
 - Observability stack can scrape Flink metrics
 
+**Track rule:** Developer work requires the Increment 8 and 9 developer gates. Increment 10 production deployment and acceptance require their production gates and the approved Ceph RGW recovery-state path.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Flink host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Flink job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Flink runtime.
+- Podman 5.8.2 installed on each Flink host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Flink job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Flink runtime.
 - Kafka client truststore from Increment 8 is available
 - `svc-flink` can read the verification event and CDC topics
 - `svc-flink` can write to the approved checkpoint and savepoint storage path
@@ -39,9 +43,9 @@ DNS names used in this increment:
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
-The approved Flink compatibility target for this increment is Flink 2.1.1 with Flink Kafka Connector 5.0.0. Connector compatibility matters more than release recency: Flink Kafka Connector 5.0.0 is listed as compatible with Flink 2.1.x and 2.2.x, and Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact for streaming table writes in Increment 11.
+The approved compatibility target is Flink 2.1.3 with Flink Kafka Connector `5.0.0-2.1`. Connector compatibility matters more than release recency: the full connector artifact version identifies its Flink line, and Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact for streaming table writes in Increment 11.
 
 Do not target Flink 2.3.0 for this increment until the Kafka connector, Iceberg runtime, and verification jobs are confirmed compatible with that line.
 
@@ -91,6 +95,8 @@ This increment validates Flink runtime behavior and Kafka consumption. It writes
 
 Restrict JobManager UI and REST API to platform operators and automation.
 
+All hard-coded `http://flink-jobmanager.stratus.local:8081` commands below are developer-profile examples. Production automation uses `STRATUS_FLINK_REST_URL=https://flink.stratus.local` with the platform CA and approved operator/deployment identity; unauthenticated HTTP is not a production runbook path.
+
 ---
 
 ## 5. Flink Image and Artifact Policy
@@ -101,15 +107,15 @@ Target artifacts:
 
 | Artifact | Target |
 |---|---|
-| Apache Flink | 2.1.1 |
-| Flink Kafka Connector | 5.0.0 |
+| Apache Flink | 2.1.3 |
+| Flink Kafka Connector | 5.0.0-2.1 |
 | JDK | Java 17 runtime for Flink 2.1; Java 25 build toolchain with Flink job modules compiled using `--release 17` |
 | Prometheus metrics reporter | bundled or pinned compatible reporter |
 
 Example image tag:
 
 ```bash
-podman build -t stratus/flink:2.1.1-kafka5.0.0 docker/flink
+podman build -t stratus/flink:2.1.3-kafka5.0.0-2.1 docker/flink
 ```
 
 This is a build-pipeline command. The pipeline tests, scans, publishes, and records the image digest before deployment.
@@ -162,7 +168,7 @@ Mounted layout:
 └── logs/
 ```
 
-For production-like deployment, checkpoint and savepoint paths should use durable shared storage. A local path is acceptable only for the first lab verification and must be replaced before production streaming jobs.
+The local directories are developer-profile state only. Production checkpoints and savepoints use the dedicated prefixes in `s3://stratus-platform/flink/`; local paths cannot pass the production gate.
 
 ---
 
@@ -196,7 +202,33 @@ metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.Prometh
 metrics.reporter.prom.port: 9249
 ```
 
-When Ceph RGW-backed durable checkpoints are enabled, update `state.checkpoints.dir` and `state.savepoints.dir` to the approved object-storage path and add the required filesystem dependencies to the Flink image.
+The YAML above is the developer overlay. The production image includes one pinned Flink S3 filesystem plugin compatible with Flink 2.1.3 and Ceph RGW. The production overlay renders scoped `svc-flink` RGW credentials through the approved secret mechanism and includes:
+
+```yaml
+state.checkpoints.dir: s3://stratus-platform/flink/checkpoints
+state.savepoints.dir: s3://stratus-platform/flink/savepoints
+s3.endpoint: https://object-store.stratus.local
+s3.path-style-access: true
+s3.access-key: <rendered svc-flink RGW access key>
+s3.secret-key: <rendered svc-flink RGW secret key>
+
+high-availability.type: zookeeper
+high-availability.storageDir: s3://stratus-platform/flink/ha
+high-availability.zookeeper.quorum: zk1.stratus.local:2181,zk2.stratus.local:2181,zk3.stratus.local:2181
+high-availability.cluster-id: /stratus/flink
+
+security.ssl.internal.enabled: true
+security.ssl.internal.keystore: /etc/flink/certs/flink-internal.p12
+security.ssl.internal.truststore: /etc/flink/certs/flink-truststore.p12
+security.ssl.rest.enabled: true
+security.ssl.rest.authentication-enabled: true
+security.ssl.rest.keystore: /etc/flink/certs/flink-rest.p12
+security.ssl.rest.truststore: /etc/flink/certs/flink-truststore.p12
+```
+
+Keystore, truststore, and key passwords are rendered separately through protected secret injection and are not committed in YAML. The image build records whether `flink-s3-fs-hadoop` or `flink-s3-fs-presto` is selected and its checksum; hosts never download the plugin at startup. Production grants `svc-flink` only the required `stratus-platform/flink/` access plus Increment 11 table prefixes. The Flink REST endpoint uses native mTLS as shown or an approved OIDC/mTLS-authenticating reverse proxy and is not published as unauthenticated HTTP.
+
+The ZooKeeper quorum may be shared with other production control-plane services only through separate ACLs, namespaces, capacity limits, backup/restore ownership, and failure tests. If those conditions are not accepted, Flink receives a dedicated quorum. At least two JobManagers are started for HA validation, and a production gate must prove leader loss and recovery from the Ceph-backed HA metadata plus checkpoints.
 
 ### Kafka client properties
 
@@ -206,14 +238,14 @@ Create `/etc/stratus/flink/kafka-client.properties`:
 bootstrap.servers=kafka1.stratus.local:9092,kafka2.stratus.local:9092,kafka3.stratus.local:9092
 security.protocol=SASL_SSL
 sasl.mechanism=SCRAM-SHA-512
-sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="svc-flink" password="${file:/etc/flink/secrets/flink-scram.pass:password}";
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="svc-flink" password="<rendered svc-flink SCRAM password>";
 ssl.truststore.location=/etc/flink/certs/kafka.truststore.p12
-ssl.truststore.password=${file:/etc/flink/secrets/kafka-truststore.pass:password}
+ssl.truststore.password=<rendered truststore password>
 ssl.truststore.type=PKCS12
 ssl.endpoint.identification.algorithm=https
 ```
 
-If the Flink Kafka connector does not support file expansion for JAAS configuration in the selected runtime, inject the rendered client properties file through the approved secret process at deployment time.
+The Flink Kafka client does not inherit Kafka Connect's config-provider expansion. Deployment therefore renders this file from the approved secret mechanism into a protected runtime mount, verifies its permissions, and removes it when the container is replaced. The literal placeholders above must never reach a running job.
 
 ---
 
@@ -229,7 +261,7 @@ podman run -d \
   -v /etc/stratus/flink:/etc/flink:ro,z \
   -v /data/flink:/data/flink:z \
   --restart unless-stopped \
-  stratus/flink:2.1.1-kafka5.0.0 \
+  stratus/flink:2.1.3-kafka5.0.0-2.1 \
   jobmanager
 ```
 
@@ -243,7 +275,7 @@ podman run -d \
   -v /etc/stratus/flink:/etc/flink:ro,z \
   -v /data/flink:/data/flink:z \
   --restart unless-stopped \
-  stratus/flink:2.1.1-kafka5.0.0 \
+  stratus/flink:2.1.3-kafka5.0.0-2.1 \
   taskmanager
 ```
 
@@ -290,13 +322,13 @@ Maven dependencies for the verification job:
 <dependency>
     <groupId>org.apache.flink</groupId>
     <artifactId>flink-streaming-java</artifactId>
-    <version>2.1.1</version>
+    <version>2.1.3</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.apache.flink</groupId>
     <artifactId>flink-connector-kafka</artifactId>
-    <version>5.0.0</version>
+    <version>5.0.0-2.1</version>
 </dependency>
 <dependency>
     <groupId>com.fasterxml.jackson.core</groupId>
@@ -331,20 +363,20 @@ Expected:
 Trigger a savepoint:
 
 ```bash
-/opt/flink/bin/flink savepoint <job-id> file:///data/flink/savepoints
+/opt/flink/bin/flink savepoint <job-id> "$STRATUS_FLINK_SAVEPOINT_URI"
 ```
 
 Stop with savepoint:
 
 ```bash
-/opt/flink/bin/flink stop --savepointPath file:///data/flink/savepoints <job-id>
+/opt/flink/bin/flink stop --savepointPath "$STRATUS_FLINK_SAVEPOINT_URI" <job-id>
 ```
 
 Restart from savepoint:
 
 ```bash
 /opt/flink/bin/flink run \
-  -s file:///data/flink/savepoints/<savepoint-id> \
+  -s "$STRATUS_FLINK_SAVEPOINT_URI/<savepoint-id>" \
   -c com.stratus.flink.VerificationKafkaConsumerJob \
   /opt/stratus/jobs/stratus-flink-verification.jar \
   --topic app.verification.events.v1 \
@@ -417,7 +449,8 @@ The verification suite uses Flink REST, Kafka admin/producer APIs, and consumer 
 
 | Variable | Example |
 |---|---|
-| `STRATUS_FLINK_REST_URL` | `http://flink-jobmanager.stratus.local:8081` |
+| `STRATUS_FLINK_REST_URL` | developer: `http://127.0.0.1:8081`; production: `https://flink.stratus.local` |
+| `STRATUS_FLINK_SAVEPOINT_URI` | developer: `file:///data/flink/savepoints`; production: `s3://stratus-platform/flink/savepoints` |
 | `STRATUS_KAFKA_BOOTSTRAP` | `kafka1.stratus.local:9092,kafka2.stratus.local:9092,kafka3.stratus.local:9092` |
 | `STRATUS_KAFKA_TRUSTSTORE` | `/etc/stratus/kafka/certs/kafka.truststore.p12` |
 | `STRATUS_KAFKA_TRUSTSTORE_PASSWORD` | truststore password |
@@ -458,14 +491,22 @@ Minimum alerts:
 
 ---
 
-## 14. Completion Gate
+## 14. Completion Gates
 
-Increment 10 is complete when:
+### Developer gate
+
+- [ ] Reduced topology startup/shutdown, Kafka consumption, local checkpoint, local savepoint/restore, TaskManager restart, and reset pass on Docker Desktop or Podman.
+- [ ] Local state and HTTP REST exposure are recorded as developer-only in the promotion manifest.
+
+### Production gate
+
+Increment 10 is accepted when:
 
 - [ ] Flink version and connector versions are pinned by image tag and digest
-- [ ] Flink 2.1.1 compatibility decision is recorded against Kafka Connector 5.0.0 and Iceberg 1.11.0 Flink 2.1 runtime
+- [ ] Flink 2.1.3 compatibility decision is recorded against Kafka Connector 5.0.0-2.1 and Iceberg 1.11.0 Flink 2.1 runtime
 - [ ] JobManager and two TaskManagers are running and managed by systemd
-- [ ] Flink REST API is restricted to platform operators
+- [ ] at least two production JobManagers use the approved ZooKeeper HA namespace and Ceph RGW HA metadata path, or an explicit RTO/RPO exception is accepted
+- [ ] Flink REST API is authenticated HTTPS and restricted to platform operators and deployment automation
 - [ ] `svc-flink` can consume only approved Kafka topics and groups
 - [ ] verification streaming job consumes Kafka events
 - [ ] checkpointing completes successfully
@@ -475,8 +516,9 @@ Increment 10 is complete when:
 - [ ] Prometheus and Grafana expose Flink cluster and job metrics
 - [ ] Java verification suite passes
 - [ ] operational runbook covers submit, stop, drain, savepoint, restore, restart, and upgrade
+- [ ] checkpoints and savepoints use Ceph RGW durable shared paths and survive loss of a JobManager host; no production state path uses `file://`
 
-When all gates are checked, Increment 11 (Streaming Writes to Iceberg) can begin.
+The developer gate may unblock Increment 11 engineering. Only the production gate marks Increment 10 accepted in the Phase 2 tracker.
 
 ---
 

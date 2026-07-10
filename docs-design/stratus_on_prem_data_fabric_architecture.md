@@ -63,6 +63,19 @@ The default shared query plane should be **Trino over Iceberg** for open interac
 ### 2.7 Platform behavior must be verified by contracts
 Every platform layer should expose a small set of explicit contracts that can be verified automatically: storage buckets and policies, catalog namespaces, table schemas, Spark job outcomes, Airflow DAG behavior, quality gate decisions, query results, lineage publication, and access control. The platform is not considered healthy because services are running; it is healthy when those contracts pass against the live stack.
 
+### 2.7.1 Two implementation profiles
+
+Every phase and increment is implemented through two explicit tracks. They share service contracts, schemas, protocols, verifier artifacts, and functional tests, but they do not claim the same operational evidence.
+
+| Track | Purpose | Permitted simplifications | Required evidence |
+|---|---|---|---|
+| Developer profile | fast, repeatable engineering on a workstation or small integration host | Docker Desktop or Podman, reduced replicas, local bind mounts or named volumes, local CA certificates, loopback/private-network HTTP where explicitly permitted, and disposable state | idempotent startup/shutdown, health checks, functional contract tests, pinned artifacts, and a documented reset path |
+| Production profile | durable on-prem service for governed datasets | only exceptions recorded with an owner, risk, expiry or retest trigger, and approved remediation | supported distributed topology, durable shared state, trusted TLS, managed service identities and secrets, authorization, observability, backup/restore, failure drills, capacity evidence, and operational ownership |
+
+A developer-profile gate proves that engineers can build and exercise the capability. It never proves production readiness. Production promotion must replace every developer-only shortcut and rerun the shared functional suite plus the production security, durability, recovery, and operations tests. An increment that cannot identify the replacement for a shortcut is incomplete.
+
+The version policy applies to both tracks: select the latest compatible supported release, pin the exact patch and artifact digest, and retest the compatibility set together. An older pin requires a written compatibility reason, owner, test evidence, and upgrade trigger; release age alone is not a reason to destabilize a validated integration.
+
 ---
 
 ### 2.8 Storage architecture decision
@@ -99,7 +112,7 @@ This section exists because "S3-compatible" is not specific enough for a product
 | Concurrent engine access | Spark, Trino, Polaris, and Airflow can all touch the storage layer during normal operation. | Concurrent read/write/list tests run without throttling, stale reads, or authorization leakage. |
 | Metadata-heavy Iceberg behavior | Iceberg creates many metadata files, manifests, and object listings as tables grow. | Object count, listing latency, bucket-index behavior, and metadata file growth are tested with representative table counts. |
 | Large scan and ingestion throughput | Storage must sustain initial batch ingestion and analytical scans without becoming the first bottleneck. | Baseline throughput, request latency, request error rate, and retry rate are recorded under Spark and Trino smoke loads. |
-| Path-style endpoint support | Internal DNS and lab deployments often use endpoint overrides rather than AWS-style virtual-hosted buckets. | Spark, Trino, Java SDK, and Polaris configs work with `STRATUS_S3_PATH_STYLE_ACCESS=true`. |
+| Path-style endpoint support | Internal DNS and lab deployments often use endpoint overrides rather than virtual-hosted buckets. | Spark, Trino, Java SDK, and Polaris configs work with `S3_PATH_STYLE_ACCESS=true`. |
 | Service identity isolation | Platform services must not share one storage credential. | `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino` access tests pass and cross-bucket denies are proven. |
 | TLS and CA trust | Production traffic must not rely on insecure TLS bypass. | HTTPS endpoint works with trusted CA; plaintext and untrusted connections fail. |
 | Encryption-at-rest path | Gold/platform data require an approved at-rest protection model. | Storage encryption design is selected and tested for the chosen target. |
@@ -165,27 +178,27 @@ Scoring scale:
 | Future multi-protocol storage | Strong if Stratus later needs object plus block/file from one storage substrate. | 5 | Strong for object storage; less relevant if Stratus later needs block/file from the same storage substrate. | 3 | Ceph has broader infrastructure-storage optionality. |
 | **Total** |  | **51 / 60** |  | **44 / 60** | Ceph scores higher under the current Stratus requirements because the comparison scores stated storage, S3 compatibility, security, operations, recovery, performance evidence, metadata behavior, and cost/operator needs. |
 
-The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is treated as the lower-risk S3 API target for the selected Iceberg/Spark/Trino/Polaris path, while Ozone remains viable if its S3 Gateway passes the same proof-of-fit and its security or operational model is preferred.
+The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is the selected lower-risk S3 API target for the Iceberg/Spark/Trino/Polaris path. Ozone remains technically plausible but is superseded unless a recorded reconsideration trigger opens a new architecture decision.
 
-#### 2.8.4 Candidate admission before Increment 1
+#### 2.8.4 Decision due diligence before Increment 1
 
-Ceph RGW can enter Increment 1 as the candidate baseline after the following evidence exists:
+Ceph RGW is the selected Phase 1 implementation baseline. Before implementation starts, the team records the following decision due-diligence evidence:
 
 - Official release and deployment method selected and pinned.
 - release documentation shows the required S3 operations and deployment topology are supported or identifies the exact items Increment 1 must prove
 - the target Linux, container runtime, node, disk, network, failure-domain, TLS, monitoring, recovery, and upgrade assumptions are documented
 - a preliminary capacity and operator-ownership model is accepted
-- the required service-identity boundaries and product-neutral `STRATUS_S3_*` client contract are defined
+- the required service-identity boundaries and active Ceph client contract (`CEPH_RGW_ENDPOINT`, scoped RGW credentials, and `S3_PATH_STYLE_ACCESS`) are defined
 - measurable Increment 1 and later cross-increment proof targets are recorded with owners and owning gates
-- Apache Ozone is either rejected with specific evidence or retained as an alternate with explicit trigger conditions.
+- Apache Ozone is retained only as a superseded alternative with explicit reconsideration triggers.
 
-Increment 1 then determines whether the candidate becomes the accepted engineering baseline. A failed Increment 1 storage-only gate stops Increment 2 and triggers an ADR or remediation decision. A later engine-specific failure reopens storage qualification but does not create a circular prerequisite for Increment 1.
+Increment 1 determines whether the selected Ceph implementation passes its engineering gate. A failed storage-only gate stops Increment 2 and triggers remediation or a new architecture decision record. A later engine-specific failure reopens Ceph qualification but does not create a circular prerequisite for Increment 1.
 
 #### 2.8.5 Decision summary
 
-Ceph RGW is the current candidate baseline because Stratus Phase 1 depends on the exact S3 behavior required by Iceberg, Spark, Trino, Polaris, Airflow, and the Java verification suite. Apache Ozone also exposes an S3-compatible API, so the distinction is not S3 versus non-S3. The distinction is that Ceph RGW is being treated as the lower-risk S3 API target for this client mix, while Ozone remains viable only if its S3 Gateway passes the same proof-of-fit and its operational or security model is preferred.
+Ceph RGW is the selected Phase 1 baseline because Stratus depends on the exact S3-compatible behavior required by Iceberg, Spark, Trino, Polaris, Airflow, and the Java verification suite. The selection does not waive proof: the developer profile must pass the client contract quickly, and the production profile must additionally pass distributed-storage, failure-domain, recovery, capacity, security, and operations gates.
 
-Apache Ozone remains the control candidate, not a footnote. Ozone may become the better choice if the requirements shift toward storage-layer Ranger/Kerberos enforcement or Ozone's volume/bucket namespace as the primary platform abstraction. That change would require revising the storage contract and the downstream Increment 2/3/5 engine configuration, not just swapping an endpoint URL.
+Apache Ozone remains a documented superseded alternative. It is reconsidered only through a new architecture decision if requirements shift toward storage-layer Ranger/Kerberos enforcement or Ozone's volume/bucket namespace. That change would require revising the storage contract and the downstream Increment 2/3/5 engine configuration, not merely swapping an endpoint URL.
 
 ---
 
@@ -246,7 +259,7 @@ Apache Ozone remains the control candidate, not a footnote. Ozone may become the
 
   ┌──────────────────────────────────────────────────────────────────────────────┐
   │ Governance / Control Plane                                                   │
-  │ Apache Atlas (JanusGraph + embedded Solr) — metadata, lineage, glossary     │
+  │ Apache Atlas — metadata, lineage, glossary; backing services vary by profile│
   │ Apache Ranger — policy enforcement, classification-driven access control     │
   │ Airflow — orchestration, scheduling, promotion gates, maintenance            │
   │ FreeIPA — Kerberos, LDAP, PKI          Keycloak — OIDC for REST services   │
@@ -457,9 +470,9 @@ References:
 - near-real-time needs are modest and do not require a shared replayable event log
 
 ### Design Position
-Kafka should not be treated as automatically mandatory just because Flink exists in the architecture. Kafka becomes a core component when the platform needs durable event retention, independent consumers, replay, back-pressure absorption, or CDC at meaningful scale. For batch-heavy or file-landed foundations, Kafka can remain a Phase 2 addition rather than a Phase 1 requirement.
+Kafka should not be treated as automatically mandatory just because Flink exists in the architecture. The **shared platform event backbone** becomes a Phase 2 core component when the platform needs durable event retention, independent consumers, replay, back-pressure absorption, or CDC at meaningful scale. Phase 1 does not deliver those streaming capabilities. A small external Kafka service brought forward solely as Atlas's supported notification dependency remains part of the Atlas production topology, not a completed Kafka platform increment.
 
-When Kafka is deployed, Kafka Connect and Debezium are deployed with it as part of the same Phase 2 increment — they are not optional additions to the streaming stack.
+Kafka is delivered by Increment 8. Kafka Connect and Debezium are delivered by Increment 9 and are required before the CDC path is accepted; they are separate increments so the event backbone can be secured and proven first.
 
 ---
 
@@ -481,17 +494,17 @@ Reference:
 
 ### Operational dependencies
 
-Atlas requires a set of backing services to run. The platform adopts the **minimal dependency configuration**:
+Atlas requires graph, search, and notification services. Stratus uses the minimal topology only for developer work and requires supported external dependencies before Atlas is accepted for production:
 
-| Dependency | Chosen option | Rationale |
+| Dependency | Developer profile | Production profile |
 |---|---|---|
-| Graph store | JanusGraph with embedded BerkeleyDB | eliminates external HBase and ZooKeeper clusters |
-| Search index | Embedded Solr | eliminates a standalone Solr cluster; adequate for moderate metadata volumes |
-| Notification bus | Embedded Kafka-compatible notifier (Phase 1); external Kafka (Phase 2+) | avoids a Kafka dependency in Phase 1; migrates to the platform Kafka instance when it is deployed in Phase 2 |
+| Graph store | embedded/disposable backend supplied by the approved Atlas development distribution | external supported HBase topology with durable storage, backup, monitoring, and tested recovery |
+| Search index | embedded/disposable Solr | external SolrCloud with ZooKeeper, persistent collections, backup, monitoring, and tested recovery |
+| Notification bus | embedded notifier for local functional testing only | external supported Kafka notification service; production may bring the Phase 2 Kafka backbone forward as a dependency without enabling CDC/Flink, or use an Atlas-dedicated cluster that Increment 12 later consolidates |
 
-This configuration runs Atlas as a single deployable service with no external cluster dependencies in Phase 1. When Phase 2 deploys the Kafka event backbone, Atlas is reconfigured to use it for entity change notifications, which also enables downstream consumers of Atlas events.
+The developer profile may run Atlas as one disposable service. It is not eligible for the Phase 1 production-readiness gate. Production acceptance requires the external dependency topology, two Atlas application instances or an approved availability exception, encrypted service protocols, and restore evidence for graph, search, types, glossary, and classifications. If the production notification service is deferred, Atlas production acceptance and governed production dataset onboarding are also deferred; the lab may continue.
 
-**Scale ceiling**: embedded BerkeleyDB and embedded Solr are appropriate for moderate metadata volumes — tens of thousands of tables and attributes. If the platform grows to very large catalogue scale, the graph backend can be migrated to a standalone JanusGraph with Cassandra or HBase. That is a deliberate future migration, not a Phase 1 concern.
+The production dependency choice is validated against the selected Atlas release documentation. Embedded stores are convenience tooling, not a small-production sizing tier.
 
 ### Blunt reality
 Atlas is useful, but it is not plug-and-play magic. It often becomes the most integration-heavy element in the stack.
@@ -1121,7 +1134,7 @@ A realistic on-prem deployment would separate infrastructure by concern.
 
 ### 12.3 Control tier
 - Airflow API server, DAG processor, scheduler, triggerer, local executor, and metadata DB (PostgreSQL)
-- Apache Atlas with embedded JanusGraph (BerkeleyDB) and embedded Solr — single deployable service in Phase 1
+- Apache Atlas developer profile with disposable embedded dependencies; production profile with external HBase, SolrCloud/ZooKeeper, and an external supported notification service
 - FreeIPA identity services (Kerberos KDC, LDAP, DNS, PKI)
 - Keycloak OIDC broker
 - Apache Ranger admin server and usersync service
@@ -1457,7 +1470,7 @@ Phase 1 operational acceptance is captured in [stratus_phase1_operational_readin
 
 ### 14.7 Upstream reference audit and version discipline
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 The platform depends on fast-moving open source projects. Each implementation increment must start by checking current upstream documentation and release notes for the selected versions, then recording the approved version matrix in the increment runbook. A design document may intentionally pin an older version for compatibility, but that pin must be explicit and verified.
 
@@ -1477,23 +1490,29 @@ Minimum version matrix to maintain:
 | Apache Flink | align Flink major version, Java support, connectors, checkpointing, and Iceberg runtime |
 | FreeIPA / Keycloak | use current identity-provider documentation for LDAP/Kerberos/OIDC integration and avoid stale user-guide assumptions |
 
-Current Phase 1 target baseline as of 2026-07-05:
+Current Phase 1 target baseline as of 2026-07-10:
 
 | Component | Target |
 |---|---|
 | Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch |
-| Component runtime exceptions | Spark 4.1 and Flink 2.1 use supported Java 17 runtimes; Airflow's Spark client uses Java 21; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
+| Java build tool | Apache Maven 3.9.16; Maven 4 remains pre-GA and is not the production build baseline |
+| OCI runtime baseline | Podman 5.8.2 preferred; Docker Engine 29.5.3 permitted where selected and component-supported; exact package and patch pinned per environment |
+| Component runtime exceptions | Spark 4.1 uses its supported Java 17 runtime; Airflow's Spark client uses Java 21; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
-| Apache Airflow | 3.2.2 |
+| Apache Airflow | 3.3.0 |
+| Airflow Python runtime | Python 3.14, using the matching official image and constraints/provider compatibility tests |
+| Airflow metadata database | PostgreSQL 17.10, latest patch in Airflow 3.3.0's newest tested PostgreSQL major |
 | Airflow Spark provider | 6.2.0 |
 | Airflow Amazon provider | 9.31.0 |
 | boto3 | 1.43.40 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
-| Ceph RGW | approved Ceph release pinned by package version or image tag plus digest in the environment version matrix |
-| Apache Atlas / Ranger | approved Apache releases built as internal images and pinned by tag plus digest after plugin/database compatibility review |
+| Keycloak metadata database | PostgreSQL 18.4, latest patch in Keycloak's newest supported PostgreSQL major |
+| Ceph RGW | Ceph Tentacle 20.2.2, pinned by package version or image tag plus digest |
+| Apache Atlas | 2.5.0, built as an internal image and pinned by tag plus digest after dependency compatibility review |
+| Apache Ranger | 2.8.0, built as an internal image and pinned by tag plus digest after plugin/database compatibility review |
 | FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |
 
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
@@ -1580,7 +1599,7 @@ Phase 1 acceptance:
 - completed through the operational readiness gate in [stratus_phase1_operational_readiness.md](stratus_phase1_operational_readiness.md), which validates integrated function, recovery, observability, security, governance, quality, and runbook ownership
 
 ### Phase 1 scope note
-Phase 1 includes REST catalog, Trino, Atlas, and Ranger alongside the core batch stack. That is a meaningful deployment surface. If Phase 1 needs to be narrower, Trino and Ranger can be deferred to a Phase 1.5 increment after Ceph RGW, Iceberg, Spark, Airflow, and Atlas are stable.
+Phase 1 is the fixed Increment 1 through Increment 7 foundation. Developer-profile completion may proceed while production dependencies are being provisioned, but no named component is silently deferred and the production-readiness gate remains blocked until every production profile passes.
 
 ### Phase 2 – Streaming and Operational Maturity
 Deliver:
@@ -1589,9 +1608,9 @@ Deliver:
 - Debezium CDC connectors for source systems
 - Flink streaming ingestion
 - CDC pipelines
-- Atlas reconfigured to use platform Kafka for entity change notifications (replacing embedded notifier)
+- Atlas notification traffic consolidated onto the platform Kafka backbone, replacing the Phase 1 dedicated service or developer embedded notifier
 - lineage automation improvements
-- maintenance automation for Iceberg
+- streaming-aware Iceberg maintenance and commit coordination
 
 Primary outcome:
 - near-real-time ingestion and processing
@@ -1677,14 +1696,15 @@ Get them wrong and you will just have an expensive collection of tools.
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/
-- Ceph Object Gateway documentation: https://docs.ceph.com/en/latest/radosgw/
-- Ceph Object Gateway S3 API: https://docs.ceph.com/en/latest/radosgw/s3/
+- Ceph Tentacle Object Gateway documentation: https://docs.ceph.com/en/tentacle/radosgw/
+- Ceph Tentacle Object Gateway S3 API: https://docs.ceph.com/en/tentacle/radosgw/s3/
 - Apache Polaris GitHub: https://github.com/apache/polaris
 - Apache Iceberg overview: https://iceberg.apache.org/
 - Apache Iceberg multi-engine support: https://iceberg.apache.org/multi-engine-support/
 - Apache Iceberg Spark quickstart: https://iceberg.apache.org/spark-quickstart/
 - Apache Iceberg Flink integration: https://iceberg.apache.org/docs/latest/flink/
 - Apache Airflow: https://airflow.apache.org/
+- Apache Airflow prerequisites: https://airflow.apache.org/docs/apache-airflow/stable/installation/prerequisites.html
 - Apache Airflow Docker guide: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html
 - Apache Atlas: https://atlas.apache.org/
 - Apache Ranger: https://ranger.apache.org/
@@ -1696,6 +1716,11 @@ Get them wrong and you will just have an expensive collection of tools.
 - Firebolt external data and Iceberg: https://docs.firebolt.io/performance-and-observability/iceberg-and-external-data
 - FreeIPA: https://www.freeipa.org/
 - Keycloak: https://www.keycloak.org/
+- Keycloak supported configurations: https://www.keycloak.org/server/supported-configurations
+- PostgreSQL release documentation: https://www.postgresql.org/docs/release/
+- Apache Maven release history: https://maven.apache.org/docs/history.html
+- Podman releases: https://github.com/containers/podman/releases
+- Docker Engine release notes: https://docs.docker.com/engine/release-notes/29/
 - MIT Kerberos: https://web.mit.edu/kerberos/
 - Prometheus: https://prometheus.io/
 - Grafana: https://grafana.com/oss/grafana/

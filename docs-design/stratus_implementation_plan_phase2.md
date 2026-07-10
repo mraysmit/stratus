@@ -17,7 +17,7 @@ References:
 
 ## 2. Phase 2 Entry Criteria
 
-Phase 2 should not begin until:
+Phase 2 production-profile deployment should not begin until:
 
 - Phase 1 operational acceptance has passed.
 - Polaris, Iceberg, Ceph RGW, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are operational.
@@ -28,6 +28,8 @@ Phase 2 should not begin until:
 - At least one CDC source and one event-stream use case have named business owners.
 
 Phase 2 should be delayed if the platform still cannot answer who owns a dataset, which table is the source of truth, how access is enforced, or how a failed pipeline is recovered.
+
+Developer-profile prototyping may begin earlier against isolated test topics and non-production data when it does not bypass a blocking Phase 1 architecture decision. That work may validate versions, connector packaging, schemas, and verifier code; it does not satisfy a Phase 2 entry or production gate.
 
 ---
 
@@ -46,11 +48,23 @@ Increment 13 - Streaming Operations and Production Readiness
 
 Kafka comes before Kafka Connect and Debezium because Connect stores connector configuration, offsets, and status in Kafka topics. Flink comes after Kafka because the first Phase 2 streaming jobs consume Kafka topics. Streaming writes to Iceberg come after Flink because they require the runtime, checkpointing, catalog, and object-storage path to be stable.
 
+### 3.1 Developer and production tracks
+
+| Concern | Developer profile | Production profile |
+|---|---|---|
+| Runtime topology | reduced broker, worker, and TaskManager counts on Docker Desktop or Podman | fault-tolerant on-prem topology with declared failure domains and capacity |
+| Control APIs | HTTP only on loopback or an isolated developer network when the increment permits it | TLS-protected and authenticated Connect, Flink, and administration endpoints |
+| State | local volumes and local Flink checkpoint/savepoint paths for disposable tests | durable Kafka replication, protected Connect internal topics, and Ceph RGW-backed Flink checkpoints/savepoints |
+| Identity and secrets | generated test identities and local protected environment files | FreeIPA/Keycloak-integrated service identities, approved secret injection, rotation, and least privilege |
+| Acceptance | startup/reset plus functional event-flow tests | shared functional regression plus security, recovery, replay, failure, capacity, observability, and runbook evidence |
+
+No Increment 8-13 production gate accepts a developer-only replica count, plaintext control API, local filesystem state, generated bootstrap identity, or untested reset procedure. Promotion is an explicit configuration change with evidence, not a relabelling of the same deployment.
+
 ---
 
 ## 4. Reference Documentation Audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 Phase 2 uses fast-moving projects. Before implementation, the platform team must check current upstream release notes and documentation, then record the approved version matrix in the runbook. The values below are the current design targets or compatibility gates at the time this document was written.
 
@@ -58,8 +72,9 @@ Phase 2 uses fast-moving projects. Before implementation, the platform team must
 |---|---|
 | Apache Kafka | 4.3.1, pinned by artifact checksum or internal image digest in the Phase 2 version matrix |
 | Kafka Connect | bundled with the selected Kafka release |
-| Debezium | 3.6 series, with exact patch version and connector artifact pinned in the Phase 2 version matrix |
-| Apache Flink | 2.1.1 implementation pin until Kafka connector and Iceberg runtime compatibility move together |
+| Debezium | 3.6.0.Final, with connector artifact and image digest pinned in the Phase 2 version matrix |
+| Apache Flink | 2.1.3, the latest patch in the Iceberg 1.11-compatible Flink 2.1 line; upgrade the Flink/Iceberg/connector set together |
+| Flink Kafka connector | 5.0.0-2.1, using the full upstream artifact version |
 | Apache Flink CDC | 3.6.0 if direct Flink CDC connectors are used; exact artifact pinned in the Phase 2 version matrix |
 | Apache Iceberg | 1.11.0 unless a newer approved release is selected and all dependent runtime artifacts are updated together |
 | Iceberg Flink runtime | must match the selected Flink major/minor line; Iceberg 1.11.0 publishes Flink 2.1, 2.0, and 1.20 runtime jars |
@@ -67,6 +82,7 @@ Phase 2 uses fast-moving projects. Before implementation, the platform team must
 | Apache Atlas | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Apache Ranger | approved Apache release image built internally and pinned by tag plus digest in the Phase 2 version matrix |
 | Java | Java 25 LTS for Stratus builds, verifiers, Kafka 4.3, and Trino 482; component-supported runtime exceptions are Java 17 for Spark 4.1 and Flink 2.1 job execution, with job artifacts compiled using the JDK 25 toolchain and the matching `--release` target |
+| Build/runtime tooling | Apache Maven 3.9.16 and Podman 5.8.2, or newer compatible stable patches after the full image and runtime regression suite |
 
 Important compatibility rule: do not select Flink solely by release recency if the selected Iceberg release does not publish or document a compatible Flink runtime. The implementation owner must choose either:
 
@@ -85,7 +101,7 @@ Apache Kafka as the durable, replayable event backbone for CDC, application even
 
 ### Why this is first
 
-Kafka is the substrate for the rest of Phase 2. Kafka Connect depends on Kafka internal topics. Debezium publishes CDC events into Kafka. Flink consumes Kafka topics. Atlas moves from its Phase 1 embedded notifier to the platform Kafka backbone after Kafka is stable.
+Kafka is the substrate for the rest of Phase 2. Kafka Connect depends on Kafka internal topics. Debezium publishes CDC events into Kafka. Flink consumes Kafka topics. Atlas moves from its Phase 1 production notification service to the shared platform Kafka backbone after Kafka is stable. A developer profile that used the embedded notifier is migrated at the same point but was never production accepted.
 
 ### What is delivered
 
@@ -343,10 +359,11 @@ This traceability keeps Phase 2 from becoming a local tool installation exercise
 
 Phase 2 is complete when:
 
+- [ ] Every Increment 8-12 developer shortcut has been replaced by its documented production setting and the shared functional suite has been rerun.
 - [ ] Kafka is running in KRaft mode with TLS, authentication, ACLs, retention, monitoring, and broker failure recovery.
 - [ ] Kafka Connect workers are running and connector state topics are protected.
 - [ ] Debezium captures the verification source snapshot and ongoing changes.
-- [ ] Flink consumes Kafka events with checkpointing, savepoints, metrics, and recovery.
+- [ ] Flink consumes Kafka events with Ceph RGW-backed checkpoints/savepoints, metrics, and recovery; no production state path uses `file://`.
 - [ ] Flink writes streaming-owned Iceberg tables through Polaris and Ceph RGW.
 - [ ] Trino can query committed streaming table snapshots.
 - [ ] Ranger policies govern streaming-created tables.

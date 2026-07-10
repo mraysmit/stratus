@@ -4,7 +4,9 @@
 
 This document is the technical implementation plan for Increment 12 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
 
-Increment 12 connects Phase 2 streaming work back into the governance plane. Atlas is migrated from the Phase 1 embedded notification posture to the Kafka event backbone, and streaming jobs publish standardized lineage and metadata for Kafka topics, CDC sources, Flink jobs, and streaming-owned Iceberg tables. Ranger policy alignment is verified for streaming-created tables through Trino.
+Increment 12 connects Phase 2 streaming work back into the governance plane. Atlas is migrated from its Phase 1 production notification service to the shared Kafka backbone, and streaming jobs publish standardized lineage and metadata for Kafka topics, CDC sources, Flink jobs, and streaming-owned Iceberg tables. A developer profile that used Atlas's embedded notifier is migrated here too, but that profile was never production accepted. Ranger policy alignment is verified for streaming-created tables through Trino.
+
+The developer profile may use reduced topic replication and test entities in isolated namespaces. The production profile uses the Increment 8 three-node Kafka contract, managed `svc-atlas` credentials, trusted TLS, retained/replayable topics, Atlas external graph/search services, production Ranger policies, and notification/lineage recovery drills. Entity types and lineage payloads are identical in both tracks.
 
 When this increment is complete, streaming data is not invisible side traffic. It is discoverable, classified, traceable, auditable, and governed using the same Atlas/Ranger expectations as the Phase 1 batch foundation.
 
@@ -18,13 +20,15 @@ When this increment is complete, streaming data is not invisible side traffic. I
 - `svc-atlas` Kafka identity and ACLs available
 - `svc-flink` can publish lineage metadata to Atlas over HTTPS
 
+**Track rule:** Developer work requires the developer gates of Increments 8-11. Increment 12 production acceptance requires their production gates and the Phase 1 production Atlas/Ranger/identity topology.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on the governance host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- Podman 5.8.2 installed on the governance host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - Atlas endpoint is reachable at `https://atlas.stratus.local`
 - Ranger endpoint is reachable at `https://ranger.stratus.local`
 - Kafka brokers are reachable on `9092` with TLS and SASL/SCRAM
@@ -46,7 +50,7 @@ Streaming governance scope:
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 This increment continues the Apache Atlas and Apache Ranger versions approved in Increment 6 and hardened in Increment 7. It also uses the Kafka 4.3.1 event backbone from Increment 8. Before implementation, confirm the selected Atlas notification properties, Kafka client security properties supported by the Atlas image, and Ranger policy/tag service compatibility with the selected Trino and Ranger releases.
 
@@ -148,7 +152,6 @@ Update the Atlas runtime configuration to use the platform Kafka backbone. Exact
 atlas.notification.embedded=false
 atlas.notification.create.topics=false
 atlas.kafka.bootstrap.servers=kafka1.stratus.local:9092,kafka2.stratus.local:9092,kafka3.stratus.local:9092
-atlas.kafka.zookeeper.connect=
 atlas.kafka.security.protocol=SASL_SSL
 atlas.kafka.sasl.mechanism=SCRAM-SHA-512
 atlas.kafka.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="svc-atlas" password="<svc-atlas password>";
@@ -348,9 +351,16 @@ Minimum alerts:
 
 ---
 
-## 12. Completion Gate
+## 12. Completion Gates
 
-Increment 12 is complete when:
+### Developer gate
+
+- [ ] Isolated Atlas notification topics and test entities prove notification delivery, lineage publication, classification, and Ranger allow/deny behavior.
+- [ ] Reduced replication, test identities, and embedded-notifier source configuration are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 12 is accepted when:
 
 - [ ] Atlas uses platform Kafka topics for notifications
 - [ ] `svc-atlas` Kafka ACLs are least-privilege
@@ -363,8 +373,10 @@ Increment 12 is complete when:
 - [ ] Ranger audit records allow and deny decisions
 - [ ] Java verification suite passes
 - [ ] governance dashboards and alerts are configured
+- [ ] Atlas no longer depends on an embedded notifier or an Atlas-dedicated Kafka service unless a documented production exception retains that service
+- [ ] notification replay, Atlas restart, broker failure, lineage republish, and Ranger policy refresh drills have current evidence
 
-When all gates are checked, Increment 13 (Streaming Operations and Production Readiness) can begin.
+The developer gate completes engineering integration. Only the production gate allows Increment 13 to begin production-readiness signoff.
 
 ---
 

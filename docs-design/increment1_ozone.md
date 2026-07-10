@@ -1,10 +1,12 @@
 # Stratus Increment 1 - Apache Ozone Storage Foundation
 
+> **Status: superseded.** The Stratus storage architecture decision ([stratus_on_prem_data_fabric_architecture.md section 2.8](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 baseline. The active runbook is [increment1_ceph.md](increment1_ceph.md). This document preserves the evaluated Ozone path for a future architecture decision; its commands, versions, and configuration examples are not normative or maintained as part of the active Stratus implementation.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
-Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. This variant describes the **Apache Ozone** implementation path.
+Increment 1 delivers the on-prem object-storage foundation consumed by Apache Polaris, Apache Iceberg, Spark, Airflow, Trino, and later Flink. This superseded variant describes the evaluated **Apache Ozone** implementation path.
 
 When this increment is complete:
 

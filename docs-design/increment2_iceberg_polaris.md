@@ -6,22 +6,24 @@ This document is the technical implementation plan for Increment 2 of the Stratu
 
 Increment 2 delivers Apache Polaris as the central REST catalog and Apache Iceberg as the table format over the Ceph RGW storage layer established in Increment 1. When this increment is complete, Iceberg tables exist in all platform zones, Polaris manages their metadata, table maintenance operations work via the Iceberg Java API, and the `platform.quality_check_results` table exists and accepts writes. A Java verification suite confirms the table layer is ready for Spark in Increment 3.
 
-**Prerequisite:** Increment 1 must be complete. All five Ceph RGW buckets must exist and all Increment 1 gate tests must pass before starting this increment.
+**Prerequisite:** All five Ceph RGW buckets must exist and the Increment 1 developer/lab gate must pass before developer-track work starts. Production acceptance additionally requires the Increment 1 production gate.
+
+**Track rule:** A dependency marked `complete` in this document means complete in the same track. A prior developer gate unblocks engineering; a prior production gate is required for production acceptance.
 
 ---
 
 ## 2. Assumptions and Prerequisites
 
-- Increment 1 complete — Ceph RGW cluster running, buckets and service accounts in place
+- Increment 1 complete in the target track — Ceph RGW cluster running, buckets and service accounts in place
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on the Polaris host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- Podman 5.8.2 installed on the Polaris host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
 - `svc-polaris` S3 credentials from Increment 1 are available
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 The current Apache Polaris documentation line lists Polaris 1.5.0. This increment therefore uses a pinned Polaris 1.5.0 image and Iceberg 1.11.0 Java dependencies, aligned with the Spark 4.1 target in Increment 3. Before implementation, verify the exact Polaris, Iceberg, Spark, and Trino versions together and update all increment documents as a set if any upstream release changes the compatibility matrix.
 
@@ -72,7 +74,7 @@ All compute engines added in later increments (Spark, Trino, Flink) connect to P
 
 ## 5. TLS Certificates
 
-Use the approved CA chain established in Increment 1. A self-signed CA is acceptable only for disposable developer validation; production-like and readiness runs must use a CA trusted by Polaris clients without `-k` or `--insecure`.
+Use the approved CA chain established in Increment 1. A local CA is acceptable only for disposable developer validation; representative shared-lab and production runs must use a CA trusted by Polaris clients without `-k` or `--insecure`.
 
 ```bash
 cd ~/stratus-certs
@@ -138,10 +140,10 @@ POLARIS_METADATA_STORE_USER=svc_polaris
 POLARIS_METADATA_STORE_PASSWORD=<svc_polaris secret from approved secret store>
 
 # Ceph RGW connection — used by Polaris to read/write Iceberg metadata files
-STRATUS_S3_ENDPOINT=https://object-store.stratus.local
-STRATUS_S3_ACCESS_KEY=svc-polaris
-STRATUS_S3_SECRET_KEY=<svc-polaris secret from Increment 1>
-STRATUS_S3_PATH_STYLE_ACCESS=true
+CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+CEPH_RGW_ACCESS_KEY=svc-polaris
+CEPH_RGW_SECRET_KEY=<svc-polaris secret from Increment 1>
+S3_PATH_STYLE_ACCESS=true
 ```
 
 ### Run Polaris
@@ -163,7 +165,7 @@ If a different Polaris release is approved, update this image tag and the Iceber
 
 ### Optional developer H2 mode
 
-Embedded H2 may be used only for local command validation and disposable developer tests. It is not a lab, production-like, or readiness topology. Do not use H2 evidence to satisfy Increment 2, Phase 1 readiness, backup/restore, HA, or recovery gates.
+Embedded H2 may be used only for local command validation and disposable developer tests. It is not a representative lab or production topology. Do not use H2 evidence to satisfy the Increment 2 production gate, Phase 1 readiness, backup/restore, HA, or recovery evidence.
 
 If a developer needs this mode, keep it in a separate environment file such as `/etc/stratus/polaris-dev-h2.env`:
 
@@ -362,29 +364,20 @@ Add to `pom.xml`:
     <artifactId>iceberg-parquet</artifactId>
     <version>1.11.0</version>
 </dependency>
-<dependency>
-    <groupId>org.apache.parquet</groupId>
-    <artifactId>parquet-avro</artifactId>
-    <version>1.13.1</version>
-</dependency>
-
-<!-- AWS S3 FileIO — used by Iceberg to read/write Ceph RGW -->
+<!-- Iceberg upstream S3 FileIO implementation, configured against Ceph RGW -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-aws</artifactId>
     <version>1.11.0</version>
 </dependency>
 <dependency>
-    <groupId>software.amazon.awssdk</groupId>
-    <artifactId>s3</artifactId>
-    <version>2.25.0</version>
-</dependency>
-<dependency>
-    <groupId>software.amazon.awssdk</groupId>
-    <artifactId>url-connection-client</artifactId>
-    <version>2.25.0</version>
+    <groupId>org.apache.iceberg</groupId>
+    <artifactId>iceberg-aws-bundle</artifactId>
+    <version>1.11.0</version>
 </dependency>
 ```
+
+Do not independently pin older Parquet or S3 SDK transitive dependencies in this verifier. Iceberg 1.11.0 owns that compatibility set through its modules and bundle; any security-driven override is tested with the full Increment 2 suite and recorded in the dependency lock/SBOM.
 
 ### Configuration
 
@@ -396,9 +389,9 @@ The verification suite reads all connection details from environment variables:
 | `STRATUS_POLARIS_CLIENT_ID` | Polaris principal client id |
 | `STRATUS_POLARIS_CLIENT_SECRET` | Polaris principal client secret |
 | `STRATUS_POLARIS_CATALOG` | Catalog name — `stratus` |
-| `STRATUS_S3_ENDPOINT` | e.g. `https://object-store.stratus.local` |
-| `STRATUS_S3_ACCESS_KEY` | `svc-polaris` access key |
-| `STRATUS_S3_SECRET_KEY` | `svc-polaris` secret key |
+| `CEPH_RGW_ENDPOINT` | e.g. `https://object-store.stratus.local` |
+| `CEPH_RGW_ACCESS_KEY` | `svc-polaris` access key |
+| `CEPH_RGW_SECRET_KEY` | `svc-polaris` secret key |
 
 ### Shared catalog client helper
 
@@ -420,9 +413,9 @@ public class PolarisTestClient {
         String clientId     = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog      = System.getenv("STRATUS_POLARIS_CATALOG");
-        String s3Endpoint   = System.getenv("STRATUS_S3_ENDPOINT");
-        String accessKey    = System.getenv("STRATUS_S3_ACCESS_KEY");
-        String secretKey    = System.getenv("STRATUS_S3_SECRET_KEY");
+        String s3Endpoint   = System.getenv("CEPH_RGW_ENDPOINT");
+        String accessKey    = System.getenv("CEPH_RGW_ACCESS_KEY");
+        String secretKey    = System.getenv("CEPH_RGW_SECRET_KEY");
 
         Map<String, String> properties = new HashMap<>();
         properties.put(CatalogProperties.URI, uri);
@@ -734,9 +727,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
-export STRATUS_S3_ACCESS_KEY=svc-polaris
-export STRATUS_S3_SECRET_KEY=<svc-polaris secret>
+export CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+export CEPH_RGW_ACCESS_KEY=svc-polaris
+export CEPH_RGW_SECRET_KEY=<svc-polaris secret>
 
 export STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE=registry.stratus.local/stratus/iceberg-polaris-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/iceberg-polaris.env \
@@ -757,9 +750,11 @@ Once the verification suite passes, perform these additional checks before signi
 Iceberg metadata files (`.metadata.json`, manifest lists, manifests) should be visible in the bronze bucket:
 
 ```bash
-aws --endpoint-url "$STRATUS_S3_ENDPOINT" \
-  s3 ls --recursive s3://stratus-bronze/
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt \
+  lsf --recursive cephrgw:stratus-bronze/
 ```
+
+The `cephrgw` rclone remote is the Ceph-specific operator client configured in Increment 1. Iceberg's upstream `S3FileIO` class and `iceberg-aws-bundle` artifact retain their official project names; they are client-library identifiers and do not imply an AWS deployment.
 
 Expect to see:
 - `metadata/` directory with `.metadata.json` and `.avro` manifest files
@@ -810,9 +805,16 @@ Increment 2 must produce production-readiness evidence for the catalog control p
 
 ---
 
-## 12. Completion Gate
+## 12. Completion Gates
 
-Increment 2 is complete when all of the following are true:
+### Developer gate
+
+- [ ] Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier contracts pass.
+- [ ] H2, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
+
+### Production gate
+
+Increment 2 is accepted when all of the following are true:
 
 - [ ] Polaris container running and managed by systemd on `polaris.stratus.local`
 - [ ] Polaris REST API responding at `https://polaris.stratus.local:8181` with TLS
@@ -828,7 +830,7 @@ Increment 2 is complete when all of the following are true:
 - [ ] Catalog audit logging and catalog/metadata-store alerts are configured
 - [ ] Polaris logs show no errors during the verification test run
 
-When all gates are checked, Increment 3 (Apache Spark) can begin.
+The developer gate may unblock Increment 3 engineering. Only the production gate marks Increment 2 accepted in the Phase 1 tracker.
 
 ---
 
@@ -877,7 +879,7 @@ Common causes:
 - Apache Iceberg Java API: https://iceberg.apache.org/docs/latest/java-api-quickstart/
 - Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Iceberg Parquet writer: https://iceberg.apache.org/docs/latest/api/
-- Ceph RGW S3 API compatibility: https://docs.ceph.com/en/latest/radosgw/s3/
+- Ceph Tentacle RGW S3 API compatibility: https://docs.ceph.com/en/tentacle/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md)
 - Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)

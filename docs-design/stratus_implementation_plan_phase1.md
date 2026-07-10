@@ -30,6 +30,26 @@ Implementation proceeds layer by layer. No layer is considered complete until it
 
 After Layer 7, Phase 1 closes with an operational acceptance and production-readiness review. That review is not a new platform layer; it proves that the integrated stack is supportable before production dataset onboarding or Phase 2 work begins.
 
+### 2.1 Developer and production tracks
+
+Each increment advances through two related tracks:
+
+| Track | Exit intent | May unblock |
+|---|---|---|
+| Developer profile | a new developer can start, stop, reset, and verify the capability on Docker Desktop or Podman with pinned artifacts and local test credentials | development of the next increment, provided the dependency contract is stable and the risk is recorded |
+| Production profile | the same capability runs on its supported on-prem topology with durable state, trusted TLS, managed identities and secrets, monitoring, backup/restore, failure drills, and named operators | production onboarding and the Phase 1 operational-readiness gate |
+
+Developer progress is deliberately allowed to lead infrastructure procurement and hardening. It does not convert a reduced replica count, embedded dependency, local filesystem, local CA, plaintext control endpoint, or bootstrap identity into a production design. Every increment document must list those differences and the promotion actions that remove them. The shared functional verification suite runs in both tracks; production adds security, durability, recovery, capacity, and operational evidence.
+
+Phase 1 deliberately has an asymmetric gate order:
+
+1. Developer gates for Increments 1-6 establish the working stack and unblock the next engineering increment.
+2. Increment 7 replaces cross-cutting local identities, certificates, plaintext endpoints, and bootstrap credentials.
+3. Production gates for Increments 1-7 are then closed against the hardened integrated stack. Earlier production preparation may proceed in parallel, but a gate that depends on Increment 7 controls remains open until those controls are verified.
+4. The Phase 1 operational-readiness gate runs only after every production gate is accepted.
+
+This is not a circular dependency: Increment 7 requires the Increment 1-6 developer contracts and production-capable configurations, not prior formal production acceptance of controls that Increment 7 itself supplies.
+
 ---
 
 ## 3. Progress Tracking Model
@@ -70,7 +90,7 @@ Evidence should be durable enough that another engineer can understand what pass
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
 | P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | Not started |
-| P1-1.1 | Storage decision and due-diligence evidence | Platform architect | Architecture storage requirements | Completed Ceph RGW vs Apache Ozone decision record, scoring, proof-of-fit targets, and accepted production path | Architecture owner | Not started |
+| P1-1.1 | Ceph decision due diligence | Platform architect | Architecture storage requirements | Confirmed Ceph baseline, retained comparison record, proof-of-fit targets, production topology, and explicit reconsideration triggers | Architecture owner | Not started |
 | P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | Not started |
 | P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | Not started |
 | P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | Not started |
@@ -98,12 +118,12 @@ Evidence should be durable enough that another engineer can understand what pass
 | P1-5.3 | Bronze/silver/gold query and storage validation | Query platform owner | P1-5.2, P1-3.4 | Row counts, schemas, joins, and aggregates match Spark-produced outputs; Trino scan throughput evidence attached to storage qualification | Data owner | Not started |
 | P1-5.4 | Quality-results query validation | Query platform owner | P1-5.2, P1-3.5 | `platform.quality_check_results` visible through Trino with expected pass/fail rows | Data owner | Not started |
 | P1-5.5 | JDBC verification suite | Query platform owner | P1-5.3 | `TrinoQueryVerificationTest` report against the live cluster | Platform owner | Not started |
-| P1-6.1 | Atlas deployment and model setup | Governance owner | P1-5 accepted | Atlas health, entity type registration, authentication mode, graph/search state evidence | Governance owner | Not started |
+| P1-6.1 | Atlas deployment, external dependencies, and model setup | Governance owner | P1-5 accepted | Developer Atlas functional evidence plus production HBase, SolrCloud/ZooKeeper, external notification service, Atlas availability, entity type registration, authentication, backup, and restore evidence | Governance owner | Not started |
 | P1-6.2 | Ranger deployment and baseline policies | Security owner | P1-5 accepted | Ranger health, usersync source, policy export for bronze/silver/gold zones | Security owner | Not started |
 | P1-6.3 | Dataset registration and lineage publication | Governance owner | P1-6.1, P1-3.6 | Atlas entities and lineage for source-to-bronze-to-silver-to-gold runs | Data owner | Not started |
 | P1-6.4 | Quality status metadata | Governance owner | P1-6.3, P1-3.5 | Atlas entity quality status reflects latest quality run | Data owner | Not started |
 | P1-6.5 | Ranger allow/deny and classification tests | Security owner | P1-6.2, P1-6.3 | Allow, deny, and PII classification enforcement evidence through Trino | Security owner | Not started |
-| P1-7.1 | FreeIPA deployment and service identities | Security owner | P1-6 accepted | FreeIPA health, groups, service principals, keytab validation | Security owner | Not started |
+| P1-7.1 | FreeIPA deployment and service identities | Security owner | P1-6 developer gate; production-capable Increment 1-6 configurations available | FreeIPA health, groups, service principals, keytab validation | Security owner | Not started |
 | P1-7.2 | Keycloak federation and OIDC clients | Security owner | P1-7.1 | Keycloak realm/client export, token issuance, issuer/claim validation | Security owner | Not started |
 | P1-7.3 | Service authentication migration | Security owner | P1-7.2 | Polaris, Airflow, Trino, Ranger, and Atlas use approved FreeIPA/Keycloak paths | Platform owner | Not started |
 | P1-7.4 | TLS certificate replacement | Security owner | P1-7.1 | FreeIPA Dogtag-issued certificates deployed and validated for all service endpoints | Security owner | Not started |
@@ -113,16 +133,18 @@ Evidence should be durable enough that another engineer can understand what pass
 
 ### Phase 1 Gate Tracker
 
+The table below records production-profile acceptance. Its row order mirrors the architecture, not the production signoff sequence. Developer-profile completion is recorded in the owning increment evidence and may support continued engineering, but it cannot set one of these gates to `Accepted`; Increments 1-6 close their final security-dependent checks after Increment 7 promotion.
+
 | Gate | Required evidence | Accepted by | Status |
 |---|---|---|---|
-| Increment 1 accepted | Candidate decision, Ceph health, RGW TLS, buckets and credential isolation, core S3 and multipart tests, concurrent synthetic client load, small-object/prefix listing behavior, failure drill, observability, and preliminary performance/capacity/operator evidence | Platform architecture and operations owners | Not started |
+| Increment 1 accepted | Ceph decision due diligence, Ceph health, RGW TLS, buckets and credential isolation, core S3 and multipart tests, concurrent synthetic client load, small-object/prefix listing behavior, failure drill, observability, and preliminary performance/capacity/operator evidence | Platform architecture and operations owners | Not started |
 | Increment 2 accepted | Polaris production metadata store, namespace/table tests, Iceberg maintenance tests, catalog/object restore drill, audit evidence | Platform architecture and data platform owners | Not started |
 | Increment 3 accepted | Spark runtime, ingestion, transformation, materialisation, quality, promotion, maintenance, and lineage-payload evidence | Data engineering owner | Not started |
 | Increment 4 accepted | Airflow deployment, DAG runs, quality gate halt, maintenance DAG, retry and alert evidence | Platform operations and data engineering owners | Not started |
 | Increment 5 accepted | Trino deployment, Polaris table resolution, query correctness, quality-results access, JDBC test evidence | Query platform owner | Not started |
-| Increment 6 accepted | Atlas registration/lineage, Ranger policies, classification enforcement, allow/deny evidence | Governance and security owners | Not started |
+| Increment 6 accepted | Atlas production dependencies and restore evidence, metadata registration/lineage, Ranger policies, classification enforcement, and allow/deny evidence | Governance and security owners | Not started |
 | Increment 7 accepted | FreeIPA, Keycloak, TLS, service authentication, encryption, credential rotation, positive/negative security tests | Security owner | Not started |
-| Phase 1 production-readiness accepted | Integrated backup/restore, DR, observability, security, performance, support, and operational acceptance evidence | Platform owner, operations owner, security owner, and data owner | Not started |
+| Phase 1 production-readiness accepted | All developer shortcuts replaced; integrated backup/restore, DR, observability, security, performance, support, and operational acceptance evidence | Platform owner, operations owner, security owner, and data owner | Not started |
 
 ---
 
@@ -155,7 +177,7 @@ Every other component in the stack writes to or reads from object storage. Nothi
 
 | Test | Pass condition |
 |---|---|
-| Storage decision gate | Ceph RGW is accepted against the documented Stratus storage requirements, with Apache Ozone evaluated as the control candidate |
+| Storage decision gate | Ceph RGW is confirmed as the selected baseline against the documented requirements, with the Apache Ozone comparison retained and reconsideration triggers recorded |
 | Bucket creation | All five buckets exist and are accessible |
 | Write test | A test file can be written to each bucket using approved service credentials |
 | Read test | A written file can be read back and content verified |
@@ -341,9 +363,10 @@ The data is flowing and queryable. Now it needs to be governed. Atlas provides t
 
 ### What is delivered
 
-- Apache Atlas deployed with embedded JanusGraph (BerkeleyDB) and embedded Solr
-- Atlas configured with lab-local authentication; FreeIPA LDAP migration follows in Increment 7
-- Apache Ranger deployed with usersync pointed at a local user store; FreeIPA LDAP migration follows in Increment 7
+- Developer Atlas deployed with disposable embedded dependencies for fast functional work
+- Production Atlas deployed with external HBase, SolrCloud/ZooKeeper, external Kafka notifications, availability, and restore evidence
+- Atlas configured with lab-local authentication only in the developer profile; FreeIPA LDAP migration follows in Increment 7 and is required for production acceptance
+- Apache Ranger developer profile uses a local user store; production acceptance requires FreeIPA LDAP usersync, durable policy state, and durable audit storage
 - Atlas entity types registered for Iceberg datasets, namespaces, and pipeline runs
 - Spark jobs updated to publish metadata and lineage payloads to Atlas on completion:
   - dataset registration on first write
@@ -442,7 +465,7 @@ The platform is fully secured. Every service authenticates via FreeIPA Kerberos 
 
 The following are explicitly deferred and belong to later increments:
 
-- **Streaming and CDC** — Kafka, Kafka Connect, Debezium, and Flink are not part of this plan. They are the next major wave after the batch and governance foundation is stable and proven.
+- **Streaming and CDC** — the shared Kafka event backbone, Kafka Connect, Debezium, and Flink are not Phase 1 capabilities. An external Kafka service used solely as Atlas's supported production notification dependency remains within Increment 6 and does not constitute completion of the Phase 2 event backbone.
 - **Firebolt Core** — optional serving acceleration. Not considered until the Iceberg and governance foundations are verified in production.
 - **Multi-environment promotion** — development, staging, and production environment separation is an operational maturity concern for after the single-environment foundation works.
 - **Self-service data discovery** — policy-driven glossary workflows and self-service onboarding follow after Atlas and Ranger are operating reliably.

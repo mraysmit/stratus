@@ -6,6 +6,8 @@ This document is the technical implementation plan for Increment 6 of the Stratu
 
 Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classification plane, and Apache Ranger as the access policy and audit plane. When this increment is complete, Iceberg datasets created by Spark and queried through Trino have Atlas entities with ownership, schema, zone, quality status, and lineage. Ranger policies enforce zone and classification-based access through Trino. A Java verification suite confirms that governance is not decorative: metadata is searchable, lineage exists, classifications can be applied, Trino allow/deny behavior follows Ranger policy, and Ranger audit logs record the decisions.
 
+This increment has two explicit tracks. The developer profile uses the disposable Atlas dependencies and local Ranger identities shown in the runnable examples so engineers can prove metadata and policy behavior quickly. The production profile replaces them with supported external Atlas graph, search, and notification services, durable Ranger state and audit storage, managed identity, trusted TLS, availability, backup/restore, and failure drills. Developer completion may unblock Increment 7 engineering; it cannot satisfy Increment 6 production acceptance or Phase 1 readiness.
+
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
@@ -13,13 +15,15 @@ Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classi
 - Increment 4 complete — Airflow orchestrates Spark jobs, quality checks, promotion gates, and maintenance
 - Increment 5 complete — Trino queries Polaris-managed Iceberg tables and all Increment 5 gate tests pass
 
+**Track rule:** Developer work requires the developer gates of Increments 1-5. Increment 6 production preparation may proceed in parallel, but its identity, TLS, and group-sync checks close only after Increment 7; formal acceptance then requires the production gates of its dependencies.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on the governance host and Trino coordinator
-- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Atlas and Ranger runtime Java versions remain pinned to the versions supported by the selected releases and are recorded as component-runtime exceptions where they differ from Java 25.
+- Podman 5.8.2 installed on the governance host and Trino coordinator, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Atlas and Ranger runtime Java versions remain pinned to the versions supported by the selected releases and are recorded as component-runtime exceptions where they differ from Java 25.
 - DNS resolution:
   - `atlas.stratus.local`
   - `ranger.stratus.local`
@@ -46,7 +50,7 @@ FreeIPA-backed LDAP usersync is introduced in Increment 7. Increment 6 may use l
 
 ## 3. Topology
 
-Atlas and Ranger run on a dedicated governance host. Ranger enforces access through the Trino Ranger access-control plugin. Atlas records metadata and lineage; Ranger enforces access and writes audit records.
+The runnable topology below is the developer profile on a dedicated governance host. Ranger enforces access through the Trino Ranger access-control plugin. Atlas records metadata and lineage; Ranger enforces access and writes audit records.
 
 ```text
 governance host
@@ -84,6 +88,8 @@ dataset exists → Atlas entity exists → classification applied
       → Ranger policy evaluates → Trino query allowed or denied
 ```
 
+The production profile adds external HBase, SolrCloud with ZooKeeper, and an external Kafka notification service for Atlas; durable PostgreSQL and audit storage for Ranger; at least two Atlas application instances or an approved availability exception; and production load-balancing, TLS, monitoring, backup, and recovery. The external notification service may be a small Atlas-dedicated Kafka deployment or the Increment 8 platform backbone brought forward solely as an Atlas dependency. CDC and Flink remain Phase 2 capabilities either way.
+
 ---
 
 ## 4. Ports
@@ -108,10 +114,18 @@ Target image names:
 
 | Image | Purpose |
 |---|---|
-| `stratus/atlas:2.4.0` | Atlas server with embedded graph and search dependencies |
-| `stratus/ranger-admin:2.6.0` | Ranger Admin server |
-| `stratus/ranger-usersync:2.6.0` | Ranger usersync service |
-| `docker.io/library/postgres:16` | Ranger policy database |
+| `stratus/atlas:2.5.0` | Atlas server; developer image includes disposable dependencies, production image uses external services |
+| `stratus/ranger-admin:2.8.0` | Ranger Admin server |
+| `stratus/ranger-usersync:2.8.0` | Ranger usersync service |
+| `${RANGER_POSTGRES_IMAGE}` | exact latest Ranger-compatible PostgreSQL patch, pinned by tag and digest in the environment matrix |
+
+Before running the examples, export the exact image reference approved by the Ranger 2.8.0 database compatibility test:
+
+```bash
+export RANGER_POSTGRES_IMAGE=registry.stratus.local/mirror/postgres:<approved-patch>@sha256:<digest>
+```
+
+There is deliberately no implicit PostgreSQL major-version default. The environment matrix records the newest supported major and latest patch that passes Ranger schema bootstrap, migration, backup, and restore tests.
 
 Create image build directories:
 
@@ -125,7 +139,7 @@ The exact image build should be pinned to approved Apache release artifacts and 
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 Apache Atlas and Apache Ranger do not provide the same single, turnkey official container path as Trino or Airflow. Stratus therefore treats the Atlas and Ranger images as platform-maintained artifacts built from approved Apache releases. The build scripts, base images, Java versions, database drivers, and plugin versions must be versioned in the repository before implementation.
 
@@ -179,7 +193,7 @@ The mounted directory layout is:
 
 ## 7. Atlas Configuration
 
-Atlas stores metadata entities, classifications, glossary terms, relationships, and lineage. Increment 6 uses the minimal embedded backend described in the architecture document: JanusGraph with BerkeleyDB and embedded Solr. This keeps the first governance increment focused on metadata behavior rather than operating a larger graph/search cluster.
+Atlas stores metadata entities, classifications, glossary terms, relationships, and lineage. The following configuration is **developer profile only**: a disposable embedded graph/search backend and embedded notifier keep local work focused on metadata behavior. These settings are prohibited by the production gate.
 
 Create `/etc/stratus/atlas/atlas-application.properties`:
 
@@ -208,6 +222,28 @@ atlas.notification.embedded=true
 atlas.cluster.name=stratus-lab
 ```
 
+### Production Atlas dependency configuration
+
+Production uses a separate configuration overlay. The selected Atlas 2.5.0 build must validate the exact property names and dependency versions against the release documentation before deployment; the required design is:
+
+```properties
+# External graph store
+atlas.graph.storage.backend=hbase2
+atlas.graph.storage.hostname=zk1.stratus.local,zk2.stratus.local,zk3.stratus.local
+
+# External search index
+atlas.graph.index.search.backend=solr
+atlas.graph.index.search.solr.mode=cloud
+atlas.graph.index.search.solr.zookeeper-url=zk1.stratus.local:2181,zk2.stratus.local:2181,zk3.stratus.local:2181/solr
+
+# External notification service
+atlas.notification.embedded=false
+atlas.kafka.bootstrap.servers=atlas-kafka1.stratus.local:9093,atlas-kafka2.stratus.local:9093,atlas-kafka3.stratus.local:9093
+atlas.kafka.security.protocol=SASL_SSL
+```
+
+The production overlay also supplies service truststores/keystores, SASL credentials through the approved secret mechanism, HBase and Solr service identities, collection/bootstrap automation, and non-local data directories. Do not place passwords in `atlas-application.properties`. Production acceptance proves HBase recovery, SolrCloud collection recovery, notification delivery, Atlas application failover, and a coordinated metadata restore. If these dependencies are unavailable, Atlas remains developer-profile only and governed production onboarding is blocked.
+
 ### Start Atlas
 
 ```bash
@@ -221,7 +257,7 @@ podman run -d \
   -v /data/atlas:/data/atlas:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/atlas:2.4.0
+  stratus/atlas:2.5.0
 ```
 
 ### Verify Atlas
@@ -254,7 +290,7 @@ podman run -d \
   -e POSTGRES_DB=ranger \
   -v /data/ranger/postgres:/var/lib/postgresql/data:z \
   --restart unless-stopped \
-  docker.io/library/postgres:16
+  ${RANGER_POSTGRES_IMAGE}
 ```
 
 ### Ranger Admin environment
@@ -288,7 +324,7 @@ podman run -d \
   -v /data/ranger/audit:/data/ranger/audit:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/ranger-admin:2.6.0
+  stratus/ranger-admin:2.8.0
 ```
 
 ### Start Ranger usersync
@@ -316,7 +352,7 @@ podman run -d \
   -v /etc/stratus/ranger:/etc/ranger/conf:ro,z \
   -v /data/ranger/audit:/data/ranger/audit:z \
   --restart unless-stopped \
-  stratus/ranger-usersync:2.6.0
+  stratus/ranger-usersync:2.8.0
 ```
 
 ### Verify Ranger
@@ -883,9 +919,11 @@ Trigger a small Airflow verification DAG and confirm Atlas updates:
 
 ---
 
-## 15. Completion Gate
+## 15. Completion Gates
 
-Increment 6 is complete when all of the following are true:
+### Developer gate
+
+The developer gate is complete when the functional checklist below passes against the disposable topology. Embedded Atlas dependencies and local Ranger users are permitted only here.
 
 - [ ] Atlas container running and managed by systemd on `atlas.stratus.local`
 - [ ] Ranger PostgreSQL container running and managed by systemd on `ranger.stratus.local`
@@ -908,7 +946,18 @@ Increment 6 is complete when all of the following are true:
 - [ ] Ranger audit records show both allow and deny events
 - [ ] `GovernanceVerificationTest` passes against the live platform
 
-When all gates are checked, Increment 7 (FreeIPA, Keycloak, and security hardening) can begin.
+When the developer gate is checked, Increment 7 engineering can begin.
+
+### Production gate
+
+- [ ] Atlas 2.5.0 uses external HBase, SolrCloud/ZooKeeper, and an external Kafka notification service; no `berkeleyje`, embedded Solr, or embedded notification setting is active.
+- [ ] Atlas application availability matches the approved RTO/RPO design and failover has been exercised.
+- [ ] HBase, SolrCloud, Atlas types/entities/glossary/classifications, and notification configuration have coordinated backup and restore evidence.
+- [ ] Ranger 2.8.0 uses a durable, backed-up PostgreSQL service and durable audit destination.
+- [ ] FreeIPA/Keycloak identities, LDAPS, trusted HTTPS, managed secrets, and service-specific authorization replace local users and bootstrap credentials.
+- [ ] The developer functional checklist passes unchanged against production, followed by failure, restore, capacity, and security-negative tests.
+
+Only this production gate can mark Increment 6 accepted in the Phase 1 gate tracker.
 
 ---
 

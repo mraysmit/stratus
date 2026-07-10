@@ -6,24 +6,28 @@ This document is the technical implementation plan for Increment 3 of the Stratu
 
 Increment 3 delivers an Apache Spark standalone cluster running on Podman containers. Spark is configured to use Apache Polaris as its Iceberg catalog and Ceph RGW as object storage. When this increment is complete, data flows from a raw source file in the landing zone through bronze, silver, and gold Iceberg tables. Quality checks run against each dataset and gate promotion between zones. A Java verification suite submits real Spark jobs and confirms the full batch compute pipeline works end to end.
 
+The Podman topology in this document is the developer profile. Production uses the same images, job artifacts, Polaris/Ceph contracts, and tests, but requires the approved multi-host worker topology, an accepted Spark master availability design or explicit RTO/RPO exception, externalized event logs, trusted service certificates, managed credentials, capacity evidence, and worker/master failure drills. Passing the local topology does not accept production Spark.
+
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
+
+**Track rule:** Developer work requires the developer gates of Increments 1 and 2. Increment 3 production acceptance requires their production gates, except final security-dependent checks close after Increment 7 as defined by the Phase 1 plan.
 
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Spark node
-- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Spark job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Spark runtime.
+- Podman 5.8.2 installed on each Spark node, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Spark job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Spark runtime.
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
 - Nodes can reach Ceph RGW at `object-store.stratus.local` (HTTPS) and Polaris on port 8181
 - `svc-spark` Ceph RGW credentials and Polaris principal credentials from earlier increments are available
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 The approved Spark compatibility target for this increment is Spark 4.1.2 with Scala 2.13 and Iceberg 1.11.0's Spark 4.1 runtime artifact. Spark 4.2.0 is not part of this increment unless the platform records a new compatibility decision. Do not fall back to the older Spark 3.5 / Scala 2.12 examples unless the platform records an explicit compatibility exception.
 
@@ -58,6 +62,20 @@ spark-worker1          spark-worker2
 
 Spark jobs are submitted to the master via `spark-submit` or the Spark Java API. The master distributes work to the workers. Workers read and write Iceberg data files directly to Ceph RGW using the `svc-spark` credentials. All table metadata is resolved through Polaris.
 
+### Production profile overlay
+
+| Concern | Production requirement |
+|---|---|
+| Master recovery | use Spark standalone recovery backed by the approved ZooKeeper service and a dedicated `/stratus/spark` namespace, or record a single-master RTO/RPO exception with automated rebuild and tested recovery |
+| Worker placement | workers run on separate failure domains with declared CPU, memory, local scratch, and network capacity; loss of one worker is tested during a representative job |
+| Submission | Airflow and approved deployment automation submit prebuilt artifacts over the internal Spark master protocol; interactive human submission is restricted |
+| Internal transport | enable Spark authentication, network crypto, I/O encryption, and secret injection supported by Spark 4.1.2; do not place the shared secret in source control or command history |
+| UIs | master, worker, application, and history UIs are internal-only or exposed through an authenticated HTTPS proxy; their HTTP ports are not production ingress |
+| Event history | write Spark event logs to `s3a://stratus-platform/spark-event-logs/` through Ceph RGW and run a history server from the same immutable image, trusted CA, and scoped service identity used by the compute nodes |
+| Recovery evidence | prove worker loss, master restart/failover, event-log continuity, failed-job retry, and cleanup of abandoned staging data |
+
+The production overlay is applied after the developer jobs are stable and before the Increment 3 production gate closes. ZooKeeper used for Spark recovery may share the production ZooKeeper service only with separate ACLs, chroot/namespace, capacity review, and failure ownership; otherwise deploy a dedicated quorum.
+
 ---
 
 ## 4. Ports
@@ -77,7 +95,18 @@ Ensure ports 7077 and 8081 are open between all nodes. Port 8080 and 8081 need t
 
 ## 5. Spark Docker Image
 
-The official Apache Spark Docker image is used as the base. A custom image adds the Iceberg runtime JAR, the AWS S3 connector, and the Polaris REST catalog client.
+The official Apache Spark Docker image is used as the base. A custom image adds the Iceberg runtime JAR, Iceberg's upstream S3-compatible client bundle, and Hadoop's S3A connector for raw-file and event-log access through Ceph RGW. The `iceberg-aws-bundle` and `hadoop-aws` names are upstream artifact names for S3 protocol clients; they do not imply an AWS deployment or an AWS account.
+
+The artifact lock for this image contains:
+
+| Artifact | Version | Purpose |
+|---|---:|---|
+| `iceberg-spark-runtime-4.1_2.13` | 1.11.0 | Iceberg Spark runtime and SQL extensions |
+| `iceberg-aws-bundle` | 1.11.0 | Iceberg `S3FileIO` implementation used with Ceph RGW |
+| `hadoop-aws` | 3.4.1 | Hadoop S3A filesystem used for `s3a://` landing files and Spark event logs |
+| `hadoop-aws` runtime dependencies | resolved from the 3.4.1 POM | S3A SDK/runtime libraries, locked with filenames, versions, licences, and SHA-256 checksums |
+
+Spark 4.1.2's official S3 example selects `hadoop-aws:3.4.1`. Image CI must also inspect the selected base image and confirm its Hadoop client JARs are 3.4.1-compatible before assembly. A mismatch fails the build; it is not corrected by layering another copy of `hadoop-common`, `hadoop-client-api`, or `hadoop-client-runtime` over the Spark distribution.
 
 ### Dockerfile
 
@@ -92,10 +121,9 @@ USER root
 # verifies their recorded checksums before the container build starts.
 COPY artifacts/iceberg-spark-runtime-4.1_2.13-1.11.0.jar /opt/spark/jars/
 COPY artifacts/iceberg-aws-bundle-1.11.0.jar /opt/spark/jars/
-
-# The s3a connector is required only if Spark internals use s3a:// paths outside Iceberg S3FileIO.
-# If enabled, pin the hadoop-aws artifact and AWS SDK dependencies to the filesystem
-# implementation bundled in the selected Spark image; do not copy unrelated older jars into it.
+# Generated from the locked hadoop-aws:3.4.1 runtime dependency set. The
+# directory excludes Hadoop core/client JARs already supplied by Spark.
+COPY artifacts/s3a-runtime/ /opt/spark/jars/
 
 USER spark
 ```
@@ -104,7 +132,7 @@ Java 25 is the Stratus build and verifier baseline, but Spark 4.1 supports Java 
 
 ### Build-system image publication
 
-The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Spark runtime hosts.
+The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Spark runtime hosts. The dependency-resolution job must materialise `artifacts/s3a-runtime/` from the committed lock, reject undeclared JARs and duplicate Hadoop client classes, and verify every checksum before `podman build` runs.
 
 ```bash
 cd docker/spark
@@ -148,15 +176,16 @@ spark.sql.catalog.stratus.s3.path-style-access  true
 # Default catalog
 spark.sql.defaultCatalog                        stratus
 
-# S3A filesystem (used by Spark internals for staging)
+# S3A filesystem (raw landing files and production event logs through Ceph RGW)
+spark.hadoop.fs.s3a.impl                        org.apache.hadoop.fs.s3a.S3AFileSystem
 spark.hadoop.fs.s3a.endpoint                    https://object-store.stratus.local
 spark.hadoop.fs.s3a.access.key                  svc-spark
 spark.hadoop.fs.s3a.secret.key                  <svc-spark secret>
 spark.hadoop.fs.s3a.path.style.access           true
 spark.hadoop.fs.s3a.connection.ssl.enabled      true
 
-# Event log — write to a mounted local path for job history.
-# If this is changed to s3a://, add the matching s3a connector dependencies for the selected Spark image.
+# Developer profile event log. The production overlay replaces this value with
+# s3a://stratus-platform/spark-event-logs/ and uses a scoped history-server identity.
 spark.eventLog.enabled                          true
 spark.eventLog.dir                              file:///data/spark-events
 
@@ -404,9 +433,9 @@ The verification suite submits real Spark jobs to the live cluster and confirms 
 | `STRATUS_POLARIS_CLIENT_ID` | `svc-spark` |
 | `STRATUS_POLARIS_CLIENT_SECRET` | svc-spark client secret |
 | `STRATUS_POLARIS_CATALOG` | `stratus` |
-| `STRATUS_S3_ENDPOINT` | Ceph RGW S3 endpoint |
-| `STRATUS_S3_ACCESS_KEY` | `svc-spark` access key |
-| `STRATUS_S3_SECRET_KEY` | `svc-spark` secret key |
+| `CEPH_RGW_ENDPOINT` | Ceph RGW S3 endpoint |
+| `CEPH_RGW_ACCESS_KEY` | `svc-spark` access key |
+| `CEPH_RGW_SECRET_KEY` | `svc-spark` secret key |
 
 ### Shared Spark session helper
 
@@ -425,9 +454,9 @@ public class SparkTestSession {
         String clientId    = System.getenv("STRATUS_POLARIS_CLIENT_ID");
         String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
         String catalog     = System.getenv("STRATUS_POLARIS_CATALOG");
-        String s3Endpoint  = System.getenv("STRATUS_S3_ENDPOINT");
-        String accessKey   = System.getenv("STRATUS_S3_ACCESS_KEY");
-        String secretKey   = System.getenv("STRATUS_S3_SECRET_KEY");
+        String s3Endpoint  = System.getenv("CEPH_RGW_ENDPOINT");
+        String accessKey   = System.getenv("CEPH_RGW_ACCESS_KEY");
+        String secretKey   = System.getenv("CEPH_RGW_SECRET_KEY");
 
         return SparkSession.builder()
             .appName("stratus-verification")
@@ -760,9 +789,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
-export STRATUS_S3_ACCESS_KEY=svc-spark
-export STRATUS_S3_SECRET_KEY=<svc-spark secret>
+export CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+export CEPH_RGW_ACCESS_KEY=svc-spark
+export CEPH_RGW_SECRET_KEY=<svc-spark secret>
 
 export STRATUS_SPARK_PIPELINE_VERIFIER_IMAGE=registry.stratus.local/stratus/spark-pipeline-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/spark-pipeline.env \
@@ -790,7 +819,7 @@ Spark event logs are written to the mounted local path `/data/spark-events`. Con
 sudo ls -lah /data/spark-events
 ```
 
-Expected: application event log files exist after the test run. If the environment changes this path to `s3a://`, the Spark image must include the matching s3a connector and AWS SDK dependencies for the selected Spark image.
+Expected in the developer profile: application event log files exist after the test run. The production profile repeats the test with `spark.eventLog.dir=s3a://stratus-platform/spark-event-logs/`, restarts the history server on another node, and proves completed applications remain readable through Ceph RGW.
 
 ### Submit a test job via spark-submit
 
@@ -810,31 +839,41 @@ Expected output: `Pi is roughly 3.14...`
 ### Confirm Iceberg tables visible in Ceph RGW after test run
 
 ```bash
-aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-bronze/ | head -20
-aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-silver/ | head -20
-aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls --recursive s3://stratus-gold/   | head -20
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsf --recursive cephrgw:stratus-bronze/ | head -20
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsf --recursive cephrgw:stratus-silver/ | head -20
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsf --recursive cephrgw:stratus-gold/ | head -20
 ```
 
 Each zone must show `metadata/` and `data/` directories containing `.json`, `.avro`, and `.parquet` files.
 
 ---
 
-## 12. Completion Gate
+## 12. Completion Gates
 
-Increment 3 is complete when all of the following are true:
+### Developer gate
+
+- [ ] Reduced Podman topology starts/stops idempotently and ingestion, transformations, quality gates, maintenance decisions, and verifier tests pass.
+- [ ] Local volumes, local certificates, reduced workers, and bootstrap credentials are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 3 is accepted when all of the following are true:
 
 - [ ] Spark master container running and managed by systemd on `spark-master.stratus.local`
 - [ ] Both Spark workers running and showing `ALIVE` in the master web UI
 - [ ] Spark connects to Polaris and resolves all four namespaces
 - [ ] Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
+- [ ] image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
 - [ ] `SparkPipelineVerificationTest` — all eleven tests pass against the live cluster
 - [ ] Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
 - [ ] Quality results written to `platform.quality_check_results` and queryable via Spark SQL
 - [ ] Promotion gate correctly blocks silver promotion when a blocking quality check fails
 - [ ] Table maintenance runs without error and records the metadata signals used to choose snapshot expiry and compaction actions
 - [ ] `spark-submit` test job executes successfully on the standalone cluster
+- [ ] production event logs persist at `s3a://stratus-platform/spark-event-logs/` and remain readable after history-server relocation; trusted TLS, managed credentials, capacity evidence, and worker failure recovery are proven
+- [ ] Spark master availability matches the approved RTO/RPO design or has an accepted exception
 
-When all gates are checked, Increment 4 (Apache Airflow) can begin.
+The developer gate may unblock Increment 4 engineering. Only the production gate marks Increment 3 accepted in the Phase 1 tracker.
 
 ---
 
@@ -856,11 +895,12 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 
 - Confirm `s3.path-style-access=true` and `fs.s3a.path.style.access=true` are both set in `spark-defaults.conf`
 - Confirm the S3 endpoint is `https://object-store.stratus.local` or the environment-approved equivalent
-- Test Ceph RGW access from a Spark node directly: `aws --endpoint-url "$STRATUS_S3_ENDPOINT" s3 ls s3://stratus-bronze/`
+- Test Ceph RGW access from an operator client directly: `rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsf cephrgw:stratus-bronze/`
 
 ### `ClassNotFoundException` for Iceberg or S3 classes
 
-- Confirm the Iceberg runtime JAR and AWS bundle JAR are present in `/opt/spark/jars/` inside the container: `podman exec spark-master ls /opt/spark/jars/ | grep iceberg`
+- Confirm the Iceberg runtime, Iceberg S3 bundle, `hadoop-aws-3.4.1.jar`, and its locked runtime dependencies are present in `/opt/spark/jars/` inside the container
+- Compare the running image digest and artifact-lock digest with the promotion manifest; do not repair a running container by downloading JARs interactively
 - Rebuild the Docker image if JARs are missing
 
 ### Quality results table shows no rows after the quality job
@@ -878,6 +918,9 @@ When all gates are checked, Increment 4 (Apache Airflow) can begin.
 ## 14. References
 
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
+- Apache Spark 4.1.2 S3A dependency example: https://spark.apache.org/docs/4.1.2/running-on-kubernetes.html#dependency-management
+- Apache Spark object-store integration: https://spark.apache.org/docs/4.1.2/cloud-integration.html
+- Apache Hadoop S3A connector: https://hadoop.apache.org/docs/r3.4.1/hadoop-aws/tools/hadoop-aws/index.html
 - Apache Spark Iceberg integration: https://iceberg.apache.org/docs/latest/spark-getting-started/
 - Iceberg Spark procedures (maintenance): https://iceberg.apache.org/docs/latest/spark-procedures/
 - Iceberg Spark SQL extensions: https://iceberg.apache.org/docs/latest/spark-ddl/
