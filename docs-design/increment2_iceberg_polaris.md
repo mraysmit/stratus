@@ -15,7 +15,7 @@ Increment 2 delivers Apache Polaris as the central REST catalog and Apache Icebe
 - Increment 1 complete — Ceph RGW cluster running, buckets and service accounts in place
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the Polaris host
-- JDK 21+ and Maven 3.9+ installed on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
 - `svc-polaris` S3 credentials from Increment 1 are available
 
@@ -332,6 +332,8 @@ This table is append-only. It must be partitioned by `zone` and `checked_at` (by
 ---
 
 ## 9. Java Verification Module
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite uses the Iceberg Java API and the Iceberg REST catalog client to connect to Polaris and verify that tables can be created, written, read, and maintained via the catalog.
 
@@ -736,7 +738,10 @@ export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
 export STRATUS_S3_ACCESS_KEY=svc-polaris
 export STRATUS_S3_SECRET_KEY=<svc-polaris secret>
 
-mvn test -pl . -Dtest=IcebergPolarisVerificationTest
+export STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE=registry.stratus.local/stratus/iceberg-polaris-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/iceberg-polaris.env \
+  -v /data/stratus/evidence/increment2:/evidence:z \
+  ${STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE}
 ```
 
 All ten tests must pass before Increment 2 is considered complete.

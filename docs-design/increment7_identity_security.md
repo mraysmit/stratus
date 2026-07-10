@@ -22,7 +22,7 @@ This is a migration and hardening increment, not a greenfield install. The exist
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the identity and Keycloak hosts
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution:
   - `ipa.stratus.local`
   - `keycloak.stratus.local`
@@ -381,7 +381,7 @@ podman run -d \
   docker.io/library/postgres:16
 ```
 
-### Build optimized Keycloak image
+### Build-system publication of the optimized Keycloak image
 
 Create `docker/keycloak/Containerfile`:
 
@@ -405,6 +405,8 @@ Build:
 ```bash
 podman build -t stratus/keycloak:26.6.4 docker/keycloak
 ```
+
+This command belongs in the approved build pipeline. The pipeline tests, scans, publishes, and records the image digest; Keycloak runtime hosts only pull and run the published image.
 
 ### Start Keycloak
 
@@ -692,6 +694,8 @@ Plaintext environment files may remain only as controlled lab bootstrap artifact
 
 ## 14. Java Verification Suite
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite checks identity, authentication, TLS, group propagation, and regression behavior against the live platform.
 
 ### Maven dependencies
@@ -949,7 +953,10 @@ export STRATUS_AIRFLOW_BASE_URL=https://airflow.stratus.local
 export STRATUS_RANGER_BASE_URL=https://ranger.stratus.local:6080
 export STRATUS_ATLAS_BASE_URL=https://atlas.stratus.local:21000
 
-mvn test -pl . -Dtest=IdentitySecurityVerificationTest
+export STRATUS_IDENTITY_SECURITY_VERIFIER_IMAGE=registry.stratus.local/stratus/identity-security-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/identity-security.env \
+  -v /data/stratus/evidence/increment7:/evidence:z \
+  ${STRATUS_IDENTITY_SECURITY_VERIFIER_IMAGE}
 ```
 
 The verification suite should be extended with command-line Kerberos checks in the implementation repository if the build host can execute `kinit`, `klist`, and `kvno`.
@@ -1008,9 +1015,9 @@ Run `curl` without insecure flags against every HTTPS endpoint. No normal operat
 Re-run the core verification suites:
 
 ```bash
-mvn test -pl . -Dtest=TrinoQueryVerificationTest
-mvn test -pl . -Dtest=GovernanceVerificationTest
-mvn test -pl . -Dtest=AirflowOrchestrationVerificationTest
+podman run --rm --env-file /etc/stratus/verifiers/trino-query.env ${STRATUS_TRINO_QUERY_VERIFIER_IMAGE}
+podman run --rm --env-file /etc/stratus/verifiers/governance.env ${STRATUS_GOVERNANCE_VERIFIER_IMAGE}
+podman run --rm --env-file /etc/stratus/verifiers/airflow-orchestration.env ${STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE}
 ```
 
 If Airflow or Polaris authentication changes require updated test clients, update the test clients and keep the behavioral assertions unchanged.

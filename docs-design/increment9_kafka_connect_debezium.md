@@ -21,7 +21,7 @@ Kafka Connect and Debezium do not replace Spark, Flink, Polaris, Iceberg, or Air
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Kafka Connect host
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Kafka Connect uses the Java 25 runtime inherited from the approved Kafka 4.3 image; connector compatibility is verified in the image pipeline.
 - Kafka client truststore from Increment 8 is available
 - `svc-connect` SCRAM user exists in Kafka
 - `svc-connect` has access to Connect internal topics and connector-created CDC topics
@@ -90,7 +90,7 @@ The Connect REST API should not be exposed to analyst or general user networks.
 
 ## 5. Kafka Connect Image
 
-Build a pinned internal Kafka Connect image from the approved Kafka runtime and Debezium plugin artifacts.
+The approved build system builds a pinned internal Kafka Connect image from the approved Kafka runtime and Debezium plugin artifacts. Kafka Connect runtime hosts never assemble plugins or build this image.
 
 The image must include:
 
@@ -105,6 +105,8 @@ Example image build target:
 ```bash
 podman build -t stratus/kafka-connect-debezium:4.3.1-3.6 docker/kafka-connect
 ```
+
+This is a build-pipeline command. The pipeline tests, scans, publishes, and records the image digest before deployment.
 
 The implementation runbook must record:
 
@@ -472,6 +474,8 @@ Expected: at least one snapshot or change event appears after the connector star
 ---
 
 ## 13. Java Verification Suite
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite uses Kafka Connect REST and Kafka consumer APIs to prove CDC behavior.
 

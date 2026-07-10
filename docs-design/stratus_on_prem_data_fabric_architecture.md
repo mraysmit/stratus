@@ -69,14 +69,19 @@ Every platform layer should expose a small set of explicit contracts that can be
 
 The storage platform decision belongs at the architecture level because every downstream increment depends on it. Increment 1 implements the selected storage target; it does not own the architecture tradeoff.
 
-The storage decision is not approved merely because a product is named. Before implementation starts, the storage target must pass the due-diligence gates below and the evidence must be attached to the Phase 1 architecture decision record.
+The storage decision is not approved merely because a product is named. Qualification is staged so that the architecture decision does not depend on components that have not yet been delivered:
+
+- **candidate admission before Increment 1** uses documented requirements, release and deployment review, operational fit, known compatibility evidence, and explicit proof targets
+- **Increment 1 acceptance** proves the deployed storage service independently through S3 protocol, security, health, failure, synthetic load, capacity, and operational tests
+- **cross-increment qualification** proves each real engine when that engine is introduced
+- **Phase 1 readiness** proves the complete concurrent engine workload and production operating model
 
 The decision process is:
 
 1. Confirm the Stratus storage requirements.
 2. Screen plausible open-source, on-prem storage candidates.
 3. Compare the viable candidates against the requirements.
-4. Run a proof-of-fit against the selected release and configuration.
+4. Define the staged proof-of-fit targets and admit one candidate into Increment 1.
 5. Record any gaps, mitigations, and disqualifying risks.
 6. Only then proceed into the Increment 1 implementation runbook.
 
@@ -104,9 +109,9 @@ This section exists because "S3-compatible" is not specific enough for a product
 | Cost and operating model | On-prem storage shifts cost into hardware, power, capacity planning, and operator effort. | Capacity model, growth assumptions, replication/erasure-coding overhead, and operational ownership are recorded before production onboarding. |
 | Governance integration path | Increment 6 adds Ranger/Atlas; storage must not block identity and policy integration. | Authz boundary is defined: storage service credentials at layer 1; analytical user policy through Polaris/Trino/Ranger later. |
 
-#### 2.8.1.1 Measurable storage acceptance evidence
+#### 2.8.1.1 Phase 1 integrated storage qualification evidence
 
-The storage decision must include measured evidence, not only product features. The following acceptance matrix applies to both Ceph RGW and Apache Ozone during proof-of-fit. Exact numeric targets are environment-specific, but each run must record the target, observed result, error budget, test dataset size, object count, concurrency level, hardware profile, and operator effort.
+The storage decision must define measurable proof targets, not only product features. The following matrix is accumulated across Phase 1 as the owning engines become available; it is not the Increment 1 exit gate and is not a prerequisite for starting Increment 2. Exact numeric targets are environment-specific, but each run must record the target, observed result, error budget, test dataset size, object count, concurrency level, hardware profile, and operator effort.
 
 | Evidence area | Required workload | Required metrics | Minimum acceptance rule |
 |---|---|---|---|
@@ -115,7 +120,7 @@ The storage decision must include measured evidence, not only product features. 
 | Ingestion/write throughput | Spark writes a scaled bronze/silver dataset using the same S3 client settings intended for production. | Sustained write throughput, multipart upload success/abort behavior, commit duration, request error rate, retry count. | Writes complete without multipart leaks, failed commits, or elevated retry/error rates beyond the declared threshold. |
 | Metadata-heavy listing behavior | Create representative Iceberg table layouts with many snapshots, manifests, partition prefixes, and metadata files. | List latency by prefix, object count, bucket-index health, metadata-file growth, manifest count, snapshot chain length. | Listing and metadata resolution remain predictable enough for maintenance and query planning; any degraded behavior has a documented object-count threshold and mitigation. |
 | Small-file/object-count stress | Generate small-file debt, then run compaction and orphan cleanup through Iceberg maintenance. | Object count before/after, average file size, compaction duration, orphan count, delete-file count, request latency/error rate during maintenance. | Maintenance reduces file-count debt and does not destabilize concurrent reads or catalog operations. |
-| Request latency and error budget | Run mixed read/write/list/head/delete/multipart operations through the selected S3 endpoint. | p50/p95/p99 latency by operation, 4xx/5xx rate, timeout rate, retry rate. | Candidate must meet the declared Phase 1 smoke-test SLO or produce a remediation plan before implementation proceeds. |
+| Request latency and error budget | Run mixed read/write/list/head/delete/multipart operations through the selected S3 endpoint. | p50/p95/p99 latency by operation, 4xx/5xx rate, timeout rate, retry rate. | The owning gate must meet its declared smoke-test SLO or produce an accepted remediation and retest plan. |
 | Cost and capacity model | Model usable capacity for the selected replication/erasure-coding profile and expected growth. | Raw-to-usable ratio, metadata overhead, bucket-index overhead, projected 12/24/36-month capacity, power/rack assumptions where known. | Capacity model shows usable headroom for onboarding and defines expansion triggers before production data is accepted. |
 | Operator effort | Execute install, upgrade rehearsal, failure drill, restore drill, credential rotation, and dashboard/alert setup. | Operator steps, elapsed operator time, specialist skills, automation gaps, runbook defects. | Operational burden is recorded and accepted by the owning operations team, including any staffing or automation gaps. |
 
@@ -153,7 +158,7 @@ Scoring scale:
 | Analytical user authorization model | Storage layer uses service credentials; analytical user policy is enforced later through Polaris/Trino/Ranger. | 4 | Can support stronger storage-layer authorization, but that is not required by the current Phase 1 storage contract. | 4 | Both are acceptable if user-facing authorization stays above storage. |
 | Operational model | Strong but complex. Ceph has mature health, dashboard, metrics, CRUSH placement, recovery, and cephadm lifecycle management. | 4 | Strong but also complex. Ozone has OM/SCM HA, Recon, Datanodes, security, and object-store operational patterns. | 4 | Team skill set matters; both require real operators. |
 | Performance evidence path | Strong tooling and metrics path through RGW, Ceph Dashboard, Prometheus, and client-side S3 measurements; still must be measured on target hardware. | 4 | Viable through Ozone Recon, S3 Gateway metrics, and client-side S3 measurements; proof-of-fit must validate the selected gateway release. | 3 | Ceph has the lower measurement-risk baseline, but neither candidate is approved without workload evidence. |
-| Metadata and small-object behavior | Mature RGW/bucket-index behavior, but Iceberg metadata and small-file stress must be measured explicitly. | 4 | Viable, but S3 Gateway list behavior and metadata-heavy Iceberg layouts need stronger proof before approval. | 3 | Metadata-heavy behavior is a required decision gate, not a later tuning task. |
+| Metadata and small-object behavior | Mature RGW/bucket-index behavior, but Iceberg metadata and small-file stress must be measured explicitly. | 4 | Viable, but S3 Gateway list behavior and metadata-heavy Iceberg layouts need stronger proof before approval. | 3 | Synthetic behavior is proved in Increment 1; real Iceberg behavior is a required Increment 2/3 and readiness gate, not optional later tuning. |
 | Cost/capacity and operator effort | Strong capacity and failure-domain modeling through Ceph pool/CRUSH design; operator skill requirement is material. | 4 | Strong storage-specific model with its own operational complexity; operator skill requirement is material. | 4 | Both require an accepted cost/capacity model and named operating team. |
 | Failure-domain and recovery controls | Strong. CRUSH, pools, OSD health, backfill/recovery behavior are central Ceph concepts. | 5 | Strong. Ozone has replication/erasure coding and service HA patterns. | 4 | Both viable; prove via drills. |
 | Encryption and key management | Supported through Ceph/RGW encryption options and storage-layer controls; exact mode must be release-validated. | 4 | Supported through Ozone/KMS/transparent data encryption path; exact mode must be release-validated. | 4 | Both viable; neither should be assumed from AWS S3 semantics. |
@@ -162,27 +167,19 @@ Scoring scale:
 
 The score is not the decision by itself. Both Ceph RGW and Apache Ozone expose S3-compatible APIs, so "S3-compatible" alone does not decide this. Under the current Stratus requirements, the tradeoff is compatibility risk and operating model: Ceph RGW is treated as the lower-risk S3 API target for the selected Iceberg/Spark/Trino/Polaris path, while Ozone remains viable if its S3 Gateway passes the same proof-of-fit and its security or operational model is preferred.
 
-#### 2.8.4 Required proof-of-fit before implementation
+#### 2.8.4 Candidate admission before Increment 1
 
-Ceph RGW can remain the baseline only after the following evidence exists:
+Ceph RGW can enter Increment 1 as the candidate baseline after the following evidence exists:
 
 - Official release and deployment method selected and pinned.
-- RGW endpoint created with HTTPS and trusted CA.
-- Java S3 verification suite passes for create bucket, put, get, head, list, delete, multipart upload, abort multipart upload, and credential-deny cases.
-- Iceberg `S3FileIO` can create, write, read, update, expire snapshots, compact, and remove orphan files against RGW.
-- Spark can read from landing and write Iceberg tables through Polaris using the RGW endpoint.
-- Trino can query Iceberg tables using the same object-store endpoint and path-style configuration.
-- Concurrent Spark write, Trino read, Polaris catalog resolution, and operator S3 listing tests complete within the declared request-latency and error-rate thresholds.
-- Large scan/read and ingestion/write throughput baselines are recorded with dataset size, object count, hardware profile, and bottleneck analysis.
-- Metadata-heavy Iceberg layouts prove acceptable list latency, bucket-index health, manifest growth, and snapshot-chain behavior.
-- Small-file/object-count stress proves compaction and orphan cleanup reduce debt without destabilizing concurrent reads or catalog operations.
-- Cost/capacity model records raw-to-usable ratio, growth assumptions, metadata overhead, expansion triggers, and operator ownership.
-- Operator effort is recorded for install, upgrade rehearsal, failure drill, restore drill, credential rotation, and observability setup.
-- Service credentials prove least privilege across `svc-spark`, `svc-polaris`, `svc-airflow`, and `svc-trino`.
-- TLS, encryption-at-rest, logging, metrics, backup, restore, and failure drills pass in a production-like topology.
+- release documentation shows the required S3 operations and deployment topology are supported or identifies the exact items Increment 1 must prove
+- the target Linux, container runtime, node, disk, network, failure-domain, TLS, monitoring, recovery, and upgrade assumptions are documented
+- a preliminary capacity and operator-ownership model is accepted
+- the required service-identity boundaries and product-neutral `STRATUS_S3_*` client contract are defined
+- measurable Increment 1 and later cross-increment proof targets are recorded with owners and owning gates
 - Apache Ozone is either rejected with specific evidence or retained as an alternate with explicit trigger conditions.
 
-If any of these fail, the storage decision must stop and produce a short ADR comparing Ceph RGW and Apache Ozone against the failed requirement before the implementation proceeds.
+Increment 1 then determines whether the candidate becomes the accepted engineering baseline. A failed Increment 1 storage-only gate stops Increment 2 and triggers an ADR or remediation decision. A later engine-specific failure reopens storage qualification but does not create a circular prerequisite for Increment 1.
 
 #### 2.8.5 Decision summary
 
@@ -1468,6 +1465,7 @@ Minimum version matrix to maintain:
 
 | Component | Version discipline |
 |---|---|
+| Java | use Java 25 LTS for Stratus-owned builds and verifier images; pin the vendor and latest approved Java 25 patch; compile component-bound artifacts with the JDK 25 toolchain using the `--release` target supported by that component runtime |
 | Ceph RGW | choose a supported Ceph release and pin all images/packages; do not use `latest` |
 | Apache Polaris | pin the catalog release and validate REST catalog behavior against Iceberg clients |
 | Apache Iceberg | align Java API, Spark runtime, Flink runtime, and Trino connector expectations |
@@ -1483,6 +1481,8 @@ Current Phase 1 target baseline as of 2026-07-05:
 
 | Component | Target |
 |---|---|
+| Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch |
+| Component runtime exceptions | Spark 4.1 and Flink 2.1 use supported Java 17 runtimes; Airflow's Spark client uses Java 21; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
@@ -1499,6 +1499,25 @@ Current Phase 1 target baseline as of 2026-07-05:
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
 
 No implementation increment should be signed off with floating container tags, unverified compatibility assumptions, or examples copied from quickstarts without adapting them to the Stratus security and QA model.
+
+### 14.8 Build, artifact, and runtime separation
+
+Stratus builds software and container images in the approved build system. Runtime and verification environments consume immutable, versioned artifacts; they do not compile source code or resolve build dependencies at execution time.
+
+The following contract applies to every increment:
+
+- application JARs, verifier JARs, Python distributions, plugins, and custom container images are built, tested, scanned, and published by the build system
+- every deployed artifact is identified by version plus checksum or image digest and is recorded in the evidence bundle
+- runtime and verification containers contain only the runtime, deployed artifact, configuration, certificates, and narrowly scoped credentials required to execute their role
+- source trees, Maven or Gradle project directories, compiler toolchains, and writable dependency caches are not mounted into runtime or verification containers
+- verification is performed by deploying a pinned verifier container image that contains the prebuilt verifier artifact and compatible runtime, then executing it against the target environment
+- verification results are written to a dedicated evidence volume or collected from standard output; the application artifact and runtime filesystem remain read-only where practical
+- Dockerfiles and Containerfiles are build inputs executed by the build system, never ad hoc production-host build instructions
+- `spark-submit`, Flink job submission, Airflow task execution, and similar commands must reference an already-built, checksummed job artifact
+- the standard Stratus build JDK and verifier runtime is Java 25 LTS at the latest approved patch level
+- the JDK 25 build toolchain may emit a lower bytecode/API target with `--release` only when a third-party runtime does not support Java 25; the exception, owning component, target release, and removal trigger must be recorded in the version matrix
+
+An increment document may show a build-system command such as `mvn verify` only in a clearly labelled build/publish stage. Its deployment and acceptance steps must execute the published verifier image without invoking Maven, Gradle, a compiler, or a package build. Verifier images use the verifier artifact as their entrypoint, accept configuration through a protected environment file or approved secret injection, mount trust material read-only, and write only to a dedicated evidence mount.
 
 ---
 
@@ -1653,6 +1672,8 @@ Get them wrong and you will just have an expensive collection of tools.
 
 ## 18. Source References
 
+- OpenJDK JDK 25: https://openjdk.org/projects/jdk/25/
+- Oracle Java SE Support Roadmap: https://www.oracle.com/java/technologies/java-se-support-roadmap.html
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/
 - Apache Polaris: https://polaris.apache.org/

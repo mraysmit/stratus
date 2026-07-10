@@ -153,4 +153,4 @@ The platform is Linux-only with no Windows dependencies.
 
 ## Status
 
-Architecture and design baseline. Java scaffold is minimal (JDK 26, no runtime dependencies yet).
+Architecture and design baseline. Implementation has not started. The Stratus-owned Java build and verifier baseline is Java 25 LTS; third-party component runtimes follow their selected release's documented Java support matrix.

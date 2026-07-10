@@ -24,7 +24,7 @@ When this increment is complete, streaming data is not invisible side traffic. I
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the governance host
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - Atlas endpoint is reachable at `https://atlas.stratus.local`
 - Ranger endpoint is reachable at `https://ranger.stratus.local`
 - Kafka brokers are reachable on `9092` with TLS and SASL/SCRAM
@@ -296,6 +296,8 @@ Expected: restricted user is denied and Ranger audit records the decision.
 ---
 
 ## 10. Java Verification Suite
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 Required tests:
 

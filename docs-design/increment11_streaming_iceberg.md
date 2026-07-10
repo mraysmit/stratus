@@ -23,7 +23,7 @@ This increment is not a general Flink deployment and not an Iceberg maintenance 
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on each Flink host
-- JDK 21+ and Maven 3.9+ on the verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Streaming job artifacts target the Java 17 runtime selected in Increment 10.
 - Flink target is `2.1.1` for this increment because Iceberg 1.11.0 publishes a Flink 2.1 runtime artifact
 - Iceberg target is `1.11.0`
 - Flink Kafka Connector target is `5.0.0`
@@ -119,6 +119,8 @@ Target image tag:
 podman build -t stratus/flink:2.1.1-kafka5.0.0-iceberg1.11.0 docker/flink-iceberg
 ```
 
+Run this only as a build-pipeline step on an approved worker. The pipeline tests, scans, publishes, and records the image digest; Flink runtime hosts only pull and run the published image.
+
 Required artifacts:
 
 | Artifact | Version |
@@ -135,11 +137,10 @@ FROM stratus/flink:2.1.1-kafka5.0.0
 
 USER root
 
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-2.1/1.11.0/iceberg-flink-runtime-2.1-1.11.0.jar \
-    /opt/flink/lib/
-
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar \
-    /opt/flink/lib/
+# The build system resolves these pinned artifacts into the build context and
+# verifies their recorded checksums before the container build starts.
+COPY artifacts/iceberg-flink-runtime-2.1-1.11.0.jar /opt/flink/lib/
+COPY artifacts/iceberg-aws-bundle-1.11.0.jar /opt/flink/lib/
 
 USER flink
 ```
@@ -369,6 +370,8 @@ Expected: new snapshots appear after successful Flink checkpoints.
 ---
 
 ## 11. Java Verification Suite
+
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
 
 The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris, Ceph RGW, and Trino.
 

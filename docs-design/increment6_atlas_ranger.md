@@ -19,7 +19,7 @@ Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classi
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 4.x installed on the governance host and Trino coordinator
-- JDK 21+ and Maven 3.9+ on the development and verification host
+- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Atlas and Ranger runtime Java versions remain pinned to the versions supported by the selected releases and are recorded as component-runtime exceptions where they differ from Java 25.
 - DNS resolution:
   - `atlas.stratus.local`
   - `ranger.stratus.local`
@@ -586,6 +586,8 @@ podman logs trino-coordinator | grep -i ranger
 
 ## 13. Java Verification Suite
 
+The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
+
 The verification suite uses Atlas REST APIs, Ranger REST APIs, and Trino JDBC to validate governance behavior.
 
 ### Maven dependencies
@@ -813,7 +815,10 @@ export STRATUS_TRINO_ALLOWED_USER=analyst_crm
 export STRATUS_TRINO_DENIED_USER=analyst_crm
 export STRATUS_TRINO_RESTRICTED_USER=analyst_restricted
 
-mvn test -pl . -Dtest=GovernanceVerificationTest
+export STRATUS_GOVERNANCE_VERIFIER_IMAGE=registry.stratus.local/stratus/governance-verifier:<version>@sha256:<digest>
+podman run --rm --env-file /etc/stratus/verifiers/governance.env \
+  -v /data/stratus/evidence/increment6:/evidence:z \
+  ${STRATUS_GOVERNANCE_VERIFIER_IMAGE}
 ```
 
 All nine tests must pass before Increment 6 is considered complete.

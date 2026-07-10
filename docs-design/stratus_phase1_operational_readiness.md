@@ -35,7 +35,7 @@ Before this readiness review begins:
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 This readiness gate depends on the same upstream projects referenced by the increment documents. Before production signoff, the platform team must confirm that the approved version matrix still matches current project documentation and release notes, or record an explicit reason for any pinned older version.
 
@@ -57,6 +57,8 @@ Current Phase 1 target baseline as of 2026-07-05:
 
 | Component | Target |
 |---|---|
+| Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch, vendor and image digest recorded |
+| Component runtime exceptions | Spark 4.1 and Flink 2.1 on supported Java 17 runtimes; Airflow Spark client on Java 21; Atlas/Ranger on selected-release-supported runtimes; each exception documented and retested on upgrade |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
@@ -172,8 +174,17 @@ Acceptance checks:
 
 - [ ] No service uses floating image tags.
 - [ ] Custom images have a reproducible Dockerfile or Containerfile.
+- [ ] Custom images and application/verifier artifacts were built, tested, scanned, and published by the approved build system.
+- [ ] Runtime and verification containers do not compile source, invoke Maven/Gradle, mount source trees, or resolve build dependencies.
+- [ ] Deployed application and verifier artifacts have recorded versions and checksums or image digests.
+- [ ] Verification executes prebuilt artifacts and writes results only to the approved evidence location.
+- [ ] Verifier images define stable entrypoints, non-zero failure exit codes, machine-readable results, human-readable summaries, and correlation identifiers.
+- [ ] Protected verifier environment files or secret injection are access-controlled and are not included in evidence bundles.
 - [ ] Airflow uses the approved 3.x image and service split.
 - [ ] Trino, Spark, and Iceberg dependency versions are mutually compatible.
+- [ ] Stratus-owned Java artifacts and verifier images use Java 25 LTS at the latest approved patch level.
+- [ ] Component-bound artifacts built with JDK 25 use the documented `--release` target matching the deployed component runtime.
+- [ ] Every non-Java-25 component runtime has a recorded compatibility exception, owner, supported-version evidence, and removal or retest trigger.
 - [ ] Ranger plugin and Trino version compatibility is documented.
 - [ ] Keycloak and FreeIPA versions are supported by their upstream projects or the selected Linux distribution.
 - [ ] The deployed configuration matches the reviewed configuration in source control.
