@@ -6,6 +6,8 @@ This document is the technical implementation plan for Increment 9 of the Stratu
 
 Increment 9 delivers Kafka Connect in distributed mode and Debezium CDC connectors. Kafka Connect provides the managed connector runtime. Debezium captures row-level source database changes and publishes them into the Kafka event backbone created in Increment 8. When this increment is complete, a PostgreSQL verification source can be snapshotted, inserts/updates/deletes are emitted to Kafka topics, connector offsets survive worker restarts, and operators can monitor connector health, lag, errors, and dead-letter routing.
 
+The developer profile may use one worker, loopback/private-network HTTP on the REST API, a disposable source database, and generated test credentials. The production profile uses three workers, TLS with authenticated operator/automation access to the REST API, protected Connect internal topics, managed source and Kafka credentials, approved source-log retention, monitoring, and worker/source failure drills. Connector JSON, topic contracts, transforms, and CDC verification are shared across both tracks.
+
 Kafka Connect and Debezium do not replace Spark, Flink, Polaris, Iceberg, or Airflow. They move source-system changes into Kafka. Flink consumes those topics in Increment 10 and writes governed Iceberg tables in Increment 11.
 
 **Prerequisites:**
@@ -15,13 +17,15 @@ Kafka Connect and Debezium do not replace Spark, Flink, Polaris, Iceberg, or Air
 - Source database owner has approved CDC permissions
 - Kafka topics and ACL patterns from Increment 8 are available
 
+**Track rule:** Developer work requires the Increment 8 developer gate. Increment 9 production deployment and acceptance require the Increment 8 production gate and the production identity, TLS, Kafka, and source-database contracts.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Kafka Connect host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Kafka Connect uses the Java 25 runtime inherited from the approved Kafka 4.3 image; connector compatibility is verified in the image pipeline.
+- Podman 5.8.2 installed on each Kafka Connect host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Kafka Connect uses the Java 25 runtime inherited from the approved Kafka 4.3 image; connector compatibility is verified in the image pipeline.
 - Kafka client truststore from Increment 8 is available
 - `svc-connect` SCRAM user exists in Kafka
 - `svc-connect` has access to Connect internal topics and connector-created CDC topics
@@ -39,11 +43,11 @@ DNS names used in this increment:
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
-The approved Debezium compatibility target for this increment is the Debezium 3.6 series with Kafka Connect bundled from the selected Kafka 4.3.1 runtime. The exact Debezium patch artifact must be pinned in the Phase 2 version matrix.
+The approved Debezium compatibility target for this increment is Debezium 3.6.0.Final with Kafka Connect bundled from the selected Kafka 4.3.1 runtime. The exact connector artifact and image digest must be pinned in the Phase 2 version matrix.
 
-Before implementation, confirm the exact Debezium 3.6 patch artifact, Kafka Connect compatibility notes, PostgreSQL connector properties, source database versions, and connector image build path. If a newer Debezium stable series is selected, update this document, plugin artifacts, test expectations, and connector templates together.
+Before implementation, confirm the Debezium 3.6.0.Final artifact checksums, Kafka Connect compatibility notes, PostgreSQL connector properties, source database versions, and connector image build path. If a newer Debezium stable series is selected, update this document, plugin artifacts, test expectations, and connector templates together.
 
 ---
 
@@ -79,10 +83,12 @@ Connect workers coordinate through Kafka. Connector configuration, offsets, and 
 
 | Port | Purpose | Access |
 |---|---|---|
-| 8083 | Kafka Connect REST API | platform operators and automation only |
+| 8083 | Kafka Connect REST API | developer: isolated HTTP; production: authenticated HTTPS from operator/automation networks only |
 | 9405 | Prometheus metrics endpoint | monitoring network only |
 | 9092 | Kafka broker access | outbound from Connect workers |
 | 5432 | PostgreSQL verification source | outbound from Connect workers |
+
+All `http://connect1.stratus.local:8083` commands below are developer-profile examples for an isolated network. Production operators substitute `STRATUS_CONNECT_URL=https://connect.stratus.local:8083` and supply the approved CA plus scoped client identity; plaintext commands are not production runbook steps.
 
 The Connect REST API should not be exposed to analyst or general user networks.
 
@@ -95,7 +101,7 @@ The approved build system builds a pinned internal Kafka Connect image from the 
 The image must include:
 
 - Kafka Connect from Kafka 4.3.1 or the approved Kafka release
-- Debezium connector plugin 3.6 for PostgreSQL
+- Debezium connector plugin 3.6.0.Final for PostgreSQL
 - JMX exporter Java agent
 - trusted platform CA bundle
 - no floating plugin downloads at container startup
@@ -103,7 +109,7 @@ The image must include:
 Example image build target:
 
 ```bash
-podman build -t stratus/kafka-connect-debezium:4.3.1-3.6 docker/kafka-connect
+podman build -t stratus/kafka-connect-debezium:4.3.1-debezium3.6.0.Final docker/kafka-connect
 ```
 
 This is a build-pipeline command. The pipeline tests, scans, publishes, and records the image digest before deployment.
@@ -243,6 +249,9 @@ value.converter.schemas.enable=true
 
 plugin.path=/opt/kafka/plugins
 
+config.providers=file
+config.providers.file.class=org.apache.kafka.common.config.provider.FileConfigProvider
+
 rest.host.name=connect1.stratus.local
 rest.port=8083
 rest.advertised.host.name=connect1.stratus.local
@@ -281,6 +290,22 @@ errors.log.include.messages=false
 
 Change `rest.host.name` and `rest.advertised.host.name` per worker.
 
+The configuration above is the developer REST overlay and must be bound only to loopback or an isolated developer network. Production replaces it with native Connect HTTPS or an approved mTLS-authenticating reverse proxy. A native HTTPS overlay uses the selected Kafka release's documented listener properties, for example:
+
+```properties
+listeners=https://0.0.0.0:8083
+rest.advertised.listener=https
+rest.advertised.host.name=connect1.stratus.local
+rest.advertised.port=8083
+listeners.https.ssl.keystore.location=/etc/connect/certs/connect.keystore.p12
+listeners.https.ssl.keystore.password=${file:/etc/connect/secrets/connect-keystore.pass:password}
+listeners.https.ssl.truststore.location=/etc/connect/certs/connect.truststore.p12
+listeners.https.ssl.truststore.password=${file:/etc/connect/secrets/connect-truststore.pass:password}
+listeners.https.ssl.client.auth=required
+```
+
+Only operator and deployment-automation client certificates may call connector create/update/delete endpoints. Production validation uses `https://`, the platform CA, and a scoped client certificate; it never relies on network location as the only authentication control.
+
 For production connectors, dead-letter behavior is configured per connector after the product owner decides whether malformed records should fail fast or route to a DLQ.
 
 ---
@@ -301,7 +326,7 @@ podman run -d \
   -v /data/connect:/data/connect:z \
   -e KAFKA_OPTS="-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent.jar=9405:/etc/connect/jmx-exporter.yml" \
   --restart unless-stopped \
-  stratus/kafka-connect-debezium:4.3.1-3.6 \
+  stratus/kafka-connect-debezium:4.3.1-debezium3.6.0.Final \
   /opt/kafka/bin/connect-distributed.sh /etc/connect/connect-distributed.properties
 ```
 
@@ -519,7 +544,7 @@ The verification suite uses Kafka Connect REST and Kafka consumer APIs to prove 
 
 | Variable | Example |
 |---|---|
-| `STRATUS_CONNECT_URL` | `http://connect1.stratus.local:8083` |
+| `STRATUS_CONNECT_URL` | developer: `http://127.0.0.1:8083`; production: `https://connect.stratus.local:8083` |
 | `STRATUS_KAFKA_BOOTSTRAP` | `kafka1.stratus.local:9092,kafka2.stratus.local:9092,kafka3.stratus.local:9092` |
 | `STRATUS_KAFKA_TRUSTSTORE` | `/etc/stratus/kafka/certs/kafka.truststore.p12` |
 | `STRATUS_KAFKA_TRUSTSTORE_PASSWORD` | truststore password |
@@ -562,14 +587,22 @@ Minimum alerts:
 
 ---
 
-## 15. Completion Gate
+## 15. Completion Gates
 
-Increment 9 is complete when:
+### Developer gate
+
+- [ ] A one-worker development stack starts and stops idempotently, lists the Debezium plugin, captures snapshot/insert/update/delete events, resumes offsets after restart, and resets without touching shared topics.
+- [ ] HTTP is bound only to loopback or an isolated developer network, and the promotion manifest records its HTTPS/authentication replacement.
+
+### Production gate
+
+Increment 9 is accepted when:
 
 - [ ] Kafka Connect distributed cluster has three workers
 - [ ] workers are managed by systemd
 - [ ] Kafka Connect uses SASL_SSL to the Kafka backbone
-- [ ] Debezium 3.6 PostgreSQL connector plugin is installed and visible
+- [ ] Debezium 3.6.0.Final PostgreSQL connector plugin is installed and visible
+- [ ] Connect REST is HTTPS and authenticated with trusted certificates; unauthenticated connector administration fails
 - [ ] Connect internal topics exist with replication factor 3 and compacted cleanup
 - [ ] `svc-connect` ACLs are least-privilege
 - [ ] PostgreSQL verification source is configured for logical replication
@@ -581,8 +614,9 @@ Increment 9 is complete when:
 - [ ] connector credentials are not stored in source control
 - [ ] Prometheus and Grafana expose worker, connector, task, lag, and error signals
 - [ ] Java verification suite passes
+- [ ] no one-worker topology, plaintext control API, generated source credential, or disposable internal-topic setting remains in production
 
-When all gates are checked, Increment 10 (Flink Streaming Compute) can begin.
+The developer gate may unblock Increment 10 engineering. Only the production gate marks Increment 9 accepted in the Phase 2 tracker.
 
 ---
 

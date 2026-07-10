@@ -51,7 +51,7 @@ The main tradeoff is operational complexity. Ceph is a real storage platform, no
 
 ## 3. Storage Decision
 
-The storage architecture decision, candidate comparison, scoring, and proof-of-fit gate are owned by [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This increment implements the current candidate baseline selected there: **Ceph Object Gateway (RGW)** on a production Ceph cluster.
+The storage architecture decision, retained comparison, scoring, and proof-of-fit gate are owned by [stratus_on_prem_data_fabric_architecture.md](stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision). This increment implements the selected baseline: **Ceph Object Gateway (RGW)** on a production Ceph cluster.
 
 ### Implementation target
 
@@ -92,8 +92,9 @@ Every storage target for Increment 1 must satisfy this contract. For this docume
 | Endpoint | `https://object-store.stratus.local` or environment-specific equivalent |
 | Transport | HTTPS only |
 | Path-style access | Required for first implementation unless all clients pass virtual-hosted validation |
-| Region | `us-east-1` unless Ceph/client compatibility testing requires another fixed value |
 | CA trust | clients must trust the endpoint CA; routine commands must not require `--insecure` or `-k` |
+
+Ceph RGW has no Stratus deployment-region parameter. If an upstream S3 client requires a field named `region`, `signing region`, or signing scope to construct S3 requests, the owning increment records that client-specific value after compatibility testing. It is not a Ceph location, availability zone, or platform configuration contract.
 
 ### Bucket contract
 
@@ -131,7 +132,7 @@ In Ceph RGW, these are represented as RGW users, subusers, access keys, or an ap
 
 ### Recovery and operations contract
 
-Production-like Ceph must define:
+Production Ceph must define:
 
 - monitor quorum and failure tolerance
 - manager daemon placement and failover
@@ -165,7 +166,7 @@ Production-like Ceph must define:
 
 ### Production topology
 
-The production-like topology should be at least:
+The production profile topology should be at least:
 
 | Role | Count | Notes |
 |---|---:|---|
@@ -218,16 +219,16 @@ For a smaller lab, roles may be co-located, but the lab must be clearly marked n
 - firewall rules opened for selected Ceph service ports
 - TLS certificates for RGW and dashboard endpoints
 - approved Ceph release and deployment method
-- Maven 3.9+ and JDK 25 on the approved build worker; the verification host requires only the approved container runtime, registry access, target network access, trust material, protected configuration, and evidence storage
+- Maven 3.9.16 and JDK 25 on the approved build worker; the verification host requires only the approved container runtime, registry access, target network access, trust material, protected configuration, and evidence storage
 - approved build pipeline capable of producing the storage verifier artifact and immutable verifier image
 - approved artifact repository and container registry with checksum, digest, scan, and provenance retention
 - approved read-only trust-material path, protected verifier environment-file path, and writable evidence destination
 
 ### Version discipline
 
-Before implementation:
+The target is **Ceph Tentacle 20.2.2**, pinned by package version or image tag and digest. Before implementation:
 
-- select an approved Ceph release
+- confirm 20.2.2 remains the latest compatible supported Tentacle patch, or record the newer approved patch
 - read the matching Ceph documentation for that exact release
 - pin all repositories, packages, containers, or deployment artifacts
 - record RGW S3 compatibility notes for that release
@@ -263,7 +264,7 @@ Production exposure:
 
 ### TLS
 
-For lab use, self-signed certificates are acceptable. For production-like use, use the platform PKI path from the identity/security increment.
+For disposable developer/lab use, a local CA is acceptable. For the production profile, use the platform PKI path from the identity/security increment.
 
 The RGW certificate must include:
 
@@ -271,7 +272,7 @@ The RGW certificate must include:
 - each RGW host, such as `ceph-rgw1.stratus.local`
 - any environment-specific aliases
 
-All Java clients must trust the issuing CA. Production-like commands and tests must not require `--insecure`, `-k`, or disabled certificate validation.
+All Java clients must trust the issuing CA. Production commands and tests must not require `--insecure`, `-k`, or disabled certificate validation.
 
 ### RGW users and access keys
 
@@ -291,7 +292,7 @@ User-facing table authorization is not implemented at the bucket layer. It is en
 
 ### Encryption
 
-Production-like environments must define:
+Production environments must define:
 
 - whether RGW server-side encryption is used
 - whether encryption is delegated to encrypted OSD/block devices
@@ -340,7 +341,7 @@ Required host capabilities:
 
 The first host bootstrap creates the first MON and MGR, writes `/etc/ceph/ceph.conf`, writes the admin keyring, and prepares cephadm SSH access for adding the rest of the cluster. After bootstrap, Stratus must add additional hosts and place services deliberately; the first host alone is not a production topology.
 
-Production-like local topology must include:
+The production topology must include:
 
 - three or five MONs, depending on node count and quorum design
 - at least two MGR daemons with standby behavior
@@ -380,6 +381,8 @@ Docker Desktop is a developer workstation tool in this design. It may run the Do
 | Production | Podman with cephadm | Preferred Stratus production deployment model | Yes |
 | Production | Docker Engine with cephadm | Allowed only with release compatibility, operations approval, and daemon restart/runbook evidence | Yes |
 | Production | Docker Desktop | Not allowed | No |
+
+The July 2026 runtime reference is Podman 5.8.2 and Docker Engine 29.5.3. Use the newest of those runtimes that Ceph Tentacle 20.2.2 and the selected Linux distribution support, pin the exact package version, and record the compatibility evidence. An older runtime needs an owner and upgrade trigger; a newer patch is adopted only after cephadm bootstrap, daemon restart, host reboot, upgrade, and rollback tests pass.
 
 ### Production Podman profile
 
@@ -493,7 +496,7 @@ The RGW layer must define:
 
 RGW TLS is configured on the Ceph RGW service, not inside the developer Compose harness. The developer harness only trusts the CA that issued the RGW endpoint certificate.
 
-For production-like environments, use the platform PKI path from the identity/security increment. For a disposable lab, a lab CA is acceptable if the CA and private keys are clearly marked non-production.
+For the production profile, use the platform PKI path from the identity/security increment. For a disposable developer/lab environment, a local CA is acceptable if the CA and private keys are clearly marked non-production.
 
 Cephadm-managed RGW supports three certificate patterns:
 
@@ -501,9 +504,9 @@ Cephadm-managed RGW supports three certificate patterns:
 |---|---|---|
 | cephadm-signed | disposable lab where automatic Ceph-managed certificates are acceptable | convenient, but clients still need to trust the issuing CA |
 | inline | small lab specs where embedding certificate and key in the RGW service spec is acceptable | avoid for long-lived environments because private key material lives in the spec file |
-| reference | production-like or shared lab environments | preferred Stratus pattern; certificate and key are registered with cephadm certmgr and referenced by the RGW service spec |
+| reference | production profile or representative shared lab | preferred Stratus pattern; certificate and key are registered with cephadm certmgr and referenced by the RGW service spec |
 
-The preferred Stratus lab and production-like pattern is **reference**.
+The preferred Stratus representative-lab and production pattern is **reference**.
 
 #### Generate a disposable lab CA and RGW certificate
 
@@ -624,7 +627,7 @@ The developer harness uses only `certs/stratus-ca.crt`. It must never mount RGW 
 
 ## 10. Podman and Docker Engine Lab Deployment
 
-This section provides a containerized lab deployment pattern for Ceph. It is not a replacement for the production topology in §5. It is intended to prove RGW, S3 client behavior, bucket setup, and Java verification before building the full production-like cluster.
+This section provides a containerized developer/lab deployment pattern for Ceph. It is not a replacement for the production topology in section 5. It proves RGW, S3 client behavior, bucket setup, and Java verification before the full production cluster is available.
 
 ### Podman-based cephadm lab
 
@@ -726,7 +729,7 @@ ceph status
 ceph health detail
 ```
 
-Expose RGW through `object-store.stratus.local` using the lab load balancer, reverse proxy, or DNS pattern approved for the lab. Production-like environments must use a redundant endpoint and trusted TLS certificate.
+Expose RGW through `object-store.stratus.local` using the lab load balancer, reverse proxy, or DNS pattern approved for the lab. Production environments must use a redundant endpoint and trusted TLS certificate.
 
 ### Docker Engine-based cephadm lab
 
@@ -786,7 +789,7 @@ The endpoint may be:
 
 - a shared Ceph/RGW lab endpoint
 - a single-host cephadm lab running in a separate Linux VM
-- a production-like non-production Ceph endpoint approved for development tests
+- a representative non-production Ceph endpoint approved for development tests
 
 Do not run the production Ceph cluster itself inside Docker Desktop. Docker Desktop does not provide the production evidence Stratus needs for systemd-managed Linux hosts, dedicated OSD devices, MON quorum, MGR failover, CRUSH placement, RGW high availability, Ceph Dashboard operations, or recovery drills.
 
@@ -1245,7 +1248,7 @@ rclone mkdir cephrgw:stratus-gold
 rclone mkdir cephrgw:stratus-platform
 ```
 
-These commands must work without TLS bypass in production-like environments.
+These commands must work without TLS bypass in representative shared labs and production.
 
 ### Create RGW users
 
@@ -1317,7 +1320,7 @@ s3.path-style-access = true
 warehouse / base locations = s3://stratus-bronze, s3://stratus-silver, s3://stratus-gold, s3://stratus-platform
 ```
 
-Increment 2 must be updated to refer to Ceph/object storage and the `STRATUS_S3_*` configuration contract.
+Increment 2 must use the active Ceph client contract: `CEPH_RGW_ENDPOINT`, service-specific `CEPH_RGW_ACCESS_KEY` and `CEPH_RGW_SECRET_KEY`, and `S3_PATH_STYLE_ACCESS`. Upstream library property names may still contain `aws` or `region`; those names are documented as third-party API identifiers and are never relabelled as Stratus infrastructure concepts.
 
 ---
 
@@ -1439,7 +1442,7 @@ aws --endpoint-url https://object-store.stratus.local s3 ls
 aws --endpoint-url https://object-store.stratus.local s3 ls s3://stratus-landing
 ```
 
-These commands must work without disabling TLS validation in production-like environments.
+These commands must work without disabling TLS validation in representative shared labs and production.
 
 ### Write/read check
 
@@ -1464,7 +1467,7 @@ For lab:
 - confirm backfill/recovery completes
 - confirm cluster returns to `HEALTH_OK` or documented acceptable state
 
-For production-like:
+For the production profile:
 
 - perform supported failure drills for OSD, MON, MGR, RGW, and load balancer paths
 - attach evidence to the production readiness record
@@ -1473,9 +1476,9 @@ For production-like:
 
 ## 17. Completion Gates
 
-### Lab gate
+### Developer gate
 
-Increment 1 lab is complete when:
+Increment 1 developer work is complete when the selected workstation or lab profile proves the following:
 
 - [ ] approved Ceph release is selected and pinned
 - [ ] the build pipeline publishes the storage verifier image by immutable digest with scan and provenance evidence
@@ -1492,9 +1495,9 @@ Increment 1 lab is complete when:
 - [ ] Ceph health checks show expected state
 - [ ] lab failure drill behavior is documented
 
-When the lab gate passes, Increment 2 engineering work can begin.
+When the developer gate passes, Increment 2 engineering work can begin.
 
-### Production-ready gate
+### Production gate
 
 The Ceph storage foundation is production-ready only when:
 
@@ -1507,7 +1510,7 @@ The Ceph storage foundation is production-ready only when:
 - [ ] service credentials are stored in the approved secret-management location
 - [ ] bucket policies or equivalent access controls pass verification
 - [ ] encryption model is approved and tested where required
-- [ ] Java S3 verification passes against the production-like Ceph target
+- [ ] Java S3 verification passes against the production Ceph target
 - [ ] Ceph health, failure, and recovery drills pass
 - [ ] monitoring, alerting, audit logging, backup, restore, patching, and rotation runbooks exist
 - [ ] Phase 1 operational readiness checklist accepts the storage layer
@@ -1562,15 +1565,15 @@ No production dataset should be onboarded based only on a single-node or non-sec
 
 ## 19. References
 
-- Ceph Object Gateway documentation: https://docs.ceph.com/en/latest/radosgw/
-- Ceph Object Gateway S3 API: https://docs.ceph.com/en/latest/radosgw/s3/
-- Ceph RGW bucket policies: https://docs.ceph.com/en/latest/radosgw/bucketpolicy/
-- Ceph RGW encryption: https://docs.ceph.com/en/latest/radosgw/encryption/
-- Cephadm documentation: https://docs.ceph.com/en/latest/cephadm/
-- Cephadm new cluster deployment: https://docs.ceph.com/en/latest/cephadm/install/
-- Ceph architecture: https://docs.ceph.com/en/latest/architecture/
-- Ceph operations: https://docs.ceph.com/en/latest/rados/operations/
-- Ceph dashboard: https://docs.ceph.com/en/latest/mgr/dashboard/
+- Ceph Tentacle Object Gateway documentation: https://docs.ceph.com/en/tentacle/radosgw/
+- Ceph Tentacle Object Gateway S3 API: https://docs.ceph.com/en/tentacle/radosgw/s3/
+- Ceph Tentacle RGW bucket policies: https://docs.ceph.com/en/tentacle/radosgw/bucketpolicy/
+- Ceph Tentacle RGW encryption: https://docs.ceph.com/en/tentacle/radosgw/encryption/
+- Ceph Tentacle cephadm documentation: https://docs.ceph.com/en/tentacle/cephadm/
+- Ceph Tentacle new cluster deployment: https://docs.ceph.com/en/tentacle/cephadm/install/
+- Ceph Tentacle architecture: https://docs.ceph.com/en/tentacle/architecture/
+- Ceph Tentacle operations: https://docs.ceph.com/en/tentacle/rados/operations/
+- Ceph Tentacle dashboard: https://docs.ceph.com/en/tentacle/mgr/dashboard/
 - Apache Ozone documentation: https://ozone.apache.org/docs/current/
 - Apache Ozone S3 protocol: https://ozone.apache.org/docs/current/interface/s3.html
 - Apache Ozone security: https://ozone.apache.org/docs/current/security.html

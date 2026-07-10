@@ -4,7 +4,9 @@
 
 This document is the technical implementation plan for Increment 8 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
 
-Increment 8 delivers Apache Kafka as the durable, replayable event backbone for Phase 2. Kafka is used by Kafka Connect, Debezium CDC connectors, Flink streaming jobs, application event producers, and Atlas entity change notifications after Atlas is migrated from the Phase 1 embedded notifier posture. When this increment is complete, the platform has a secure KRaft-mode Kafka cluster with TLS, authentication, ACLs, topic standards, retention policy, observability, and a Java verification suite.
+Increment 8 delivers Apache Kafka as the durable, replayable event backbone for Phase 2. Kafka is used by Kafka Connect, Debezium CDC connectors, Flink streaming jobs, application event producers, and Atlas entity change notifications after Atlas is migrated from its Phase 1 notification service. When this increment is complete, the platform has a secure KRaft-mode Kafka cluster with TLS, authentication, ACLs, topic standards, retention policy, observability, and a Java verification suite.
+
+The developer profile may use one combined broker/controller, replication factor `1`, local volumes, and generated test credentials on Docker Desktop or Podman. The production profile is the three-node topology below with replication factor `3`, `min.insync.replicas=2`, managed credentials, trusted TLS, durable host storage, monitoring, capacity evidence, and quorum/broker failure drills. Topic names, schemas, ACL intent, client security protocol, and functional tests remain identical across both tracks.
 
 Kafka is not the data lake, the catalog, the governance system, or the scheduler. It is the event backbone. Governed analytical state remains in Iceberg tables managed through Polaris and stored in Ceph RGW.
 
@@ -15,13 +17,15 @@ Kafka is not the data lake, the catalog, the governance system, or the scheduler
 - Platform observability stack available or ready to receive Kafka metrics
 - Initial Phase 2 topic classes and owners identified
 
+**Track rule:** Developer-profile version, packaging, topic-contract, and verifier work may begin against isolated non-production infrastructure before Phase 1 readiness, as allowed by the Phase 2 plan. Increment 8 production deployment and acceptance require Phase 1 operational readiness and the production identity/TLS services.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on each Kafka host
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- Podman 5.8.2 installed on each Kafka host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - FreeIPA manages or delegates DNS for the Kafka hostnames
 - FreeIPA Dogtag PKI issues Kafka TLS certificates
 - Kafka brokers can reach each other on the broker and controller ports
@@ -52,7 +56,7 @@ Kafka authentication is initially implemented with SASL/SCRAM over TLS. FreeIPA 
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 The Phase 2 plan targets Apache Kafka 4.3.1 as the current ASF release artifact visible in the Apache download index. Kafka Connect is bundled with the selected Kafka release. This increment uses Kafka in KRaft mode and does not use ZooKeeper-era deployment patterns.
 
@@ -99,7 +103,7 @@ Firewall rules:
 - Kafka hosts must reach each other on `9092` and `9093`.
 - Kafka clients must reach brokers on `9092`.
 - Prometheus must reach each broker metrics endpoint on `9404`.
-- No plaintext listener should be exposed in production-like environments.
+- No plaintext Kafka listener is exposed in the production profile.
 
 ---
 
@@ -262,13 +266,19 @@ transaction.state.log.min.isr=2
 
 group.initial.rebalance.delay.ms=3000
 
+config.providers=file
+config.providers.file.class=org.apache.kafka.common.config.provider.FileConfigProvider
+
 ssl.keystore.location=/etc/kafka/certs/kafka.keystore.p12
 ssl.keystore.password=${file:/etc/kafka/secrets/kafka-keystore.pass:password}
 ssl.keystore.type=PKCS12
 ssl.truststore.location=/etc/kafka/certs/kafka.truststore.p12
 ssl.truststore.password=${file:/etc/kafka/secrets/kafka-truststore.pass:password}
 ssl.truststore.type=PKCS12
-ssl.client.auth=required
+# Controllers require mutual TLS. Broker clients authenticate with SCRAM over TLS,
+# so the broker listener does not also require a client certificate.
+listener.name.controller.ssl.client.auth=required
+listener.name.broker.ssl.client.auth=none
 ssl.endpoint.identification.algorithm=https
 
 sasl.enabled.mechanisms=SCRAM-SHA-512
@@ -286,7 +296,7 @@ Notes:
 - `auto.create.topics.enable=false` prevents accidental topic sprawl.
 - `allow.everyone.if.no.acl.found=false` makes missing ACLs fail closed.
 - SCRAM credentials must be created before ordinary clients can authenticate.
-- For production, validate whether file-based config providers are supported by the selected Kafka image and startup classpath; otherwise inject secrets through the approved protected runtime mechanism.
+- The internal Kafka image must include the standard `FileConfigProvider` on the broker classpath and the image test must prove each `${file:...}` reference resolves before deployment. If the packaging changes, fail the build rather than starting with unresolved placeholders.
 
 ---
 
@@ -832,15 +842,23 @@ Expected: ISR recovers and alert clears.
 
 ---
 
-## 17. Completion Gate
+## 17. Completion Gates
 
-Increment 8 is complete when:
+### Developer gate
+
+- [ ] Idempotent startup, health, topic bootstrap, producer/consumer round trip, ACL deny, shutdown, and reset procedures pass on Docker Desktop or Podman.
+- [ ] Developer-only replication, credentials, certificates, storage, and port exposure are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 8 is accepted when:
 
 - [ ] Kafka 4.3.1 or the approved current release is pinned by image tag and digest
 - [ ] Kafka runs in KRaft mode with no ZooKeeper dependency
 - [ ] all three brokers/controllers are running and managed by systemd
 - [ ] KRaft quorum reports one leader and three voters
 - [ ] TLS is enabled on broker and controller traffic
+- [ ] the controller listener requires mTLS; the broker listener uses TLS plus SCRAM without accidentally requiring an unconfigured client certificate
 - [ ] normal client commands validate certificates without insecure overrides
 - [ ] SASL/SCRAM authentication is enabled for client traffic
 - [ ] `allow.everyone.if.no.acl.found=false`
@@ -852,11 +870,12 @@ Increment 8 is complete when:
 - [ ] Java verification suite passes
 - [ ] unauthorized produce or consume attempt fails
 - [ ] one-broker failure simulation behaves as expected
+- [ ] no one-node topology, replication factor `1`, generated credential, local-only volume, or developer certificate remains in production
 - [ ] Prometheus scrapes Kafka metrics
 - [ ] Grafana dashboard shows broker, quorum, partition, request, auth, and lag signals
 - [ ] Kafka runbook covers startup, shutdown, broker failure, topic creation, ACL change, retention change, and credential rotation
 
-When all gates are checked, Increment 9 (Kafka Connect and Debezium CDC) can begin.
+The developer gate may unblock Increment 9 engineering. Only the production gate marks Increment 8 accepted in the Phase 2 tracker.
 
 ---
 

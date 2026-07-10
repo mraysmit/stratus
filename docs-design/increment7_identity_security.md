@@ -8,6 +8,8 @@ Increment 7 hardens the working platform from Increments 1 through 6. It introdu
 
 This is a migration and hardening increment, not a greenfield install. The existing platform must continue to work after identity is made real.
 
+Increment 7 still has two tracks. The developer profile may use a disposable FreeIPA/Keycloak realm, local CA hierarchy, test users, and protected local secret files to exercise enrollment, OIDC, LDAPS, and certificate replacement. The production profile uses backed-up identity databases and CA state, production DNS, approved certificate profiles, managed secrets, rotation, high availability or accepted RTO/RPO, and recovery drills. Increment 7 is not accepted until the production profile has replaced the earlier local CA, local users, plaintext endpoints, and bootstrap credentials.
+
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW storage running with all buckets and service credentials
 - Increment 2 complete — Polaris and Iceberg tables operational
@@ -16,13 +18,15 @@ This is a migration and hardening increment, not a greenfield install. The exist
 - Increment 5 complete — Trino query plane operational
 - Increment 6 complete — Atlas metadata and Ranger policy enforcement operational
 
+**Track rule:** Increment 7 engineering requires the developer gates of Increments 1-6 plus their production-capable configuration overlays. It does not require formal production acceptance of controls that Increment 7 supplies. After hardening, the production suites for Increments 1-7 are rerun and their production gates close before Phase 1 readiness.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on the identity and Keycloak hosts
-- JDK 25 and Maven 3.9+ on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- Podman 5.8.2 installed on the identity and Keycloak hosts, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution:
   - `ipa.stratus.local`
   - `keycloak.stratus.local`
@@ -33,16 +37,16 @@ This is a migration and hardening increment, not a greenfield install. The exist
   - `atlas.stratus.local`
   - `ranger.stratus.local`
 - FreeIPA manages the `stratus.local` DNS zone for lab identity hosts, or delegates for the relevant service names are configured
-- A production-like deployment should use persistent volumes and backed-up PostgreSQL databases for Keycloak and governance services
+- The production profile uses persistent identity state and backed-up external PostgreSQL services for Keycloak and governance components
 - Flink is not part of the Increment 7 verification path unless a Flink increment has already been implemented
 
 ### Reference Documentation Audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
-The current FreeIPA documentation page points users toward Red Hat Enterprise Linux Identity Management documentation for maintained operational guidance. Keycloak's current documentation line is 26.6.4 and its container guide recommends optimized images, HTTPS in production mode, health and metrics endpoints, and PostgreSQL for production-like deployments. Trino 482 documentation confirms that OAuth2 client authentication is configured on the coordinator, requires TLS and a shared secret, and does not require the same client-auth changes on workers.
+The current FreeIPA documentation page points users toward Red Hat Enterprise Linux Identity Management documentation for maintained operational guidance. Keycloak's current documentation line is 26.6.4 and its supported-configuration matrix includes PostgreSQL 18.x. Stratus pins PostgreSQL 18.4 for Keycloak, uses an optimized Keycloak image, enables HTTPS in production mode, and exposes health/metrics only on the management network. Trino 482 documentation confirms that OAuth2 client authentication is configured on the coordinator, requires TLS and a shared secret, and does not require the same client-auth changes on workers.
 
-Airflow is standardized on Airflow 3.2.2 in Increment 4. Increment 7 hardens that Airflow 3.x topology using the Airflow 3 public API and auth-manager model rather than the retired Airflow 2.x webserver/Flask AppBuilder assumption.
+Airflow is standardized on Airflow 3.3.0 in Increment 4. Increment 7 hardens that Airflow 3.x topology using the Airflow 3 public API and auth-manager model rather than the retired Airflow 2.x webserver/Flask AppBuilder assumption.
 
 ---
 
@@ -80,6 +84,19 @@ FreeIPA LDAP and groups
         ├── Atlas LDAP authentication
         └── Linux hosts via SSSD
 ```
+
+### Production profile overlay
+
+| Service | Production topology and state |
+|---|---|
+| FreeIPA | at least two replicas on separate failure domains, including the required CA/DNS roles; time synchronization, DNS delegation, replication monitoring, encrypted backups, and a tested server/CA restore |
+| Keycloak | at least two optimized Keycloak 26.6.4 instances behind the approved HTTPS load balancer, using the supported cluster transport and cache configuration for the environment |
+| Keycloak database | external PostgreSQL 18.4 over TLS with a scoped role, monitored storage, backups, and restore/upgrade rehearsal |
+| Keycloak cache | use the release-supported embedded cluster cache for the initial single-site production profile; introduce external Infinispan 16.0.8 only when the approved HA or multi-site design requires it |
+| Certificates | FreeIPA-issued service certificates with automated inventory, expiry alerting, protected private keys, documented reload/restart behavior, and renewal tests |
+| Secrets | bootstrap admin credentials are retired; OIDC client secrets, database credentials, RGW keys, keytabs, and truststore passwords use approved injection and rotation workflows |
+
+The load balancer exposes only Keycloak HTTPS. Keycloak management port `9000`, FreeIPA replication, LDAP, Kerberos, DNS, PostgreSQL, and cache traffic remain on their approved internal networks. Production acceptance exercises loss of one FreeIPA replica, one Keycloak instance, database restoration, OIDC signing-key rotation, and certificate renewal without changing stable issuers or service identities.
 
 The hardened authentication model is:
 
@@ -193,7 +210,7 @@ Existing service ports from earlier increments remain in place, but their TLS an
 |---|---|
 | Ceph RGW | TLS chain trusted; encryption-at-rest enabled on sensitive buckets |
 | Polaris | HTTPS with trusted certificate; OIDC integration where supported |
-| Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.2.2 |
+| Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.3.0 |
 | Trino | HTTPS coordinator endpoint; Keycloak/OIDC client auth |
 | Atlas | HTTPS and FreeIPA LDAP authentication |
 | Ranger | HTTPS, FreeIPA LDAP usersync, group-based policies |
@@ -212,7 +229,7 @@ Keycloak runs as a pinned container image with PostgreSQL:
 | MIT Kerberos client packages | Kerberos client tools on platform hosts |
 | SSSD packages | Linux host integration with FreeIPA |
 | `quay.io/keycloak/keycloak:26.6.4` | Keycloak OIDC broker |
-| `docker.io/library/postgres:16` | Keycloak metadata database |
+| `docker.io/library/postgres:18.4` | Keycloak metadata database; latest patch in the newest supported PostgreSQL major |
 
 Do not use `latest` tags. If another Keycloak release is approved, update this document and the verification suite expectations together.
 
@@ -378,7 +395,7 @@ podman run -d \
   -e POSTGRES_DB=keycloak \
   -v /data/keycloak/postgres:/var/lib/postgresql/data:z \
   --restart unless-stopped \
-  docker.io/library/postgres:16
+  docker.io/library/postgres:18.4
 ```
 
 ### Build-system publication of the optimized Keycloak image
@@ -597,7 +614,7 @@ The user identity used for authorization is the authenticated Trino user. The Ce
 
 ### Airflow authentication
 
-Airflow hardening targets the Airflow 3.2.2 topology from Increment 4. Use the Airflow 3 public API and selected auth-manager configuration, with Keycloak as the OIDC identity provider. If a reverse proxy is used in front of Airflow, it must preserve the same authentication and authorization contracts and must not create a second identity source.
+Airflow hardening targets the Airflow 3.3.0 topology from Increment 4. Use the Airflow 3 public API and selected auth-manager configuration, with Keycloak as the OIDC identity provider. If a reverse proxy is used in front of Airflow, it must preserve the same authentication and authorization contracts and must not create a second identity source.
 
 Verification must prove:
 
@@ -610,7 +627,7 @@ Airflow protocol flow:
 
 ```text
 Operator browser ──HTTPS/OIDC──► Airflow UI
-Airflow scheduler ──local metadata DB protocol──► Airflow PostgreSQL
+Airflow services ──TLS PostgreSQL protocol──► Airflow PostgreSQL
 Airflow task ──spark-submit / cluster protocol──► Spark
 Spark ──HTTPS REST──► Polaris
 Spark ──HTTPS S3 API──► Ceph RGW
@@ -1024,11 +1041,18 @@ If Airflow or Polaris authentication changes require updated test clients, updat
 
 ---
 
-## 16. Completion Gate
+## 16. Completion Gates
 
-Increment 7 is complete when all of the following are true:
+### Developer gate
+
+The developer gate proves repeatable realm/bootstrap automation, local certificate issuance, OIDC/LDAPS flows, and the full earlier-increment security regression against non-production identities. It permits disposable identity state and cannot mark Increment 7 accepted.
+
+### Production gate
+
+Increment 7 is accepted only when all of the following are true:
 
 - [ ] FreeIPA server is deployed, backed up, and reachable at `ipa.stratus.local`
+- [ ] FreeIPA replica/CA topology survives the declared server failure and replication health is monitored
 - [ ] DNS names used by clients resolve consistently and match certificate SANs
 - [ ] Kerberos realm `STRATUS.LOCAL` is operational
 - [ ] FreeIPA LDAP and LDAPS are operational
@@ -1038,6 +1062,7 @@ Increment 7 is complete when all of the following are true:
 - [ ] Platform users and service principals exist in FreeIPA
 - [ ] Required keytabs exist only on intended hosts with owner-only permissions
 - [ ] Keycloak is deployed with PostgreSQL and HTTPS
+- [ ] at least two Keycloak instances pass load-balancer failover, session, token issuance, and signing-key rotation tests against external PostgreSQL 18.4
 - [ ] Keycloak realm `stratus` exists
 - [ ] Keycloak federates users and groups from FreeIPA LDAP
 - [ ] Keycloak tokens include the group claims needed by platform services
@@ -1047,7 +1072,7 @@ Increment 7 is complete when all of the following are true:
 - [ ] Ranger policies are migrated to FreeIPA groups
 - [ ] Atlas authenticates against FreeIPA LDAP
 - [ ] Trino coordinator uses HTTPS and Keycloak/OIDC for client access
-- [ ] Airflow UI/API authentication is hardened for Airflow 3.2.2 and Keycloak
+- [ ] Airflow UI/API authentication is hardened for Airflow 3.3.0 and Keycloak
 - [ ] Polaris rejects unauthenticated catalog access
 - [ ] Polaris, Trino, Spark, and Airflow still resolve Iceberg tables only through Polaris
 - [ ] FreeIPA-issued certificates replace lab self-signed certificates for platform endpoints
@@ -1055,9 +1080,12 @@ Increment 7 is complete when all of the following are true:
 - [ ] `stratus-gold` and `stratus-platform` have server-side encryption enabled
 - [ ] Bootstrap local users from earlier increments are disabled or removed from normal operation
 - [ ] `IdentitySecurityVerificationTest` passes
+- [ ] FreeIPA and Keycloak backup/restore, CA recovery, signing-key rotation, service-certificate renewal, and identity-service outage drills have current evidence.
+- [ ] Every service in the certificate inventory has a named owner, issuing procedure, deployed key/trust format, renewal threshold, reload/restart behavior, and expiry alert.
+- [ ] The Increment 1-6 functional suites pass after all developer identities, local CAs, plaintext endpoints, and bootstrap credentials are removed from the production configuration.
 - [ ] Increment 4, 5, and 6 verification behavior still passes after hardening
 
-When all gates are checked, the Phase 1 batch, query, governance, and identity foundation is complete.
+The developer gate supports regression work. Only the production gate completes the Phase 1 batch, query, governance, and identity foundation and permits operational-readiness signoff.
 
 ---
 
@@ -1139,7 +1167,9 @@ When all gates are checked, the Phase 1 batch, query, governance, and identity f
 - Red Hat Identity Management documentation: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_idm_users_groups_hosts_and_access_control_rules/
 - Keycloak documentation: https://www.keycloak.org/documentation
 - Keycloak server container guide: https://www.keycloak.org/server/containers
+- Keycloak supported configurations: https://www.keycloak.org/server/supported-configurations
 - Keycloak server administration guide: https://www.keycloak.org/docs/latest/server_admin/
+- PostgreSQL 18 release notes: https://www.postgresql.org/docs/18/release.html
 - Trino OAuth2 authentication: https://trino.io/docs/current/security/oauth2.html
 - Trino Kerberos authentication: https://trino.io/docs/current/security/kerberos.html
 - Trino secure internal communication: https://trino.io/docs/current/security/internal-communication.html

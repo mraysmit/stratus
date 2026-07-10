@@ -1,5 +1,7 @@
 # Stratus Implementation Plan - Phase 3
 
+> **Status: planning baseline only.** Increments 14-19 are scoped here but their implementation documents have not been written or authorized. This plan is not an executable runbook, and no Phase 3 increment should begin until its dedicated document applies the Stratus developer/production profile contract and passes architecture review.
+
 ## 1. Purpose
 
 This document defines how Stratus Phase 3 is built and verified.
@@ -51,7 +53,7 @@ The ordering is intentional. Data products and marts come before acceleration be
 
 ## 4. Reference Documentation Audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
 Before implementation, review current upstream and vendor documentation for the selected serving stack and record the approved version matrix in the Phase 3 runbook.
 

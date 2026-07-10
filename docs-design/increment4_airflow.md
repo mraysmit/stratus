@@ -11,13 +11,15 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 - Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
 - Increment 3 complete — Spark cluster running, Spark jobs implemented, all Increment 3 gate tests passing
 
+**Track rule:** Developer work requires the developer gates of Increments 1-3. Increment 4 production acceptance requires their production gates, except final security-dependent checks close after Increment 7 as defined by the Phase 1 plan.
+
 ---
 
 ## 2. Assumptions and Prerequisites
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 4.x installed on the Airflow host
-- JDK 25 and Maven 3.9+ on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
+- Podman 5.8.2 installed on the Airflow host, or a newer approved stable patch after regression testing
+- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
 - DNS resolution: `airflow.stratus.local` resolves to the Airflow host
 - Airflow host can reach:
   - Spark master on port 7077
@@ -30,9 +32,13 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 
 ### Reference documentation audit
 
-Reference baseline: 2026-07-05.
+Reference baseline: 2026-07-10.
 
-The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.2.2 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. The custom image also targets the current stable Spark 4.1 client and current Airflow provider lines used by this design. This avoids carrying an obsolete Airflow 2.x webserver topology or stale Spark 3.x client into the design.
+The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.3.0 with Python 3.14 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. The Spark 6.2.0 and Amazon 9.31.0 providers support this Python line. The custom image also targets the current stable Spark 4.1 client. This avoids carrying an obsolete Airflow 2.x webserver topology, stale Spark 3.x client, or unnecessarily old Python runtime into the design.
+
+Airflow 3.3.0 is tested with PostgreSQL 13-17. Stratus therefore pins PostgreSQL 17.10, the latest patch in the newest supported major, rather than using PostgreSQL 18 before Airflow adds it to the tested support matrix.
+
+The single-host Podman commands are the developer profile. Production uses the same DAGs, providers, images, public API, and verification suite, but requires an external durable metadata database, durable remote logs, managed secrets, trusted HTTPS/OIDC, scheduler and DAG-processor availability appropriate to the selected executor, backup/restore, and failure drills. Local volumes, bootstrap credentials, and a one-host service split cannot pass the production gate.
 
 Airflow's official Docker Compose quickstart is not a production deployment recommendation. The Podman commands here are a lab topology and must be hardened before production use.
 
@@ -72,6 +78,31 @@ Spark workers → Polaris REST catalog → Ceph RGW Iceberg tables
 
 Airflow is not a compute engine. DAG tasks submit Spark jobs, run lightweight control-plane checks, evaluate promotion gates, and schedule maintenance. Heavy transformations remain in Spark.
 
+### Production profile overlay
+
+| Concern | Production requirement |
+|---|---|
+| Metadata state | external PostgreSQL service over TLS with a scoped Airflow database role, monitored storage, backups, point-in-time recovery where required, and a tested restore before upgrade |
+| Service placement | API server, DAG processor, scheduler, and triggerer run as separately managed services; each has a documented restart policy and the selected executor has an accepted availability/RTO design |
+| Executor | retain `LocalExecutor` for the initial control-plane workload only when capacity and host-recovery evidence support it; move to a distributed executor through a separate dependency and capacity decision, not an undocumented configuration toggle |
+| DAG delivery | immutable DAG revision is delivered by the build/release process; production services do not mount a developer working tree |
+| Task logs | remote logs are written to `s3://stratus-platform/airflow/logs/` through the Ceph RGW connection and remain readable after loss of an Airflow host |
+| User/API ingress | trusted HTTPS with Keycloak-backed Airflow 3 auth-manager integration; internal port `8088` is not directly exposed to users |
+| Secrets | connections, variables, database credentials, OIDC secrets, Ceph RGW credentials, and Spark submission credentials use the approved secret backend/injection path and rotation procedure |
+| Downstream protocols | `spark-submit` to Spark's internal master endpoint, Iceberg REST over HTTPS to Polaris, and S3-compatible HTTPS to Ceph RGW; trust validation is never disabled |
+
+The production environment records at least these effective settings, with secret values omitted from evidence:
+
+```bash
+AIRFLOW__CORE__EXECUTOR=LocalExecutor
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=<TLS PostgreSQL URI from secret injection>
+AIRFLOW__LOGGING__REMOTE_LOGGING=True
+AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER=s3://stratus-platform/airflow/logs
+AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID=ceph_rgw_logs
+```
+
+Increment 7 supplies the production certificate and OIDC configuration. The Increment 4 production gate closes only after metadata restore, remote-log continuity, authenticated API access, scheduler/DAG-processor restart, and the unchanged DAG verification suite pass on this overlay.
+
 ---
 
 ## 4. Ports
@@ -103,7 +134,11 @@ The official Airflow image is used as the base. A custom image adds Java, Spark 
 Create `docker/airflow/Dockerfile` in the Stratus repository:
 
 ```dockerfile
-FROM apache/airflow:3.2.2-python3.11
+ARG TEMURIN_21_IMAGE=eclipse-temurin:21-jre
+ARG AIRFLOW_BASE_IMAGE=apache/airflow:3.3.0-python3.14
+
+FROM ${TEMURIN_21_IMAGE} AS java21
+FROM ${AIRFLOW_BASE_IMAGE}
 
 USER root
 
@@ -111,8 +146,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
        ca-certificates \
-       openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=java21 /opt/java/openjdk /opt/java/openjdk
 
 # The build system downloads the pinned Spark distribution, verifies its
 # recorded checksum, and places it in the build context before this build.
@@ -123,17 +159,17 @@ RUN mkdir -p /opt/spark \
 
 ENV SPARK_HOME=/opt/spark
 ENV PATH="${SPARK_HOME}/bin:${PATH}"
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV JAVA_HOME=/opt/java/openjdk
 
 USER airflow
 
 RUN pip install --no-cache-dir \
-    apache-airflow-providers-apache-spark==6.2.0 \
+    "apache-airflow-providers-apache-spark[pyspark]==6.2.0" \
     apache-airflow-providers-amazon==9.31.0 \
     boto3==1.43.40
 ```
 
-The Airflow image carries Java 21 only as the Spark 4.1 client runtime because Spark 4.1 supports Java 17/21 and not Java 25. Stratus application and verifier builds use JDK 25; Spark-submitted job artifacts use the compatible `--release 17` target defined by Increment 3.
+The Airflow image carries Java 21 only as the Spark 4.1 client runtime because Spark 4.1 supports Java 17/21 and not Java 25. Java is copied from a Temurin JRE image rather than assumed to exist in the Airflow base distribution's package repository. The Spark provider's `pyspark` extra is explicit because provider 6.x no longer includes it by default for `spark-submit` style connections. The lock must resolve PySpark/Spark client 4.1.2 consistently with the copied Spark distribution. Stratus application and verifier builds use JDK 25; Spark-submitted job artifacts use the compatible `--release 17` target defined by Increment 3.
 
 The build system resolves the Python packages from the approved package repository using a locked, hash-verified dependency set. The abbreviated `pip install` fragment above shows the required contents, not permission to resolve mutable dependencies on a runtime host.
 
@@ -143,8 +179,13 @@ The following container build is a build-pipeline step. It runs on an approved b
 
 ```bash
 cd docker/airflow
-podman build -t stratus/airflow:3.2.2 .
+podman build \
+  --build-arg 'AIRFLOW_BASE_IMAGE=apache/airflow:3.3.0-python3.14@sha256:<approved-digest>' \
+  --build-arg 'TEMURIN_21_IMAGE=eclipse-temurin:21-jre@sha256:<approved-digest>' \
+  -t stratus/airflow:3.3.0 .
 ```
+
+The build pipeline resolves the current Java 21 patch image, verifies both base-image digests, and records them in the SBOM/version matrix. Floating defaults are acceptable only for local Dockerfile parsing; release builds must pass immutable digest-qualified arguments.
 
 ---
 
@@ -209,9 +250,9 @@ STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 STRATUS_POLARIS_CLIENT_ID=svc-spark
 STRATUS_POLARIS_CLIENT_SECRET=<svc-spark Polaris client secret>
 STRATUS_POLARIS_CATALOG=stratus
-STRATUS_S3_ENDPOINT=https://object-store.stratus.local
-STRATUS_S3_ACCESS_KEY=svc-spark
-STRATUS_S3_SECRET_KEY=<svc-spark Ceph RGW secret>
+CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+CEPH_RGW_ACCESS_KEY=svc-spark
+CEPH_RGW_SECRET_KEY=<svc-spark Ceph RGW secret>
 
 # Landing-zone detection account
 STRATUS_AIRFLOW_S3_ACCESS_KEY=svc-airflow
@@ -262,7 +303,7 @@ podman run -d \
   -e POSTGRES_DB=airflow \
   -v /data/airflow/postgres:/var/lib/postgresql/data:z \
   --restart unless-stopped \
-  docker.io/library/postgres:16
+  docker.io/library/postgres:17.10
 ```
 
 ### Initialise Airflow metadata
@@ -278,7 +319,7 @@ podman run --rm \
   -v /data/airflow/logs:/opt/airflow/logs:z \
   -v /data/airflow/plugins:/opt/airflow/plugins:z \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  stratus/airflow:3.2.2 \
+  stratus/airflow:3.3.0 \
   bash -c 'airflow db migrate && airflow users create \
     --username "$_AIRFLOW_WWW_USER_USERNAME" \
     --password "$_AIRFLOW_WWW_USER_PASSWORD" \
@@ -302,7 +343,7 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:3.2.2 \
+  stratus/airflow:3.3.0 \
   airflow api-server --port 8088
 ```
 
@@ -320,7 +361,7 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:3.2.2 \
+  stratus/airflow:3.3.0 \
   airflow dag-processor
 ```
 
@@ -338,7 +379,7 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:3.2.2 \
+  stratus/airflow:3.3.0 \
   airflow scheduler
 ```
 
@@ -356,7 +397,7 @@ podman run -d \
   -v /data/airflow/jars:/opt/airflow/jars:ro,z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  stratus/airflow:3.2.2 \
+  stratus/airflow:3.3.0 \
   airflow triggerer
 ```
 
@@ -415,7 +456,7 @@ podman exec airflow-scheduler airflow variables set stratus_spark_master "$STRAT
 podman exec airflow-scheduler airflow variables set stratus_spark_app_jar "$STRATUS_SPARK_APP_JAR"
 podman exec airflow-scheduler airflow variables set stratus_polaris_uri "$STRATUS_POLARIS_URI"
 podman exec airflow-scheduler airflow variables set stratus_polaris_catalog "$STRATUS_POLARIS_CATALOG"
-podman exec airflow-scheduler airflow variables set stratus_s3_endpoint "$STRATUS_S3_ENDPOINT"
+podman exec airflow-scheduler airflow variables set ceph_rgw_endpoint "$CEPH_RGW_ENDPOINT"
 podman exec airflow-scheduler airflow variables set stratus_landing_bucket "$STRATUS_LANDING_BUCKET"
 ```
 
@@ -426,10 +467,10 @@ podman exec airflow-scheduler airflow connections add stratus_landing \
   --conn-type aws \
   --conn-login "$STRATUS_AIRFLOW_S3_ACCESS_KEY" \
   --conn-password "$STRATUS_AIRFLOW_S3_SECRET_KEY" \
-  --conn-extra "{\"endpoint_url\": \"${STRATUS_S3_ENDPOINT}\", \"verify\": \"/etc/stratus/pki/stratus-ca.crt\"}"
+  --conn-extra "{\"endpoint_url\": \"${CEPH_RGW_ENDPOINT}\", \"verify\": \"/etc/stratus/pki/stratus-ca.crt\"}"
 ```
 
-The CA bundle must be mounted read-only into the Airflow containers and must validate the certificate presented by `STRATUS_S3_ENDPOINT`. Do not disable certificate verification, including during routine lab verification.
+The CA bundle must be mounted read-only into the Airflow containers and must validate the certificate presented by `CEPH_RGW_ENDPOINT`. Do not disable certificate verification, including during routine lab verification. Airflow's connection type and provider package retain the upstream name `aws`; that is the official S3-compatible provider API, not an AWS infrastructure dependency.
 
 ---
 
@@ -470,14 +511,14 @@ from airflow.models import Variable
 def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
     catalog = Variable.get("stratus_polaris_catalog", default_var="stratus")
     polaris_uri = Variable.get("stratus_polaris_uri")
-    s3_endpoint = Variable.get("stratus_s3_endpoint")
+    s3_endpoint = Variable.get("ceph_rgw_endpoint")
     master = Variable.get("stratus_spark_master")
     app_jar = Variable.get("stratus_spark_app_jar")
 
     client_id = os.environ["STRATUS_POLARIS_CLIENT_ID"]
     client_secret = os.environ["STRATUS_POLARIS_CLIENT_SECRET"]
-    access_key = os.environ["STRATUS_S3_ACCESS_KEY"]
-    secret_key = os.environ["STRATUS_S3_SECRET_KEY"]
+    access_key = os.environ["CEPH_RGW_ACCESS_KEY"]
+    secret_key = os.environ["CEPH_RGW_SECRET_KEY"]
 
     return [
         "spark-submit",
@@ -863,9 +904,9 @@ The Spark and Iceberg dependencies from Increment 3 remain in place for table as
 | `STRATUS_POLARIS_CLIENT_ID` | `svc-spark` |
 | `STRATUS_POLARIS_CLIENT_SECRET` | svc-spark client secret |
 | `STRATUS_POLARIS_CATALOG` | `stratus` |
-| `STRATUS_S3_ENDPOINT` | Ceph RGW S3 endpoint |
-| `STRATUS_S3_ACCESS_KEY` | `svc-spark` access key |
-| `STRATUS_S3_SECRET_KEY` | `svc-spark` secret key |
+| `CEPH_RGW_ENDPOINT` | Ceph RGW S3 endpoint |
+| `CEPH_RGW_ACCESS_KEY` | `svc-spark` access key |
+| `CEPH_RGW_SECRET_KEY` | `svc-spark` secret key |
 
 ### Shared Airflow REST client
 
@@ -1090,9 +1131,9 @@ export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
 export STRATUS_POLARIS_CLIENT_ID=svc-spark
 export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
 export STRATUS_POLARIS_CATALOG=stratus
-export STRATUS_S3_ENDPOINT=https://object-store.stratus.local
-export STRATUS_S3_ACCESS_KEY=svc-spark
-export STRATUS_S3_SECRET_KEY=<svc-spark secret>
+export CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+export CEPH_RGW_ACCESS_KEY=svc-spark
+export CEPH_RGW_SECRET_KEY=<svc-spark secret>
 
 export STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE=registry.stratus.local/stratus/airflow-orchestration-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/airflow-orchestration.env \
@@ -1163,16 +1204,23 @@ After the maintenance DAG runs, inspect the target tables:
 
 ---
 
-## 15. Completion Gate
+## 15. Completion Gates
 
-Increment 4 is complete when all of the following are true:
+### Developer gate
+
+- [ ] Single-host Airflow 3.3.0 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
+- [ ] Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
+
+### Production gate
+
+Increment 4 is accepted when all of the following are true:
 
 - [ ] PostgreSQL metadata database running and managed by systemd on `airflow.stratus.local`
 - [ ] Airflow API server running and managed by systemd on `airflow.stratus.local`
 - [ ] Airflow DAG processor running and managed by systemd
 - [ ] Airflow scheduler running and managed by systemd on `airflow.stratus.local`
 - [ ] Airflow triggerer running and managed by systemd
-- [ ] Airflow UI and REST API reachable on port 8088
+- [ ] Airflow UI and public REST API are reachable through trusted HTTPS/OIDC; port 8088, if retained internally, is not an unauthenticated production ingress
 - [ ] Airflow DAG import check reports no errors
 - [ ] All four DAGs exist: `stratus_landing_to_bronze`, `stratus_bronze_to_silver`, `stratus_silver_to_gold`, `stratus_table_maintenance`
 - [ ] Airflow can submit Spark jobs to `spark-master.stratus.local:7077`
@@ -1184,8 +1232,9 @@ Increment 4 is complete when all of the following are true:
 - [ ] Failure alerts fire when a task exhausts retries
 - [ ] `AirflowOrchestrationVerificationTest` passes against the live platform
 - [ ] Airflow task logs include run IDs, target tables, Spark application IDs, and quality gate decisions
+- [ ] external metadata database and remote logs restore successfully; managed secrets and scheduler/DAG-processor availability meet the approved RTO/RPO design
 
-When all gates are checked, Increment 5 (Trino interactive query) can begin.
+The developer gate may unblock Increment 5 engineering. Only the production gate marks Increment 4 accepted in the Phase 1 tracker.
 
 ---
 
@@ -1275,10 +1324,13 @@ Common causes:
 ## 17. References
 
 - Apache Airflow documentation: https://airflow.apache.org/docs/
+- Airflow 3.3 prerequisites and supported databases/Python: https://airflow.apache.org/docs/apache-airflow/stable/installation/prerequisites.html
 - Airflow Docker deployment guide: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html
 - Airflow REST API: https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html
 - Airflow Spark provider: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/
+- Airflow Spark provider changelog: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/changelog.html
 - Airflow Amazon provider: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/
+- PostgreSQL 17 release notes: https://www.postgresql.org/docs/17/release.html
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
 - Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)

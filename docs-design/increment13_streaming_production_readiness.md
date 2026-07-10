@@ -8,12 +8,14 @@ Increment 13 does not introduce another streaming component. It verifies that In
 
 Phase 2 is not complete until this readiness gate passes.
 
+This document accepts only the production profile. Developer-profile results are retained as regression evidence, but reduced replicas, local-only volumes, `file://` Flink state, plaintext Connect/Flink control APIs, generated identities, local CA certificates, and disposable source or governance dependencies are automatic failures here.
+
 **Prerequisites:**
-- Increment 8 complete - Kafka event backbone
-- Increment 9 complete - Kafka Connect and Debezium CDC
-- Increment 10 complete - Flink streaming compute
-- Increment 11 complete - streaming writes to Iceberg
-- Increment 12 complete - Atlas event bus and lineage automation
+- Increment 8 production gate complete - Kafka event backbone
+- Increment 9 production gate complete - Kafka Connect and Debezium CDC
+- Increment 10 production gate complete - Flink streaming compute
+- Increment 11 production gate complete - streaming writes to Iceberg
+- Increment 12 production gate complete - Atlas event bus and lineage automation
 - Phase 1 operational readiness evidence is still valid
 
 ---
@@ -54,6 +56,9 @@ The Phase 2 evidence bundle must include:
 - dashboard and alert inventory
 - runbook index
 - drill results and open risk register
+- a promotion manifest showing the production replacement and verification evidence for every developer shortcut used in Increments 8-12
+
+The version matrix must pin at least Kafka 4.3.1, Debezium 3.6.0.Final, Flink 2.1.3, Flink Kafka Connector 5.0.0-2.1, Iceberg 1.11.0, Polaris 1.5.0, Atlas 2.5.0, Ranger 2.8.0, and each deployed image digest, unless a newer compatible set has passed the same suites and is recorded by architecture decision.
 
 ---
 
@@ -189,16 +194,25 @@ Kafka is not backed up like a database in this plan. The readiness posture is to
 
 ---
 
-## 8. Phase 2 Completion Gate
+## 8. Completion Gates
+
+### Developer evidence
+
+Increment 13 has no independent developer acceptance gate. Developer-profile results from Increments 8 through 12 remain useful regression evidence, but they cannot satisfy or weaken any readiness criterion below.
+
+### Production gate
 
 Phase 2 is production-ready when:
 
-- [ ] Increment 8 through Increment 12 completion gates are complete
+- [ ] Increment 8 through Increment 12 production gates are complete; developer gates alone are insufficient
+- [ ] the promotion manifest has no unresolved developer-only topology, state, transport, identity, certificate, or secret setting
 - [ ] all Phase 2 verification suites pass
 - [ ] replay drill rebuilds the verification streaming table
 - [ ] broker failure drill passes
 - [ ] connector failure and source outage drills pass
 - [ ] Flink savepoint, restore, and checkpoint failure drills pass
+- [ ] Flink checkpoints/savepoints use Ceph RGW durable shared paths and no production state path uses `file://`
+- [ ] Kafka Connect and Flink operator APIs use authenticated HTTPS; unauthenticated and untrusted clients are rejected
 - [ ] schema change drill passes for compatible and incompatible changes
 - [ ] streaming table freshness is observable through Trino and dashboards
 - [ ] Atlas lineage and classifications are current for streaming tables
