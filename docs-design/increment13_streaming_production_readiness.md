@@ -194,7 +194,22 @@ Kafka is not backed up like a database in this plan. The readiness posture is to
 
 ---
 
-## 8. Completion Gates
+## 8. Implementation Task Track
+
+Increment 13 has no developer acceptance gate. Developer results are indexed by `P2-13.E-D` as regression inputs only. Production drill evidence belongs under `evidence/phase2/increment13/<task-id>/`.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-13.E-D` | Developer evidence | Freeze developer regression reports and promotion manifests from Increments 8-12; no production claim is made. | QA owner | P2-8 through P2-12 developer gates | developer evidence index | completeness/hash validation | developer evidence | Platform owner | Missing upstream report | Not started |
+| `P2-13.S1` | Production | Freeze versions, topology, identities, risks, exceptions, runbooks, SLOs, and production evidence inventory. | Platform owner | P2-8 through P2-12 production gates | readiness manifest | configuration/evidence review | P1-P3 | Architecture owner | Upstream gate open | Not started |
+| `P2-13.R1` | Production | Execute Kafka recovery and Connect/Debezium restart/source-outage drills. | Operations owner | `P2-13.S1` | drill reports | loss/duplicate/RTO/RPO and alert evidence | P4-P6 | Data owner | Maintenance window | Not started |
+| `P2-13.R2` | Production | Execute Flink savepoint/restore/upgrade and Ceph-state outage drills. | Operations owner | `P2-13.S1` | drill reports | state consistency, RTO/RPO, rollback | P7-P8 | Data-engineering owner | State compatibility | Not started |
+| `P2-13.R3` | Production | Execute Iceberg replay/rebuild/reconciliation and Atlas lineage reconciliation drills. | Data/governance owners | `P2-13.R1`, `P2-13.R2` | drill reports | row/snapshot/lineage reconciliation | P9-P11 | Data owner | Destructive rebuild scope | Not started |
+| `P2-13.R4` | Production | Exercise security rotation/expiry, alerts, backup/restore, capacity, and operator runbooks. | Security/operations owners | `P2-13.R3` | drill and capacity reports | negative tests, alerts, restore, load results | P10-P14 | Platform owner | Cross-team scheduling | Not started |
+| `P2-13.V1` | Production | Close defects, rerun failed drills, validate evidence links, and record residual-risk decisions. | QA owner | `P2-13.R4` | readiness evidence index | zero unexplained failures; accepted risks | P12-P15 | Architecture owner | Unaccepted high risk | Not started |
+| `P2-13.G-P` | Production | Obtain platform, operations, security, governance, and data signoff; done when P1-P16 are accepted. | Platform owner | `P2-13.V1` | Phase 2 acceptance record | signed gate/evidence matrix | P1-P16 | Steering group | Any open blocking defect | Not started |
+
+## 9. Completion Gates
 
 ### Developer evidence
 
@@ -204,28 +219,28 @@ Increment 13 has no independent developer acceptance gate. Developer-profile res
 
 Phase 2 is production-ready when:
 
-- [ ] Increment 8 through Increment 12 production gates are complete; developer gates alone are insufficient
-- [ ] the promotion manifest has no unresolved developer-only topology, state, transport, identity, certificate, or secret setting
-- [ ] all Phase 2 verification suites pass
-- [ ] replay drill rebuilds the verification streaming table
-- [ ] broker failure drill passes
-- [ ] connector failure and source outage drills pass
-- [ ] Flink savepoint, restore, and checkpoint failure drills pass
-- [ ] Flink checkpoints/savepoints use Ceph RGW durable shared paths and no production state path uses `file://`
-- [ ] Kafka Connect and Flink operator APIs use authenticated HTTPS; unauthenticated and untrusted clients are rejected
-- [ ] schema change drill passes for compatible and incompatible changes
-- [ ] streaming table freshness is observable through Trino and dashboards
-- [ ] Atlas lineage and classifications are current for streaming tables
-- [ ] Ranger allow/deny behavior works for streaming tables and is audited
-- [ ] runbooks have owners and are executable by operators
-- [ ] open risks have owner, severity, mitigation, and acceptance
-- [ ] platform operations, data engineering, security, and governance sign off
+- [ ] **P1** - Increment 8 through Increment 12 production gates are complete; developer gates alone are insufficient
+- [ ] **P2** - the promotion manifest has no unresolved developer-only topology, state, transport, identity, certificate, or secret setting
+- [ ] **P3** - all Phase 2 verification suites pass
+- [ ] **P4** - replay drill rebuilds the verification streaming table
+- [ ] **P5** - broker failure drill passes
+- [ ] **P6** - connector failure and source outage drills pass
+- [ ] **P7** - Flink savepoint, restore, and checkpoint failure drills pass
+- [ ] **P8** - Flink checkpoints/savepoints use Ceph RGW durable shared paths and no production state path uses `file://`
+- [ ] **P9** - Kafka Connect and Flink operator APIs use authenticated HTTPS; unauthenticated and untrusted clients are rejected
+- [ ] **P10** - schema change drill passes for compatible and incompatible changes
+- [ ] **P11** - streaming table freshness is observable through Trino and dashboards
+- [ ] **P12** - Atlas lineage and classifications are current for streaming tables
+- [ ] **P13** - Ranger allow/deny behavior works for streaming tables and is audited
+- [ ] **P14** - runbooks have owners and are executable by operators
+- [ ] **P15** - open risks have owner, severity, mitigation, and acceptance
+- [ ] **P16** - platform operations, data engineering, security, and governance sign off
 
 After this gate passes, controlled production streaming sources may onboard, and Phase 3 data product/query acceleration planning can proceed.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 ### Replay does not match expected table state
 
@@ -257,7 +272,7 @@ After this gate passes, controlled production streaming sources may onboard, and
 
 ---
 
-## 10. References
+## 11. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)

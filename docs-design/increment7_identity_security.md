@@ -1041,7 +1041,26 @@ If Airflow or Polaris authentication changes require updated test clients, updat
 
 ---
 
-## 16. Completion Gates
+## 16. Implementation Task Track
+
+These tasks execute `P1-7.1` through `P1-7.6`. Because this increment changes the trust assumptions of Increments 1-6, each migration task must record prechecks, rollback trigger, affected gates, and post-migration regression evidence under `evidence/phase1/increment7/<task-id>/`.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-7.1-S1` | `P1-7.1` | Shared | Lock identity topology, realm/domain naming, trust boundaries, ports, RTO/RPO, and migration order. | Security architect | P1-6 developer gate | identity ADR and inventory | design review and dependency readiness | developer gate, P1-P3 | Platform owner | Naming/trust change | Not started |
+| `P1-7.1-D1` | `P1-7.1` | Developer | Deploy disposable FreeIPA/CA and Keycloak integration used to prove clients and migration automation. | Security owner | `P1-7.1-S1` | `deploy/dev/identity/` | lifecycle, user/service/token/cert smoke | developer gate | Platform owner | Local DNS/time | Not started |
+| `P1-7.1-P1` | `P1-7.1` | Production | Deploy replicated FreeIPA/Dogtag with backup, restore, monitoring, and service identities. | Security/operations owners | `P1-7.1-D1` | `deploy/prod/freeipa/`; runbooks | replica loss, CA issuance, backup/restore | P1-P7 | Security owner | DNS/NTP/CA outage risk | Not started |
+| `P1-7.2-P1` | `P1-7.2` | Production | Deploy redundant Keycloak and external PostgreSQL, federation, realm, clients, HA/cache posture, backup and restore. | Security owner | `P1-7.1-P1` | `deploy/prod/keycloak/`; realm exports | failover, token claims, DB restore | P4-P10 | Operations owner | Database/cache design | Not started |
+| `P1-7.3-P1` | `P1-7.3` | Production | Migrate Ceph/Polaris service identities and certificates with precheck, rollback, rotation, and Increment 1-2 regression. | Security owner | `P1-7.2-P1` | service migration record | positive/negative auth, TLS, gate reruns | P11-P15 | Platform owner | Storage/catalog outage | Not started |
+| `P1-7.3-P2` | `P1-7.3` | Production | Migrate Spark/Airflow identities, secrets, and certificates; rerun submission, pipeline, quality, and recovery gates. | Security owner | `P1-7.3-P1` | service migration record | Increment 3-4 gate regression | P16-P20 | Data-engineering owner | Pipeline outage | Not started |
+| `P1-7.3-P3` | `P1-7.3` | Production | Migrate Trino/Atlas/Ranger identities and certificates; rerun query, lineage, policy, and audit gates. | Security owner | `P1-7.3-P2` | service migration record | Increment 5-6 gate regression | P21-P25 | Governance owner | Authorization lockout | Not started |
+| `P1-7.4-P1` | `P1-7.4` | Production | Replace endpoint certificates and prove trust-chain, expiry monitoring, renewal, and rollback across all services. | PKI owner | `P1-7.3-P3` | certificate inventory/runbook | TLS scans, renewal drill, prior-cert rollback | P23-P28 | Security owner | Coordinated expiry | Not started |
+| `P1-7.5-P1` | `P1-7.5` | Production | Implement encryption-at-rest controls and rotate all service credentials without shared identities. | Security owner | `P1-7.4-P1` | encryption/rotation records | key/credential rotation and negative tests | P26-P30 | Platform owner | Key recovery | Not started |
+| `P1-7.6-R1` | `P1-7.6` | Production | Execute integrated identity outage, token/key/cert expiry, restore, alert, and break-glass drills. | Operations/security owners | `P1-7.5-P1` | `runbooks/identity/drills/` | RTO/RPO, alerts, audit, defects/reruns | P29-P33 | Operations owner | Maintenance window | Not started |
+| `P1-7.G-D` | `P1-7` | Developer | Accept the developer proof only; it does not accept production identity. | Platform owner | `P1-7.1-D1` | developer gate record | client and automation evidence | developer gate | Security owner | Open client incompatibility | Not started |
+| `P1-7.G-P` | `P1-7` | Production | Accept P1-P33 and affected Increment 1-6 regression evidence. | Platform owner | `P1-7.6-R1` | production gate record | complete gate/evidence and rollback index | P1-P33 | Security/operations owners | Any failed earlier gate | Not started |
+
+## 17. Completion Gates
 
 ### Developer gate
 
@@ -1051,45 +1070,45 @@ The developer gate proves repeatable realm/bootstrap automation, local certifica
 
 Increment 7 is accepted only when all of the following are true:
 
-- [ ] FreeIPA server is deployed, backed up, and reachable at `ipa.stratus.local`
-- [ ] FreeIPA replica/CA topology survives the declared server failure and replication health is monitored
-- [ ] DNS names used by clients resolve consistently and match certificate SANs
-- [ ] Kerberos realm `STRATUS.LOCAL` is operational
-- [ ] FreeIPA LDAP and LDAPS are operational
-- [ ] FreeIPA Dogtag CA issues service certificates
-- [ ] Platform hosts are enrolled with FreeIPA and SSSD
-- [ ] Platform groups exist in FreeIPA
-- [ ] Platform users and service principals exist in FreeIPA
-- [ ] Required keytabs exist only on intended hosts with owner-only permissions
-- [ ] Keycloak is deployed with PostgreSQL and HTTPS
-- [ ] at least two Keycloak instances pass load-balancer failover, session, token issuance, and signing-key rotation tests against external PostgreSQL 18.4
-- [ ] Keycloak realm `stratus` exists
-- [ ] Keycloak federates users and groups from FreeIPA LDAP
-- [ ] Keycloak tokens include the group claims needed by platform services
-- [ ] Keycloak tokens validate issuer, audience, signature, and expiration for all OIDC consumers
-- [ ] OIDC clients exist for Trino, Airflow, Polaris where supported, and verification utilities
-- [ ] Ranger usersync imports FreeIPA users and groups
-- [ ] Ranger policies are migrated to FreeIPA groups
-- [ ] Atlas authenticates against FreeIPA LDAP
-- [ ] Trino coordinator uses HTTPS and Keycloak/OIDC for client access
-- [ ] Airflow UI/API authentication is hardened for Airflow 3.3.0 and Keycloak
-- [ ] Polaris rejects unauthenticated catalog access
-- [ ] Polaris, Trino, Spark, and Airflow still resolve Iceberg tables only through Polaris
-- [ ] FreeIPA-issued certificates replace lab self-signed certificates for platform endpoints
-- [ ] Clients no longer require insecure TLS flags for normal operation
-- [ ] `stratus-gold` and `stratus-platform` have server-side encryption enabled
-- [ ] Bootstrap local users from earlier increments are disabled or removed from normal operation
-- [ ] `IdentitySecurityVerificationTest` passes
-- [ ] FreeIPA and Keycloak backup/restore, CA recovery, signing-key rotation, service-certificate renewal, and identity-service outage drills have current evidence.
-- [ ] Every service in the certificate inventory has a named owner, issuing procedure, deployed key/trust format, renewal threshold, reload/restart behavior, and expiry alert.
-- [ ] The Increment 1-6 functional suites pass after all developer identities, local CAs, plaintext endpoints, and bootstrap credentials are removed from the production configuration.
-- [ ] Increment 4, 5, and 6 verification behavior still passes after hardening
+- [ ] **P1** - FreeIPA server is deployed, backed up, and reachable at `ipa.stratus.local`
+- [ ] **P2** - FreeIPA replica/CA topology survives the declared server failure and replication health is monitored
+- [ ] **P3** - DNS names used by clients resolve consistently and match certificate SANs
+- [ ] **P4** - Kerberos realm `STRATUS.LOCAL` is operational
+- [ ] **P5** - FreeIPA LDAP and LDAPS are operational
+- [ ] **P6** - FreeIPA Dogtag CA issues service certificates
+- [ ] **P7** - Platform hosts are enrolled with FreeIPA and SSSD
+- [ ] **P8** - Platform groups exist in FreeIPA
+- [ ] **P9** - Platform users and service principals exist in FreeIPA
+- [ ] **P10** - Required keytabs exist only on intended hosts with owner-only permissions
+- [ ] **P11** - Keycloak is deployed with PostgreSQL and HTTPS
+- [ ] **P12** - at least two Keycloak instances pass load-balancer failover, session, token issuance, and signing-key rotation tests against external PostgreSQL 18.4
+- [ ] **P13** - Keycloak realm `stratus` exists
+- [ ] **P14** - Keycloak federates users and groups from FreeIPA LDAP
+- [ ] **P15** - Keycloak tokens include the group claims needed by platform services
+- [ ] **P16** - Keycloak tokens validate issuer, audience, signature, and expiration for all OIDC consumers
+- [ ] **P17** - OIDC clients exist for Trino, Airflow, Polaris where supported, and verification utilities
+- [ ] **P18** - Ranger usersync imports FreeIPA users and groups
+- [ ] **P19** - Ranger policies are migrated to FreeIPA groups
+- [ ] **P20** - Atlas authenticates against FreeIPA LDAP
+- [ ] **P21** - Trino coordinator uses HTTPS and Keycloak/OIDC for client access
+- [ ] **P22** - Airflow UI/API authentication is hardened for Airflow 3.3.0 and Keycloak
+- [ ] **P23** - Polaris rejects unauthenticated catalog access
+- [ ] **P24** - Polaris, Trino, Spark, and Airflow still resolve Iceberg tables only through Polaris
+- [ ] **P25** - FreeIPA-issued certificates replace lab self-signed certificates for platform endpoints
+- [ ] **P26** - Clients no longer require insecure TLS flags for normal operation
+- [ ] **P27** - `stratus-gold` and `stratus-platform` have server-side encryption enabled
+- [ ] **P28** - Bootstrap local users from earlier increments are disabled or removed from normal operation
+- [ ] **P29** - `IdentitySecurityVerificationTest` passes
+- [ ] **P30** - FreeIPA and Keycloak backup/restore, CA recovery, signing-key rotation, service-certificate renewal, and identity-service outage drills have current evidence.
+- [ ] **P31** - Every service in the certificate inventory has a named owner, issuing procedure, deployed key/trust format, renewal threshold, reload/restart behavior, and expiry alert.
+- [ ] **P32** - The Increment 1-6 functional suites pass after all developer identities, local CAs, plaintext endpoints, and bootstrap credentials are removed from the production configuration.
+- [ ] **P33** - Increment 4, 5, and 6 verification behavior still passes after hardening
 
 The developer gate supports regression work. Only the production gate completes the Phase 1 batch, query, governance, and identity foundation and permits operational-readiness signoff.
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### Keycloak cannot sync FreeIPA users
 
@@ -1161,7 +1180,7 @@ The developer gate supports regression work. Only the production gate completes 
 
 ---
 
-## 18. References
+## 19. References
 
 - FreeIPA documentation: https://www.freeipa.org/page/Documentation
 - Red Hat Identity Management documentation: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_idm_users_groups_hosts_and_access_control_rules/

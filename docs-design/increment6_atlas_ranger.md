@@ -919,49 +919,67 @@ Trigger a small Airflow verification DAG and confirm Atlas updates:
 
 ---
 
-## 15. Completion Gates
+## 15. Implementation Task Track
+
+These tasks execute `P1-6.1` through `P1-6.5`; evidence belongs under `evidence/phase1/increment6/<task-id>/`.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-6.1-S1` | `P1-6.1` | Shared | Build, lock, scan, and publish Atlas/Ranger images, plugins, models, and verifiers. | Build owner | P1-5 developer gate | `docker/atlas/`; `docker/ranger/`; model modules | digests, SBOMs, startup smoke | D1-D4, P1 | Platform owner | Non-official image build | Not started |
+| `P1-6.1-D1` | `P1-6.1` | Developer | Deploy idempotent Atlas developer dependencies and service. | Governance owner | `P1-6.1-S1` | `deploy/dev/atlas/` | lifecycle, health, entity CRUD | D1-D6 | Platform owner | Resource footprint | Not started |
+| `P1-6.2-D1` | `P1-6.2` | Developer | Deploy Ranger, usersync fixture, Trino integration, and baseline policies. | Security owner | `P1-6.1-S1` | `deploy/dev/ranger/`; policies | allow/deny and audit tests | D7-D11 | Security owner | Plugin compatibility | Not started |
+| `P1-6.3-D1` | `P1-6.3` | Developer | Implement dataset registration, lineage publication, quality status, classifications, retry/idempotency, and reconciliation. | Governance owner | `P1-6.1-D1`, `P1-6.2-D1` | `services/governance/`; type definitions | entity/lineage/quality test reports | D12-D18 | Data owner | Event ordering | Not started |
+| `P1-6.5-V1` | `P1-6.5` | Developer | Run integrated Atlas/Ranger positive, negative, and failure regression. | QA owner | `P1-6.3-D1` | verifier reports | JUnit, audit, retry and policy evidence | D19-D20 | Governance owner | Test identity setup | Not started |
+| `P1-6.1-P1` | `P1-6.1` | Production | Deploy production HBase, SolrCloud/ZooKeeper, notification Kafka, and redundant Atlas with backup/restore. | Governance/operations owners | `P1-6.1-S1` | `deploy/prod/atlas/`; runbooks | dependency failure, Atlas recovery, restore | P1-P3 | Operations owner | Multi-service capacity | Not started |
+| `P1-6.2-P1` | `P1-6.2` | Production | Deploy production Ranger/Admin/usersync with external DB, TLS, identity, policy backup, and HA posture. | Security owner | `P1-6.1-S1`, Increment 7 controls | `deploy/prod/ranger/` | auth, sync, policy export/restore | P2-P4 | Security owner | Identity source availability | Not started |
+| `P1-6.3-P1` | `P1-6.3` | Production | Migrate developer governance state/contracts to external dependencies and rerun lineage/policy regression. | Governance owner | `P1-6.1-P1`, `P1-6.2-P1` | migration/promotion runbook | before/after reconciliation, rollback rehearsal | P3-P5 | Data owner | Migration data loss | Not started |
+| `P1-6.5-R1` | `P1-6.5` | Production | Exercise dependency, publisher, policy, backup/restore, observability, and reconciliation failures. | Operations owner | `P1-6.3-P1` | `runbooks/governance/` | timed drills, alerts, defects/reruns | P4-P6 | Platform owner | Maintenance window | Not started |
+| `P1-6.G-D` | `P1-6` | Developer | Accept D1-D20. | Governance owner | `P1-6.5-V1` | developer gate record | gate/evidence matrix | D1-D20 | Platform owner | Open defect | Not started |
+| `P1-6.G-P` | `P1-6` | Production | Accept P1-P6 with production dependencies and promotion evidence. | Platform owner | `P1-6.5-R1` | production gate record | gate/evidence matrix | P1-P6 | Security/operations owners | Open production defect | Not started |
+
+## 16. Completion Gates
 
 ### Developer gate
 
 The developer gate is complete when the functional checklist below passes against the disposable topology. Embedded Atlas dependencies and local Ranger users are permitted only here.
 
-- [ ] Atlas container running and managed by systemd on `atlas.stratus.local`
-- [ ] Ranger PostgreSQL container running and managed by systemd on `ranger.stratus.local`
-- [ ] Ranger Admin container running and managed by systemd on `ranger.stratus.local`
-- [ ] Ranger usersync container running and managed by systemd
-- [ ] Atlas UI and REST API reachable on port 21000
-- [ ] Ranger UI and REST API reachable on port 6080
-- [ ] Stratus Atlas type definitions registered
-- [ ] Atlas contains entities for verification bronze, silver, gold, and platform Iceberg tables
-- [ ] Atlas table entities include owner, steward, domain, zone, schema, quality status, and latest snapshot id
-- [ ] Atlas lineage shows source → bronze → silver → gold for the verification pipeline
-- [ ] `PII`, `CONFIDENTIAL`, `RESTRICTED`, and `QUALITY_FAILED` classifications exist
-- [ ] A verification dataset or column is classified as `PII`
-- [ ] Ranger `stratus_trino` service exists
-- [ ] Ranger baseline Trino policies exist for platform admins, engineers, analysts, quality visibility, bronze restriction, and PII access
-- [ ] Trino coordinator is configured with Ranger access control
-- [ ] Authorized Trino query against a non-sensitive gold table succeeds
-- [ ] Unauthorized Trino query against a PII-classified table or column is denied
-- [ ] Authorized restricted user can query the same PII-classified resource
-- [ ] Ranger audit records show both allow and deny events
-- [ ] `GovernanceVerificationTest` passes against the live platform
+- [ ] **D1** - Atlas container running and managed by systemd on `atlas.stratus.local`
+- [ ] **D2** - Ranger PostgreSQL container running and managed by systemd on `ranger.stratus.local`
+- [ ] **D3** - Ranger Admin container running and managed by systemd on `ranger.stratus.local`
+- [ ] **D4** - Ranger usersync container running and managed by systemd
+- [ ] **D5** - Atlas UI and REST API reachable on port 21000
+- [ ] **D6** - Ranger UI and REST API reachable on port 6080
+- [ ] **D7** - Stratus Atlas type definitions registered
+- [ ] **D8** - Atlas contains entities for verification bronze, silver, gold, and platform Iceberg tables
+- [ ] **D9** - Atlas table entities include owner, steward, domain, zone, schema, quality status, and latest snapshot id
+- [ ] **D10** - Atlas lineage shows source → bronze → silver → gold for the verification pipeline
+- [ ] **D11** - `PII`, `CONFIDENTIAL`, `RESTRICTED`, and `QUALITY_FAILED` classifications exist
+- [ ] **D12** - A verification dataset or column is classified as `PII`
+- [ ] **D13** - Ranger `stratus_trino` service exists
+- [ ] **D14** - Ranger baseline Trino policies exist for platform admins, engineers, analysts, quality visibility, bronze restriction, and PII access
+- [ ] **D15** - Trino coordinator is configured with Ranger access control
+- [ ] **D16** - Authorized Trino query against a non-sensitive gold table succeeds
+- [ ] **D17** - Unauthorized Trino query against a PII-classified table or column is denied
+- [ ] **D18** - Authorized restricted user can query the same PII-classified resource
+- [ ] **D19** - Ranger audit records show both allow and deny events
+- [ ] **D20** - `GovernanceVerificationTest` passes against the live platform
 
 When the developer gate is checked, Increment 7 engineering can begin.
 
 ### Production gate
 
-- [ ] Atlas 2.5.0 uses external HBase, SolrCloud/ZooKeeper, and an external Kafka notification service; no `berkeleyje`, embedded Solr, or embedded notification setting is active.
-- [ ] Atlas application availability matches the approved RTO/RPO design and failover has been exercised.
-- [ ] HBase, SolrCloud, Atlas types/entities/glossary/classifications, and notification configuration have coordinated backup and restore evidence.
-- [ ] Ranger 2.8.0 uses a durable, backed-up PostgreSQL service and durable audit destination.
-- [ ] FreeIPA/Keycloak identities, LDAPS, trusted HTTPS, managed secrets, and service-specific authorization replace local users and bootstrap credentials.
-- [ ] The developer functional checklist passes unchanged against production, followed by failure, restore, capacity, and security-negative tests.
+- [ ] **P1** - Atlas 2.5.0 uses external HBase, SolrCloud/ZooKeeper, and an external Kafka notification service; no `berkeleyje`, embedded Solr, or embedded notification setting is active.
+- [ ] **P2** - Atlas application availability matches the approved RTO/RPO design and failover has been exercised.
+- [ ] **P3** - HBase, SolrCloud, Atlas types/entities/glossary/classifications, and notification configuration have coordinated backup and restore evidence.
+- [ ] **P4** - Ranger 2.8.0 uses a durable, backed-up PostgreSQL service and durable audit destination.
+- [ ] **P5** - FreeIPA/Keycloak identities, LDAPS, trusted HTTPS, managed secrets, and service-specific authorization replace local users and bootstrap credentials.
+- [ ] **P6** - The developer functional checklist passes unchanged against production, followed by failure, restore, capacity, and security-negative tests.
 
 Only this production gate can mark Increment 6 accepted in the Phase 1 gate tracker.
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### Atlas starts but search returns no entities
 
@@ -1015,7 +1033,7 @@ Only this production gate can mark Increment 6 accepted in the Phase 1 gate trac
 
 ---
 
-## 17. References
+## 18. References
 
 - Apache Atlas: https://atlas.apache.org/
 - Apache Atlas REST API: https://atlas.apache.org/api/v2/index.html

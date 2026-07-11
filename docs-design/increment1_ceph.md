@@ -1438,8 +1438,8 @@ ceph orch ps
 ### RGW check
 
 ```bash
-aws --endpoint-url https://object-store.stratus.local s3 ls
-aws --endpoint-url https://object-store.stratus.local s3 ls s3://stratus-landing
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsd cephrgw:
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt lsf cephrgw:stratus-landing/
 ```
 
 These commands must work without disabling TLS validation in representative shared labs and production.
@@ -1448,12 +1448,12 @@ These commands must work without disabling TLS validation in representative shar
 
 ```bash
 echo "stratus-ceph-verification" > /tmp/stratus-ceph-verification.txt
-aws --endpoint-url https://object-store.stratus.local \
-  s3 cp /tmp/stratus-ceph-verification.txt \
-  s3://stratus-landing/verification/stratus-ceph-verification.txt
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt copyto \
+  /tmp/stratus-ceph-verification.txt \
+  cephrgw:stratus-landing/verification/stratus-ceph-verification.txt
 
-aws --endpoint-url https://object-store.stratus.local \
-  s3 cp s3://stratus-landing/verification/stratus-ceph-verification.txt -
+rclone --ca-cert /etc/stratus/pki/stratus-ca.crt cat \
+  cephrgw:stratus-landing/verification/stratus-ceph-verification.txt
 ```
 
 ### Failure drill
@@ -1474,26 +1474,89 @@ For the production profile:
 
 ---
 
-## 17. Completion Gates
+## 17. Implementation Task Track
+
+This section is the executable work breakdown for Increment 1. The technical sections above define how each task is implemented; this section controls assignment, dependency order, evidence, and acceptance. The task IDs are stable and must also be used in issues, pull requests, evidence directories, and gate signoff records.
+
+### Tracking rules
+
+- `Shared` tasks produce decisions or artifacts used by both tracks.
+- `Developer` tasks may unblock Increment 2 engineering only after the developer gate is accepted.
+- `Production` tasks may begin in parallel when their dependencies are met, but they cannot inherit acceptance from a developer deployment.
+- A task moves to `Verified` only when its deliverable exists and the listed evidence is stored under `evidence/phase1/increment1/<task-id>/` or the approved evidence system using the same task ID.
+- A task moves to `Accepted` only when the named acceptance role reviews that evidence.
+- Valid states are `Not started`, `In progress`, `Blocked`, `Built`, `Verified`, and `Accepted`.
+- Blockers and material risks must name an owner and resolution condition; `None recorded` means no blocker has yet been identified, not that risk is impossible.
+
+### Work-package tracker
+
+| ID | Parent | Track | Task and definition of done | Delivery owner | Depends on | Deliverable/path | Verification and evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-1.1-S1` | `P1-1.1` | Shared | Approve Ceph RGW as the baseline, selected release, supported host OS/runtime combinations, production topology, and reconsideration triggers. Done when the decision record is accepted. | Platform architect | `P1-0.1` | `docs/adr/ADR-P1-001-ceph-baseline.md`; version matrix entry | Accepted ADR, upstream compatibility references, image/package checksums | D1, P1, P2 | Architecture owner | None recorded | Not started |
+| `P1-1.2-S1` | `P1-1.2` | Shared | Define node, disk, network, DNS, NTP, firewall, capacity, CRUSH failure-domain, pool, and endpoint requirements. Done when values are reviewable and contain no unresolved placeholder used for deployment. | Storage owner | `P1-1.1-S1` | `infra/ceph/inventory/`; `infra/ceph/specs/`; capacity worksheet | Peer-reviewed inventory/specs, address and port validation, raw-to-usable calculation | D7, P1-P4 | Operations owner | Hardware and addresses may be environment-specific | Not started |
+| `P1-1.6-S1` | `P1-1.6` | Shared | Implement and publish the storage verifier image and Java suite. Done when CI publishes a scanned immutable digest with provenance and a smoke report. | Build engineering owner | `P1-0.1`, `P1-1.1-S1` | `src/test/`; `docker/storage-verifier/`; CI pipeline definition | Unit report, image scan, SBOM, provenance, digest, container smoke test | D2, D10-D12, P10 | Platform owner | Registry and CI signing service required | Not started |
+| `P1-1.2-D1` | `P1-1.2` | Developer | Select and record the developer profile: Docker Desktop client harness, Podman client harness, single-host cephadm, or representative lab. Done when prerequisites and unsupported production claims are recorded. | Developer-platform owner | `P1-1.1-S1` | `config/dev/ceph/profile.env`; implementation record | Preflight output for runtime, DNS, ports, endpoint reachability, and writable evidence directory | D3 | Platform owner | Shared RGW lab may be unavailable | Not started |
+| `P1-1.3-D1` | `P1-1.3` | Developer | Generate or obtain the developer CA chain and RGW certificate without copying private keys into the client harness. Done when hostname validation succeeds. | Security engineering owner | `P1-1.2-D1` | `docker/ceph-client/certs/stratus-ca.crt`; protected lab PKI location | `openssl verify`, endpoint handshake, SAN validation, file-permission evidence | D5 | Security owner | Shared lab CA must be supplied by its owner | Not started |
+| `P1-1.2-D2` | `P1-1.2` | Developer | Deploy or select the Ceph lab endpoint. Done when cephadm reports the expected lab daemons healthy and the profile limitations are documented. | Storage owner | `P1-1.2-S1`, `P1-1.2-D1` | `infra/ceph/specs/dev/`; lab deployment record | `ceph status`, `ceph orch ps`, OSD/pool inventory, runtime/version output | D4, D7, D13 | Operations owner | Docker Desktop cannot host the Ceph cluster | Not started |
+| `P1-1.3-D2` | `P1-1.3` | Developer | Configure the RGW HTTPS endpoint and apply the developer certificate. Done when trusted clients connect and plaintext/insecure paths are rejected. | Storage owner | `P1-1.3-D1`, `P1-1.2-D2` | RGW service spec; endpoint/DNS record | TLS handshake, CA validation, HTTPS S3 list, negative HTTP or untrusted-CA test | D5 | Security owner | DNS or reverse-proxy ownership may be external | Not started |
+| `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and lab-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | `infra/ceph/bootstrap/buckets.yaml`; `infra/ceph/policy/dev/`; protected credential records | Bucket inventory, RGW user inventory, allowed/denied operation report | D6, D8, D9 | Security owner | Credentials must not enter Git or evidence output | Not started |
+| `P1-1.2-D3` | `P1-1.2` | Developer | Implement the idempotent Docker Desktop and Podman client harness. Done when startup, check, verifier, shutdown, and repeated startup succeed without manual repair. | Developer-platform owner | `P1-1.3-D1`, `P1-1.4-D1`, `P1-1.6-S1` | `docker/ceph-client/compose.yaml`; `.env.template`; `scripts/startup.sh`; `check.sh`; `verify-java.sh`; `shutdown.sh` | Shell/static checks, Docker Compose run, Podman run, second-start and second-stop transcripts | D3, D12 | Platform owner | Podman Compose implementation differences require testing | Not started |
+| `P1-1.6-D1` | `P1-1.6` | Developer | Run the Java storage contract suite from the published verifier image. Done when all bucket, object, multipart, TLS, and access-boundary tests pass. | Quality engineering owner | `P1-1.2-D3` | Test report under the task evidence directory | Immutable image digest, injected-config record, JUnit report, no-source/no-build-tools inspection | D10, D12 | Data platform owner | Test identities must be scoped and resettable | Not started |
+| `P1-1.6-D2` | `P1-1.6` | Developer | Run storage-only concurrency, multipart, small-object, and prefix-listing baselines. Done when declared thresholds pass or an owned decision record accepts a variance. | Performance engineering owner | `P1-1.6-D1` | `verification/storage/`; benchmark result bundle | Raw runs, p50/p95/p99, throughput, errors/retries, object counts, environment manifest | D11 | Platform owner | Shared labs may produce non-production capacity results | Not started |
+| `P1-1.5-D1` | `P1-1.5` | Developer | Exercise health observation and the supported lab OSD failure/recovery path. Done when degradation and recovery match the documented pool behavior. | Operations owner | `P1-1.2-D2`, `P1-1.6-D1` | Lab drill record and health snapshot | Before/during/after `ceph status`, recovery timing, client read/write result, defect links | D13, D14 | Operations owner | Single-host profile cannot prove quorum or host failure | Not started |
+| `P1-1.G-D` | `P1-1` | Developer | Review and accept the developer gate. Done only when D1-D14 have producing accepted tasks and no evidence is missing. | Platform owner | `P1-1.6-D2`, `P1-1.5-D1` | Developer gate record | Gate-to-task matrix, evidence index, open-risk review | D1-D14 | Platform and data-platform owners | Any open blocking defect keeps the gate open | Not started |
+| `P1-1.1-P1` | `P1-1.1` | Production | Approve the production Ceph architecture, Podman or Docker Engine runtime, support model, RTO/RPO, and capacity target. Done when architecture and operations approve the record. | Platform architect | `P1-1.1-S1`, `P1-1.2-S1` | Production architecture/ADR and support record | Design review, compatibility evidence, RTO/RPO and support acceptance | P1, P2 | Architecture and operations owners | Procurement or support decision may block deployment | Not started |
+| `P1-1.2-P1` | `P1-1.2` | Production | Prepare production hosts and runtime. Done when OS, time, DNS, network, disks, package repositories, Podman/Docker, and cephadm preflight pass on every host. | Infrastructure owner | `P1-1.1-P1` | `infra/ceph/inventory/prod/`; host baseline automation | Per-host preflight report, package versions, disk identity, firewall and MTU tests | P2 | Operations owner | Destructive OSD-device use requires approved inventory | Not started |
+| `P1-1.2-P2` | `P1-1.2` | Production | Bootstrap cephadm and deploy MON/MGR quorum across failure domains. Done when quorum, standby manager, restart, and host-reboot tests pass. | Storage owner | `P1-1.2-P1` | `infra/ceph/specs/prod/mon-mgr.yaml`; cluster bootstrap record | `ceph quorum_status`, `ceph mgr dump`, orchestrator inventory, restart/reboot evidence | P3 | Operations owner | Quorum placement depends on distinct failure domains | Not started |
+| `P1-1.2-P3` | `P1-1.2` | Production | Deploy OSDs, CRUSH rules, and pools. Done when placement, replication/EC, `size`/`min_size`, PG state, and usable capacity match the approved design. | Storage owner | `P1-1.2-P2` | Drive-group and pool specifications | OSD tree, CRUSH dump, pool detail, clean PG state, capacity calculation | P4 | Architecture and operations owners | Incorrect device selection can destroy data | Not started |
+| `P1-1.3-P1` | `P1-1.3` | Production | Deploy redundant RGW instances behind the approved endpoint and apply platform-PKI certificates. Done when RGW/node/endpoint failure tests retain service within the target. | Storage and network owners | `P1-1.2-P3`, Increment 7 PKI task or approved interim production PKI | RGW/ingress specs, DNS/load-balancer config, certificate references | TLS validation, plaintext rejection, RGW failover, load-balancer failover, endpoint health | P5, P6 | Operations and security owners | Final acceptance waits for approved PKI integration | Not started |
+| `P1-1.4-P1` | `P1-1.4` | Production | Create production service identities, secret records, buckets, quotas, and least-privilege policies. Done when each service passes positive tests and cross-service/unauthorized tests fail. | Storage and security owners | `P1-1.3-P1`, approved secret-management service | `infra/ceph/policy/prod/`; secret references; identity inventory | Policy matrix, positive/negative report, secret-location and rotation metadata | P7, P8 | Security owner | No secret value may appear in Git or evidence | Not started |
+| `P1-1.4-P2` | `P1-1.4` | Production | Implement and test the approved encryption-at-rest model. Done when required zones are protected and key-loss/recovery implications are documented. | Security and storage owners | `P1-1.4-P1`, approved key-management service | Encryption design and Ceph configuration record | Configuration inspection, encrypted-write test, key-access negative test, recovery procedure | P9 | Security owner | KMS availability and recovery ownership required | Not started |
+| `P1-1.5-P1` | `P1-1.5` | Production | Implement dashboards, metrics, logs, audit events, capacity alerts, and service-health alerts. Done when alerts fire, route, acknowledge, and clear. | Operations owner | `P1-1.2-P3`, `P1-1.3-P1` | Monitoring configuration, dashboards, alert rules | Dashboard export, synthetic alert exercise, log/audit query, notification receipt | P12 | Operations owner | Monitoring platform integration may be external | Not started |
+| `P1-1.5-P2` | `P1-1.5` | Production | Implement configuration backup, metadata protection, restore, patching, credential rotation, OSD replacement, and host-drain runbooks. Done when restore and one rotation are executed successfully. | Operations owner | `P1-1.4-P1`, `P1-1.5-P1` | `runbooks/ceph/`; protected backup records | Restore transcript, recovered configuration comparison, rotation result, runbook review | P12 | Operations and security owners | Backup without tested restore is not accepted | Not started |
+| `P1-1.6-P1` | `P1-1.6` | Production | Run the immutable Java verifier and production storage qualification. Done when functional, concurrency, latency, throughput, retry, and capacity thresholds pass against production. | Quality and performance owners | `P1-1.3-P1`, `P1-1.4-P2`, `P1-1.6-S1` | Production verification and benchmark evidence | Image digest, environment manifest, JUnit report, raw metrics, threshold decision | P10 | Platform owner | Tests must avoid destructive production data paths | Not started |
+| `P1-1.5-P3` | `P1-1.5` | Production | Execute OSD, MON, MGR, RGW, endpoint, runtime-daemon, and host failure/recovery drills. Done when observed RTO/RPO meets the target and all defects are closed or accepted. | Operations owner | `P1-1.5-P2`, `P1-1.6-P1` | `runbooks/ceph/drills/`; drill schedule and reports | Before/during/after health, client continuity, recovery timing, defect and rerun records | P3, P5, P11 | Operations owner | Change approval and maintenance window required | Not started |
+| `P1-1.R-P` | `P1-1` | Production | Execute and close the storage-related Phase 1 operational-readiness checks. Done when every applicable readiness item has evidence, failed items have resolved or accepted remediation records, and the storage owner signs the result. | Operations owner | `P1-1.5-P3`; required Increment 7 controls accepted | Completed storage sections of `stratus_phase1_operational_readiness.md`; remediation records | Readiness evidence index, defect reruns, storage-owner signoff | P13 | Platform owner | Open readiness failure keeps production acceptance blocked | Not started |
+| `P1-1.G-P` | `P1-1` | Production | Review and accept the production gate. Done only when P1-P13 map to accepted tasks and no developer-only setting remains. | Platform owner | `P1-1.R-P` | Production gate record and promotion manifest | Gate-to-task matrix, evidence index, readiness checklist references, open-risk acceptance | P1-P13 | Architecture, operations, security, and platform owners | Any developer shortcut or missing recovery evidence keeps the gate open | Not started |
+
+### Developer-to-production promotion controls
+
+| Developer condition | Production replacement task | Rollback or stop condition |
+|---|---|---|
+| Docker Desktop or client-only Compose harness | `P1-1.2-P1` through `P1-1.2-P3`; Ceph runs on approved Linux hosts under cephadm | stop promotion if host/runtime compatibility, disk inventory, or quorum placement is unapproved |
+| Single-host or reduced lab topology | `P1-1.2-P2`, `P1-1.2-P3`, `P1-1.3-P1` | do not onboard production data until quorum, failure domains, redundant RGW, and endpoint failover pass |
+| Local lab CA or shared-lab certificate | `P1-1.3-P1` | restore the last valid certificate reference if trust validation or endpoint health fails; never fall back to insecure clients |
+| Lab-equivalent identities and local `.env` secrets | `P1-1.4-P1` | disable the new identity and restore the prior approved production credential reference if policy regression occurs; never promote lab credentials |
+| Local or reduced monitoring | `P1-1.5-P1` | production gate remains open until routing, acknowledgement, and clear behavior pass |
+| Lab-only health and OSD drill | `P1-1.5-P3` | stop the drill under the approved abort criteria; recover service and open defects before rerun |
+| Developer performance baseline | `P1-1.6-P1` | production sizing is not approved from lab numbers; failed thresholds require remediation or an accepted decision record |
+
+### Gate traceability rule
+
+The gate identifiers below are normative. A gate checkbox may be marked complete only when every mapped task is `Accepted` and its evidence index resolves. `P1-1.G-D` and `P1-1.G-P` own the final checks; they do not create missing evidence on behalf of implementation tasks.
+
+---
+
+## 18. Completion Gates
 
 ### Developer gate
 
 Increment 1 developer work is complete when the selected workstation or lab profile proves the following:
 
-- [ ] approved Ceph release is selected and pinned
-- [ ] the build pipeline publishes the storage verifier image by immutable digest with scan and provenance evidence
-- [ ] lab runtime profile is recorded as Podman, Docker Engine, or Docker Desktop client harness only
-- [ ] Ceph lab cluster is running
-- [ ] RGW is reachable over HTTPS
-- [ ] all five Stratus S3 buckets exist
-- [ ] pool and CRUSH layout are documented
-- [ ] platform service identities or lab equivalents exist
-- [ ] access boundaries are enforced through RGW policy/user controls
-- [ ] Java S3 verification suite passes
-- [ ] concurrent synthetic S3, multipart, and small-object/prefix-listing baselines pass without later engines
-- [ ] verifier execution uses the published image, protected configuration injection, read-only trust material, and dedicated evidence mount without source or build tools
-- [ ] Ceph health checks show expected state
-- [ ] lab failure drill behavior is documented
+- [ ] **D1** - approved Ceph release is selected and pinned
+- [ ] **D2** - the build pipeline publishes the storage verifier image by immutable digest with scan and provenance evidence
+- [ ] **D3** - lab runtime profile is recorded as Podman, Docker Engine, or Docker Desktop client harness only
+- [ ] **D4** - Ceph lab cluster is running
+- [ ] **D5** - RGW is reachable over HTTPS
+- [ ] **D6** - all five Stratus S3 buckets exist
+- [ ] **D7** - pool and CRUSH layout are documented
+- [ ] **D8** - platform service identities or lab equivalents exist
+- [ ] **D9** - access boundaries are enforced through RGW policy/user controls
+- [ ] **D10** - Java S3 verification suite passes
+- [ ] **D11** - concurrent synthetic S3, multipart, and small-object/prefix-listing baselines pass without later engines
+- [ ] **D12** - verifier execution uses the published image, protected configuration injection, read-only trust material, and dedicated evidence mount without source or build tools
+- [ ] **D13** - Ceph health checks show expected state
+- [ ] **D14** - lab failure drill behavior is documented
 
 When the developer gate passes, Increment 2 engineering work can begin.
 
@@ -1501,25 +1564,25 @@ When the developer gate passes, Increment 2 engineering work can begin.
 
 The Ceph storage foundation is production-ready only when:
 
-- [ ] production Ceph topology is approved
-- [ ] production runtime profile is approved as Podman or Docker Engine; Docker Desktop is not used for production Ceph nodes
-- [ ] MON quorum and MGR failover are configured and tested
-- [ ] OSD storage layout, CRUSH rules, pool replication, and/or erasure coding are approved
-- [ ] RGW is deployed redundantly behind the approved endpoint
-- [ ] TLS works without insecure client flags
-- [ ] service credentials are stored in the approved secret-management location
-- [ ] bucket policies or equivalent access controls pass verification
-- [ ] encryption model is approved and tested where required
-- [ ] Java S3 verification passes against the production Ceph target
-- [ ] Ceph health, failure, and recovery drills pass
-- [ ] monitoring, alerting, audit logging, backup, restore, patching, and rotation runbooks exist
-- [ ] Phase 1 operational readiness checklist accepts the storage layer
+- [ ] **P1** - production Ceph topology is approved
+- [ ] **P2** - production runtime profile is approved as Podman or Docker Engine; Docker Desktop is not used for production Ceph nodes
+- [ ] **P3** - MON quorum and MGR failover are configured and tested
+- [ ] **P4** - OSD storage layout, CRUSH rules, pool replication, and/or erasure coding are approved
+- [ ] **P5** - RGW is deployed redundantly behind the approved endpoint
+- [ ] **P6** - TLS works without insecure client flags
+- [ ] **P7** - service credentials are stored in the approved secret-management location
+- [ ] **P8** - bucket policies or equivalent access controls pass verification
+- [ ] **P9** - encryption model is approved and tested where required
+- [ ] **P10** - Java S3 verification passes against the production Ceph target
+- [ ] **P11** - Ceph health, failure, and recovery drills pass
+- [ ] **P12** - monitoring, alerting, audit logging, backup, restore, patching, and rotation runbooks exist
+- [ ] **P13** - Phase 1 operational readiness checklist accepts the storage layer
 
 No production dataset should be onboarded based only on a single-node or non-secure Ceph developer topology.
 
 ---
 
-## 18. Troubleshooting
+## 19. Troubleshooting
 
 ### RGW endpoint unreachable
 
@@ -1563,7 +1626,7 @@ No production dataset should be onboarded based only on a single-node or non-sec
 
 ---
 
-## 19. References
+## 20. References
 
 - Ceph Tentacle Object Gateway documentation: https://docs.ceph.com/en/tentacle/radosgw/
 - Ceph Tentacle Object Gateway S3 API: https://docs.ceph.com/en/tentacle/radosgw/s3/

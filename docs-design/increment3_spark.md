@@ -848,36 +848,53 @@ Each zone must show `metadata/` and `data/` directories containing `.json`, `.av
 
 ---
 
-## 12. Completion Gates
+## 12. Implementation Task Track
+
+These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are stable across issues, artifacts, evidence, and gate records; evidence belongs under `evidence/phase1/increment3/<task-id>/`.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `docker/spark/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Dependency collision | Not started |
+| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `deploy/dev/spark/` | repeated lifecycle, master/worker health | D1 | Platform owner | Local capacity | Not started |
+| `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `config/spark/dev/` | catalog resolution and object read/write | D1 | Data-platform owner | Secret handling | Not started |
+| `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; verifier tests | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Test-data determinism | Not started |
+| `P1-3.1-P1` | `P1-3.1` | Production | Deploy approved master recovery design, multi-host workers, durable scratch policy, and restricted submission. | Platform owner | `P1-3.1-S1`, production infrastructure | `deploy/prod/spark/` | worker/master loss and RTO/RPO evidence | P1-P4 | Operations owner | Availability exception | Not started |
+| `P1-3.2-P1` | `P1-3.2` | Production | Apply Spark auth/crypto, managed secrets, trusted TLS proxying, and least-privilege Polaris/Ceph access. | Security owner | `P1-3.1-P1`, Increment 7 controls | `config/spark/prod/` | positive/negative auth, encrypted transport | P3-P7 | Platform owner | Shared-secret rotation | Not started |
+| `P1-3.6-P1` | `P1-3.6` | Production | Deploy Ceph-backed event logs and history server; prove relocation and continuity. | Operations owner | `P1-3.2-P1` | history-server config/runbook | `s3a://` event continuity and restart test | P8-P9 | Operations owner | Event-log retention | Not started |
+| `P1-3.5-V1` | `P1-3.5` | Production | Run full production pipeline, quality, maintenance, capacity, and worker-failure regression. | QA owner | `P1-3.6-P1` | production reports | JUnit, job IDs, metrics, object/table evidence | P10-P13 | Data owner | Representative workload needed | Not started |
+| `P1-3.G-D` | `P1-3` | Developer | Accept D1-D2 after all producing tasks and evidence are accepted. | Platform owner | `P1-3.3-V1` | developer gate record | gate matrix/evidence index | D1-D2 | Data owner | Open functional defect | Not started |
+| `P1-3.G-P` | `P1-3` | Production | Accept P1-P13 with promotion manifest and no developer shortcuts. | Platform owner | `P1-3.5-V1` | production gate record | gate matrix, recovery and readiness evidence | P1-P13 | Operations owner | Open production defect | Not started |
+
+## 13. Completion Gates
 
 ### Developer gate
 
-- [ ] Reduced Podman topology starts/stops idempotently and ingestion, transformations, quality gates, maintenance decisions, and verifier tests pass.
-- [ ] Local volumes, local certificates, reduced workers, and bootstrap credentials are recorded in the promotion manifest.
+- [ ] **D1** - Reduced Podman topology starts/stops idempotently and ingestion, transformations, quality gates, maintenance decisions, and verifier tests pass.
+- [ ] **D2** - Local volumes, local certificates, reduced workers, and bootstrap credentials are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 3 is accepted when all of the following are true:
 
-- [ ] Spark master container running and managed by systemd on `spark-master.stratus.local`
-- [ ] Both Spark workers running and showing `ALIVE` in the master web UI
-- [ ] Spark connects to Polaris and resolves all four namespaces
-- [ ] Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
-- [ ] image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
-- [ ] `SparkPipelineVerificationTest` — all eleven tests pass against the live cluster
-- [ ] Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
-- [ ] Quality results written to `platform.quality_check_results` and queryable via Spark SQL
-- [ ] Promotion gate correctly blocks silver promotion when a blocking quality check fails
-- [ ] Table maintenance runs without error and records the metadata signals used to choose snapshot expiry and compaction actions
-- [ ] `spark-submit` test job executes successfully on the standalone cluster
-- [ ] production event logs persist at `s3a://stratus-platform/spark-event-logs/` and remain readable after history-server relocation; trusted TLS, managed credentials, capacity evidence, and worker failure recovery are proven
-- [ ] Spark master availability matches the approved RTO/RPO design or has an accepted exception
+- [ ] **P1** - Spark master container running and managed by systemd on `spark-master.stratus.local`
+- [ ] **P2** - Both Spark workers running and showing `ALIVE` in the master web UI
+- [ ] **P3** - Spark connects to Polaris and resolves all four namespaces
+- [ ] **P4** - Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
+- [ ] **P5** - image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
+- [ ] **P6** - `SparkPipelineVerificationTest` — all eleven tests pass against the live cluster
+- [ ] **P7** - Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
+- [ ] **P8** - Quality results written to `platform.quality_check_results` and queryable via Spark SQL
+- [ ] **P9** - Promotion gate correctly blocks silver promotion when a blocking quality check fails
+- [ ] **P10** - Table maintenance runs without error and records the metadata signals used to choose snapshot expiry and compaction actions
+- [ ] **P11** - `spark-submit` test job executes successfully on the standalone cluster
+- [ ] **P12** - production event logs persist at `s3a://stratus-platform/spark-event-logs/` and remain readable after history-server relocation; trusted TLS, managed credentials, capacity evidence, and worker failure recovery are proven
+- [ ] **P13** - Spark master availability matches the approved RTO/RPO design or has an accepted exception
 
 The developer gate may unblock Increment 4 engineering. Only the production gate marks Increment 3 accepted in the Phase 1 tracker.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Workers do not appear in the master UI
 
@@ -915,7 +932,7 @@ The developer gate may unblock Increment 4 engineering. Only the production gate
 
 ---
 
-## 14. References
+## 15. References
 
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
 - Apache Spark 4.1.2 S3A dependency example: https://spark.apache.org/docs/4.1.2/running-on-kubernetes.html#dependency-management

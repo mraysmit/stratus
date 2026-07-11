@@ -764,41 +764,59 @@ Do not sign off Increment 5 if Trino can still query governed Iceberg tables whi
 
 ---
 
-## 13. Completion Gates
+## 13. Implementation Task Track
+
+These tasks execute `P1-5.1` through `P1-5.5`; evidence belongs under `evidence/phase1/increment5/<task-id>/`.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-5.1-S1` | `P1-5.1` | Shared | Lock Trino image/plugins/config verifier and publish immutable artifacts. | Build owner | P1-4 developer gate | `docker/trino/`; plugin lock | scan, digest, startup/plugin smoke | D1, P1-P2 | Platform owner | Plugin compatibility | Not started |
+| `P1-5.1-D1` | `P1-5.1` | Developer | Deploy idempotent reduced coordinator/worker profile. | Query owner | `P1-5.1-S1` | `deploy/dev/trino/` | lifecycle and node health | D1 | Platform owner | Local resources | Not started |
+| `P1-5.2-D1` | `P1-5.2` | Developer | Configure Polaris, Ceph, CA trust, and lab authorization. | Query owner | `P1-5.1-D1` | `config/trino/dev/` | catalog/table resolution and negative access | D1 | Security owner | Credentials | Not started |
+| `P1-5.5-V1` | `P1-5.5` | Developer | Run bronze/silver/gold, quality, JDBC, and cross-engine correctness tests. | QA owner | `P1-5.2-D1` | query/verifier tests | JUnit, query output, Spark comparison | D1-D2 | Data owner | Test-data parity | Not started |
+| `P1-5.1-P1` | `P1-5.1` | Production | Deploy coordinator/workers across failure domains with capacity and restart controls. | Platform owner | `P1-5.1-S1` | `deploy/prod/trino/` | node loss, restart, capacity evidence | P1-P5 | Operations owner | Sizing | Not started |
+| `P1-5.2-P1` | `P1-5.2` | Production | Apply HTTPS/OIDC, internal secret/TLS, managed catalog secrets, and least privilege. | Security owner | `P1-5.1-P1`, Increment 7 controls | `config/trino/prod/` | positive/negative auth and rotation | P4-P10 | Platform owner | Identity integration | Not started |
+| `P1-5.3-P1` | `P1-5.3` | Production | Integrate Ranger policies, workload controls, resource groups, and audit. | Query/security owners | `P1-5.2-P1` | policy/resource-group configs | allow/deny, audit, queue/concurrency tests | P8-P13 | Security owner | Ranger plugin compatibility | Not started |
+| `P1-5.4-R1` | `P1-5.4` | Production | Prove failure, query cancellation, recovery, observability, and runbooks. | Operations owner | `P1-5.3-P1` | `runbooks/trino/` | drills, alerts, dashboard and log evidence | P12-P16 | Operations owner | Maintenance window | Not started |
+| `P1-5.5-V2` | `P1-5.5` | Production | Run production JDBC/correctness/performance regression. | QA owner | `P1-5.4-R1` | production reports | JUnit, query metrics, policy evidence | P15-P18 | Data owner | Workload dataset | Not started |
+| `P1-5.G-D` | `P1-5` | Developer | Accept D1-D2. | Platform owner | `P1-5.5-V1` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P1-5.G-P` | `P1-5` | Production | Accept P1-P18 with promotion evidence. | Platform owner | `P1-5.5-V2` | production gate record | gate/evidence matrix | P1-P18 | Operations owner | Open production defect | Not started |
+
+## 14. Completion Gates
 
 ### Developer gate
 
-- [ ] Reduced Podman cluster and isolated HTTP endpoint pass Polaris/Ceph table resolution, query parity, quality visibility, and JDBC verification.
-- [ ] HTTP, reduced topology, local certificates, and bootstrap identities are recorded in the promotion manifest.
+- [ ] **D1** - Reduced Podman cluster and isolated HTTP endpoint pass Polaris/Ceph table resolution, query parity, quality visibility, and JDBC verification.
+- [ ] **D2** - HTTP, reduced topology, local certificates, and bootstrap identities are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 5 is accepted when all of the following are true:
 
-- [ ] Trino coordinator container running and managed by systemd on `trino-coordinator.stratus.local`
-- [ ] Both Trino worker containers running and managed by systemd
-- [ ] Trino web UI and client endpoint are reachable through trusted HTTPS/OIDC; port 8080 is internal only if retained
-- [ ] Trino reports one coordinator and two active workers
-- [ ] `stratus` catalog configured with the Iceberg connector and Apache Polaris REST catalog
-- [ ] Trino uses native S3 access to Ceph RGW with path-style access enabled
-- [ ] Bronze, silver, gold, and platform schemas visible through Trino
-- [ ] Trino can query Spark-produced bronze, silver, and gold verification tables
-- [ ] Bronze row count matches Spark ingestion output
-- [ ] Silver row count matches Spark deduplication output
-- [ ] Gold aggregate results match Spark materialisation output
-- [ ] `stratus.platform.quality_check_results` is queryable
-- [ ] Cross-zone join works for the verification principal where policy permits
-- [ ] Invalid column query fails with a clear SQL error
-- [ ] Iceberg metadata tables, such as `$snapshots`, are queryable through Trino
-- [ ] `TrinoQueryVerificationTest` passes against the live Trino cluster
-- [ ] Trino does not expose an unmanaged catalog path that bypasses Polaris
-- [ ] Ranger enforcement, managed Ceph RGW credentials, durable logs, capacity evidence, and node/coordinator recovery evidence are complete
+- [ ] **P1** - Trino coordinator container running and managed by systemd on `trino-coordinator.stratus.local`
+- [ ] **P2** - Both Trino worker containers running and managed by systemd
+- [ ] **P3** - Trino web UI and client endpoint are reachable through trusted HTTPS/OIDC; port 8080 is internal only if retained
+- [ ] **P4** - Trino reports one coordinator and two active workers
+- [ ] **P5** - `stratus` catalog configured with the Iceberg connector and Apache Polaris REST catalog
+- [ ] **P6** - Trino uses native S3 access to Ceph RGW with path-style access enabled
+- [ ] **P7** - Bronze, silver, gold, and platform schemas visible through Trino
+- [ ] **P8** - Trino can query Spark-produced bronze, silver, and gold verification tables
+- [ ] **P9** - Bronze row count matches Spark ingestion output
+- [ ] **P10** - Silver row count matches Spark deduplication output
+- [ ] **P11** - Gold aggregate results match Spark materialisation output
+- [ ] **P12** - `stratus.platform.quality_check_results` is queryable
+- [ ] **P13** - Cross-zone join works for the verification principal where policy permits
+- [ ] **P14** - Invalid column query fails with a clear SQL error
+- [ ] **P15** - Iceberg metadata tables, such as `$snapshots`, are queryable through Trino
+- [ ] **P16** - `TrinoQueryVerificationTest` passes against the live Trino cluster
+- [ ] **P17** - Trino does not expose an unmanaged catalog path that bypasses Polaris
+- [ ] **P18** - Ranger enforcement, managed Ceph RGW credentials, durable logs, capacity evidence, and node/coordinator recovery evidence are complete
 
 The developer gate may unblock Increment 6 engineering. Only the production gate marks Increment 5 accepted in the Phase 1 tracker.
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 ### Coordinator starts but workers do not appear
 
@@ -869,7 +887,7 @@ Common causes:
 
 ---
 
-## 15. References
+## 16. References
 
 - Trino Iceberg connector: https://trino.io/docs/current/connector/iceberg.html
 - Trino REST catalog properties: https://trino.io/docs/current/object-storage/metastores.html#rest-catalog

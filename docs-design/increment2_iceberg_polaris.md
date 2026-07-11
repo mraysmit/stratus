@@ -805,36 +805,54 @@ Increment 2 must produce production-readiness evidence for the catalog control p
 
 ---
 
-## 12. Completion Gates
+## 12. Implementation Task Track
+
+These child tasks are the execution source of truth for Phase 1 parents `P1-2.1` through `P1-2.6`. IDs must be used in issues, pull requests, evidence paths, and gate records. Evidence is stored under `evidence/phase1/increment2/<task-id>/`; valid states are `Not started`, `In progress`, `Blocked`, `Built`, `Verified`, and `Accepted`.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `docker/polaris/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
+| `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `deploy/dev/polaris/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Local resource limits | Not started |
+| `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches contract. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `config/polaris/dev/`; bootstrap module | Namespace/location inventory and access tests | D1 | Security owner | Credential leakage | Not started |
+| `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | None recorded | Not started |
+| `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `infra/postgresql/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
+| `P1-2.2-P1` | `P1-2.2` | Production | Deploy redundant production Polaris services with trusted TLS, health routing, immutable image, and managed config. | Platform owner | `P1-2.1-P1` | `deploy/prod/polaris/` | Endpoint failover, config snapshot, digest check | P1-P5 | Operations owner | Load-balancer ownership | Not started |
+| `P1-2.3-P1` | `P1-2.3` | Production | Apply service identities, least-privilege catalog roles, Ceph bindings, secret injection, and rotation. | Security owner | `P1-2.2-P1`, Increment 7 controls | `config/polaris/prod/`; policy records | Positive/negative authorization and rotation tests | P4-P7 | Data-platform owner | Final identity integration | Not started |
+| `P1-2.5-P1` | `P1-2.5` | Production | Verify metadata-driven maintenance thresholds and safe snapshot/orphan behavior. | Data-platform owner | `P1-2.3-P1` | maintenance queries/runbook | Metadata queries, dry-run and applied-action evidence | P8-P9 | Data-engineering owner | Unsafe retention setting | Not started |
+| `P1-2.6-R1` | `P1-2.6` | Production | Execute catalog/database/object consistency backup and restore; done when restored tables resolve to valid Ceph objects. | Operations owner | `P1-2.5-P1` | restore runbook and evidence | Timed restore, consistency queries, audit events | P10-P12 | Platform owner | Restore point mismatch | Not started |
+| `P1-2.G-D` | `P1-2` | Developer | Accept developer gate after D1-D2 have accepted producing tasks. | Platform owner | `P1-2.4-V1` | developer gate record | Gate matrix and evidence index | D1-D2 | Data-platform owner | Open functional defect | Not started |
+| `P1-2.G-P` | `P1-2` | Production | Run production regression and accept P1-P13 with no developer-only setting remaining. | Platform owner | `P1-2.6-R1`, Increment 7 controls | production gate/promotion record | Full verifier, resilience, observability and readiness evidence | P1-P13 | Architecture and operations owners | Open production defect | Not started |
+
+## 13. Completion Gates
 
 ### Developer gate
 
-- [ ] Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier contracts pass.
-- [ ] H2, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
+- [ ] **D1** - Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier contracts pass.
+- [ ] **D2** - H2, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
 
 ### Production gate
 
 Increment 2 is accepted when all of the following are true:
 
-- [ ] Polaris container running and managed by systemd on `polaris.stratus.local`
-- [ ] Polaris REST API responding at `https://polaris.stratus.local:8181` with TLS
-- [ ] Polaris uses the approved external metadata store; embedded H2 is not used for completion evidence
-- [ ] Metadata-store backup, restore, monitoring, and HA/failover posture are documented and tested
-- [ ] `stratus` catalog created in Polaris
-- [ ] Four namespaces exist: `bronze`, `silver`, `gold`, `platform`
-- [ ] `svc-spark` and `svc-trino` principals created in Polaris with correct roles
-- [ ] `platform.quality_check_results` Iceberg table created with correct schema
-- [ ] `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
-- [ ] Iceberg metadata files visible in Ceph RGW buckets through the approved S3 client
-- [ ] Restored Polaris resolves table identifiers to the same expected Iceberg metadata locations in Ceph RGW
-- [ ] Catalog audit logging and catalog/metadata-store alerts are configured
-- [ ] Polaris logs show no errors during the verification test run
+- [ ] **P1** - Polaris container running and managed by systemd on `polaris.stratus.local`
+- [ ] **P2** - Polaris REST API responding at `https://polaris.stratus.local:8181` with TLS
+- [ ] **P3** - Polaris uses the approved external metadata store; embedded H2 is not used for completion evidence
+- [ ] **P4** - Metadata-store backup, restore, monitoring, and HA/failover posture are documented and tested
+- [ ] **P5** - `stratus` catalog created in Polaris
+- [ ] **P6** - Four namespaces exist: `bronze`, `silver`, `gold`, `platform`
+- [ ] **P7** - `svc-spark` and `svc-trino` principals created in Polaris with correct roles
+- [ ] **P8** - `platform.quality_check_results` Iceberg table created with correct schema
+- [ ] **P9** - `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
+- [ ] **P10** - Iceberg metadata files visible in Ceph RGW buckets through the approved S3 client
+- [ ] **P11** - Restored Polaris resolves table identifiers to the same expected Iceberg metadata locations in Ceph RGW
+- [ ] **P12** - Catalog audit logging and catalog/metadata-store alerts are configured
+- [ ] **P13** - Polaris logs show no errors during the verification test run
 
 The developer gate may unblock Increment 3 engineering. Only the production gate marks Increment 2 accepted in the Phase 1 tracker.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Polaris container exits on startup
 
@@ -872,7 +890,7 @@ Common causes:
 
 ---
 
-## 14. References
+## 15. References
 
 - Apache Polaris documentation: https://polaris.apache.org/
 - Apache Polaris GitHub: https://github.com/apache/polaris

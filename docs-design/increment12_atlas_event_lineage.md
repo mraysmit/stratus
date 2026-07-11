@@ -351,36 +351,52 @@ Minimum alerts:
 
 ---
 
-## 12. Completion Gates
+## 12. Implementation Task Track
+
+Evidence for these stable tasks belongs under `evidence/phase2/increment12/<task-id>/`.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-12.S1` | Shared | Lock event schemas, Atlas model, publisher image, retry/DLQ contracts, and verifier. | Governance owner | P2-11 developer gate | schema/model/service modules | build, schema compatibility, smoke | D1, P1-P3 | Data owner | Model evolution | Not started |
+| `P2-12.D1` | Developer | Deploy publisher and developer topics; publish idempotent lineage for streaming runs. | Governance owner | `P2-12.S1` | `services/atlas-lineage/`; dev config | entity/lineage creation and duplicate suppression | D1 | Data owner | Atlas fixture | Not started |
+| `P2-12.D2` | Developer | Prove retry, DLQ, replay, reconciliation, quality status, and malformed-event handling. | QA owner | `P2-12.D1` | verifier/tests | JUnit, DLQ and reconciliation reports | D1-D2 | Governance owner | Deterministic retries | Not started |
+| `P2-12.P1` | Production | Deploy redundant publisher with TLS/auth, managed secrets, ACLs, schema controls, and Atlas production dependencies. | Platform/governance owners | `P2-12.S1`, P2-11 production gate | production service/config | auth negative tests, failover and publish | P1-P8 | Security owner | Atlas capacity | Not started |
+| `P2-12.P2` | Production | Apply retention, audit, replay boundaries, reconciliation schedule, ownership, alerts, and change controls. | Governance owner | `P2-12.P1` | governance operations config | audit, scheduled reconciliation, alert exercise | P7-P11 | Data owner | Replay duplication | Not started |
+| `P2-12.R1` | Production | Execute Kafka/Atlas/publisher outage, DLQ recovery, rebuild, rollback, and model migration drills. | Operations owner | `P2-12.P2` | `runbooks/atlas-lineage/` | timed drills, defects/reruns, restored lineage | P10-P12 | Platform owner | Maintenance window | Not started |
+| `P2-12.V1` | Production | Run full event-to-lineage correctness, lag, throughput, idempotency, and observability regression. | QA owner | `P2-12.R1` | production reports | JUnit, lineage graph, metrics | P12-P13 | Governance owner | Representative event rate | Not started |
+| `P2-12.G-D` | Developer | Accept D1-D2. | Governance owner | `P2-12.D2` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P2-12.G-P` | Production | Accept P1-P13. | Platform owner | `P2-12.V1` | production gate record | evidence/promotion index | P1-P13 | Governance/operations owners | Open production defect | Not started |
+
+## 13. Completion Gates
 
 ### Developer gate
 
-- [ ] Isolated Atlas notification topics and test entities prove notification delivery, lineage publication, classification, and Ranger allow/deny behavior.
-- [ ] Reduced replication, test identities, and embedded-notifier source configuration are recorded in the promotion manifest.
+- [ ] **D1** - Isolated Atlas notification topics and test entities prove notification delivery, lineage publication, classification, and Ranger allow/deny behavior.
+- [ ] **D2** - Reduced replication, test identities, and embedded-notifier source configuration are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 12 is accepted when:
 
-- [ ] Atlas uses platform Kafka topics for notifications
-- [ ] `svc-atlas` Kafka ACLs are least-privilege
-- [ ] Atlas notification events are visible on approved Kafka topics
-- [ ] streaming source, connector, topic, Flink job, and Iceberg table entities exist in Atlas
-- [ ] lineage connects source database to Kafka topic to Flink job to Iceberg table
-- [ ] latest snapshot id and quality status update after streaming commits
-- [ ] streaming table classifications are applied
-- [ ] Ranger policies govern streaming-created tables through Trino
-- [ ] Ranger audit records allow and deny decisions
-- [ ] Java verification suite passes
-- [ ] governance dashboards and alerts are configured
-- [ ] Atlas no longer depends on an embedded notifier or an Atlas-dedicated Kafka service unless a documented production exception retains that service
-- [ ] notification replay, Atlas restart, broker failure, lineage republish, and Ranger policy refresh drills have current evidence
+- [ ] **P1** - Atlas uses platform Kafka topics for notifications
+- [ ] **P2** - `svc-atlas` Kafka ACLs are least-privilege
+- [ ] **P3** - Atlas notification events are visible on approved Kafka topics
+- [ ] **P4** - streaming source, connector, topic, Flink job, and Iceberg table entities exist in Atlas
+- [ ] **P5** - lineage connects source database to Kafka topic to Flink job to Iceberg table
+- [ ] **P6** - latest snapshot id and quality status update after streaming commits
+- [ ] **P7** - streaming table classifications are applied
+- [ ] **P8** - Ranger policies govern streaming-created tables through Trino
+- [ ] **P9** - Ranger audit records allow and deny decisions
+- [ ] **P10** - Java verification suite passes
+- [ ] **P11** - governance dashboards and alerts are configured
+- [ ] **P12** - Atlas no longer depends on an embedded notifier or an Atlas-dedicated Kafka service unless a documented production exception retains that service
+- [ ] **P13** - notification replay, Atlas restart, broker failure, lineage republish, and Ranger policy refresh drills have current evidence
 
 The developer gate completes engineering integration. Only the production gate allows Increment 13 to begin production-readiness signoff.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Atlas does not publish Kafka events
 
@@ -404,7 +420,7 @@ The developer gate completes engineering integration. Only the production gate a
 
 ---
 
-## 14. References
+## 15. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Increment 6 - Atlas and Ranger: [increment6_atlas_ranger.md](increment6_atlas_ranger.md)
