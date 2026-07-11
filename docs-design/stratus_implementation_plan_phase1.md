@@ -87,6 +87,8 @@ Evidence should be durable enough that another engineer can understand what pass
 
 ### Phase 1 Work-Package Tracker
 
+The rows below are portfolio-level parent work packages. Each owning increment document decomposes its parent IDs into shared (`S`), developer (`D`), production (`P`), verification (`V`), recovery (`R`), and gate (`G`) child tasks with deliverable paths and gate mappings. The execution sources of truth are the Implementation Task Track sections in [Increment 1](increment1_ceph.md#17-implementation-task-track), [Increment 2](increment2_iceberg_polaris.md#12-implementation-task-track), [Increment 3](increment3_spark.md#12-implementation-task-track), [Increment 4](increment4_airflow.md#15-implementation-task-track), [Increment 5](increment5_trino.md#13-implementation-task-track), [Increment 6](increment6_atlas_ranger.md#15-implementation-task-track), and [Increment 7](increment7_identity_security.md#16-implementation-task-track). This table remains the portfolio roll-up.
+
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
 | P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | Not started |

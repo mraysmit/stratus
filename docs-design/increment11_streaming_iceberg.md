@@ -499,41 +499,57 @@ Minimum alerts:
 
 ---
 
-## 14. Completion Gates
+## 14. Implementation Task Track
+
+Evidence for these stable tasks belongs under `evidence/phase2/increment11/<task-id>/`.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-11.S1` | Shared | Lock table/event contracts, Flink-Iceberg artifacts, maintenance rules, and verifier datasets. | Data-platform owner | P2-10 developer gate | schema/contracts/jobs | compatibility and build smoke | D1, P1-P3 | Data owner | Schema compatibility | Not started |
+| `P2-11.D1` | Developer | Provision streaming tables and run idempotent developer writer with local checkpoints. | Data-engineering owner | `P2-11.S1` | `jobs/flink-iceberg/`; table bootstrap | commit/snapshot and restart evidence | D1 | Data-platform owner | Small-file growth | Not started |
+| `P2-11.D2` | Developer | Prove replay, deduplication, schema evolution, quality, maintenance, and Trino visibility. | QA owner | `P2-11.D1` | verifier/tests | duplicate/loss checks and query results | D1-D2 | Data owner | Event identity contract | Not started |
+| `P2-11.P1` | Production | Deploy writer against production Kafka, Polaris, Ceph state, managed identities, and protected table branches/namespaces. | Data-engineering owner | `P2-11.S1`, P2-10 production gate | production job/config | auth, commit, checkpoint and failover | P1-P9 | Platform owner | Commit contention | Not started |
+| `P2-11.P2` | Production | Implement compaction, snapshot/orphan/delete-file controls, schema governance, quality alerts, and workload limits. | Data-platform owner | `P2-11.P1` | maintenance/policy configs | metadata thresholds and safe maintenance | P7-P13 | Data owner | Retention safety | Not started |
+| `P2-11.R1` | Production | Execute replay/rebuild, checkpoint loss, partial commit, catalog/object outage, rollback, and reconciliation drills. | Operations/data owners | `P2-11.P2` | `runbooks/streaming-iceberg/` | timed drills, row/snapshot reconciliation | P12-P17 | Platform owner | Destructive replay | Not started |
+| `P2-11.V1` | Production | Run end-to-end correctness, freshness, throughput, file-size, query, and observability regression. | QA/performance owners | `P2-11.R1` | production reports | JUnit, metrics, Trino comparisons | P16-P18 | Data owner | Representative volume | Not started |
+| `P2-11.G-D` | Developer | Accept D1-D2. | Data-platform owner | `P2-11.D2` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P2-11.G-P` | Production | Accept P1-P18. | Platform owner | `P2-11.V1` | production gate record | evidence/promotion index | P1-P18 | Data/operations owners | Open production defect | Not started |
+
+## 15. Completion Gates
 
 ### Developer gate
 
-- [ ] Isolated verification tables receive CDC records, commit on checkpoints, become visible in Trino, and recover from a local restart without unacceptable duplicates.
-- [ ] Local state, reduced parallelism, test credentials, and developer namespaces are recorded in the promotion manifest.
+- [ ] **D1** - Isolated verification tables receive CDC records, commit on checkpoints, become visible in Trino, and recover from a local restart without unacceptable duplicates.
+- [ ] **D2** - Local state, reduced parallelism, test credentials, and developer namespaces are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 11 is accepted when:
 
-- [ ] Flink runtime, Kafka connector, and Iceberg runtime versions are pinned and compatible
-- [ ] Flink Iceberg image includes `iceberg-flink-runtime-2.1` 1.11.0 and `iceberg-aws-bundle` 1.11.0
-- [ ] `svc-flink` resolves tables through Polaris REST catalog
-- [ ] `svc-flink` writes data files only to approved Ceph RGW locations
-- [ ] streaming-owned bronze table exists and is documented
-- [ ] optional silver current-state table is either implemented safely or explicitly deferred
-- [ ] Flink job consumes Debezium CDC topic and writes bronze Iceberg records
-- [ ] Iceberg snapshots are committed after successful checkpoints
-- [ ] Trino sees committed streaming records
-- [ ] restart from checkpoint/savepoint does not create unacceptable duplicates
-- [ ] streaming quality results are written to `platform.quality_check_results`
-- [ ] small-file thresholds are defined and verification workload stays within them
-- [ ] Spark/Airflow maintenance conflict rules are documented
-- [ ] Java verification suite passes
-- [ ] operational dashboards and alerts exist
-- [ ] checkpoint/savepoint state is stored in Ceph RGW and no production path uses `file://`
-- [ ] authenticated HTTPS protects Flink operations, and production Polaris/RGW/Kafka credentials are managed and scoped
-- [ ] streaming-safe maintenance and commit ownership have been exercised under concurrent Trino reads and scheduled maintenance
+- [ ] **P1** - Flink runtime, Kafka connector, and Iceberg runtime versions are pinned and compatible
+- [ ] **P2** - Flink Iceberg image includes `iceberg-flink-runtime-2.1` 1.11.0 and `iceberg-aws-bundle` 1.11.0
+- [ ] **P3** - `svc-flink` resolves tables through Polaris REST catalog
+- [ ] **P4** - `svc-flink` writes data files only to approved Ceph RGW locations
+- [ ] **P5** - streaming-owned bronze table exists and is documented
+- [ ] **P6** - optional silver current-state table is either implemented safely or explicitly deferred
+- [ ] **P7** - Flink job consumes Debezium CDC topic and writes bronze Iceberg records
+- [ ] **P8** - Iceberg snapshots are committed after successful checkpoints
+- [ ] **P9** - Trino sees committed streaming records
+- [ ] **P10** - restart from checkpoint/savepoint does not create unacceptable duplicates
+- [ ] **P11** - streaming quality results are written to `platform.quality_check_results`
+- [ ] **P12** - small-file thresholds are defined and verification workload stays within them
+- [ ] **P13** - Spark/Airflow maintenance conflict rules are documented
+- [ ] **P14** - Java verification suite passes
+- [ ] **P15** - operational dashboards and alerts exist
+- [ ] **P16** - checkpoint/savepoint state is stored in Ceph RGW and no production path uses `file://`
+- [ ] **P17** - authenticated HTTPS protects Flink operations, and production Polaris/RGW/Kafka credentials are managed and scoped
+- [ ] **P18** - streaming-safe maintenance and commit ownership have been exercised under concurrent Trino reads and scheduled maintenance
 
 The developer gate may unblock Increment 12 engineering. Only the production gate marks Increment 11 accepted in the Phase 2 tracker.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### Flink cannot resolve the Polaris catalog
 
@@ -571,7 +587,7 @@ The developer gate may unblock Increment 12 engineering. Only the production gat
 
 ---
 
-## 16. References
+## 17. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)

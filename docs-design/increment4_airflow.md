@@ -1204,41 +1204,58 @@ After the maintenance DAG runs, inspect the target tables:
 
 ---
 
-## 15. Completion Gates
+## 15. Implementation Task Track
+
+These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/phase1/increment4/<task-id>/` and IDs remain stable in delivery tooling.
+
+| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `docker/airflow/`; dependency locks | build, scan, import and provider smoke tests | D1, P1-P3 | Platform owner | Provider compatibility | Not started |
+| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S1` | `deploy/dev/airflow/` | two lifecycle cycles and DB migration output | D1 | Platform owner | Local resources | Not started |
+| `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `dags/`; `config/airflow/dev/` | Spark task and secret-redaction evidence | D1 | Security owner | Connection leakage | Not started |
+| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | DAG modules/tests | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | Alert sink availability | Not started |
+| `P1-4.1-P1` | `P1-4.1` | Production | Provision external PostgreSQL TLS/backup/restore and production Airflow service placement. | Database and operations owners | `P1-4.1-S1` | `deploy/prod/airflow/`; DB runbook | migration, failover/recovery, service restart | P1-P6 | Platform owner | DB HA decision | Not started |
+| `P1-4.2-P1` | `P1-4.2` | Production | Apply OIDC/HTTPS, managed secrets, immutable DAG promotion, Ceph remote logs, and restricted administration. | Security owner | `P1-4.1-P1`, Increment 7 controls | `config/airflow/prod/` | auth negative tests, log continuity, rotation | P5-P11 | Operations owner | OIDC integration | Not started |
+| `P1-4.5-R1` | `P1-4.5` | Production | Prove scheduler/service failure, DB restore, DAG rollback, retry safety, and alert routing. | Operations owner | `P1-4.2-P1` | `runbooks/airflow/` | timed drills, restored run metadata, alert exercise | P12-P16 | Platform owner | Maintenance window | Not started |
+| `P1-4.4-V1` | `P1-4.4` | Production | Run production DAG and quality-gate regression with capacity and observability evidence. | QA owner | `P1-4.5-R1` | production test reports | run IDs, JUnit, metrics, failed promotion proof | P15-P18 | Data owner | Representative schedule load | Not started |
+| `P1-4.G-D` | `P1-4` | Developer | Accept D1-D2. | Platform owner | `P1-4.3-V1` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P1-4.G-P` | `P1-4` | Production | Accept P1-P18 with promotion and readiness evidence. | Platform owner | `P1-4.4-V1` | production gate record | gate/evidence matrix | P1-P18 | Operations owner | Open production defect | Not started |
+
+## 16. Completion Gates
 
 ### Developer gate
 
-- [ ] Single-host Airflow 3.3.0 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
-- [ ] Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
+- [ ] **D1** - Single-host Airflow 3.3.0 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
+- [ ] **D2** - Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 4 is accepted when all of the following are true:
 
-- [ ] PostgreSQL metadata database running and managed by systemd on `airflow.stratus.local`
-- [ ] Airflow API server running and managed by systemd on `airflow.stratus.local`
-- [ ] Airflow DAG processor running and managed by systemd
-- [ ] Airflow scheduler running and managed by systemd on `airflow.stratus.local`
-- [ ] Airflow triggerer running and managed by systemd
-- [ ] Airflow UI and public REST API are reachable through trusted HTTPS/OIDC; port 8088, if retained internally, is not an unauthenticated production ingress
-- [ ] Airflow DAG import check reports no errors
-- [ ] All four DAGs exist: `stratus_landing_to_bronze`, `stratus_bronze_to_silver`, `stratus_silver_to_gold`, `stratus_table_maintenance`
-- [ ] Airflow can submit Spark jobs to `spark-master.stratus.local:7077`
-- [ ] Landing-to-bronze DAG detects a source file and writes a bronze Iceberg table
-- [ ] Bronze-to-silver DAG runs quality checks and blocks downstream transform when a blocking failure exists
-- [ ] Silver-to-gold DAG materialises a gold table when quality passes
-- [ ] Maintenance DAG inspects Iceberg metadata tables, applies per-table policy, and runs or skips snapshot expiry and file rewrite operations with recorded evidence
-- [ ] Task retries work for a transient failure
-- [ ] Failure alerts fire when a task exhausts retries
-- [ ] `AirflowOrchestrationVerificationTest` passes against the live platform
-- [ ] Airflow task logs include run IDs, target tables, Spark application IDs, and quality gate decisions
-- [ ] external metadata database and remote logs restore successfully; managed secrets and scheduler/DAG-processor availability meet the approved RTO/RPO design
+- [ ] **P1** - PostgreSQL metadata database running and managed by systemd on `airflow.stratus.local`
+- [ ] **P2** - Airflow API server running and managed by systemd on `airflow.stratus.local`
+- [ ] **P3** - Airflow DAG processor running and managed by systemd
+- [ ] **P4** - Airflow scheduler running and managed by systemd on `airflow.stratus.local`
+- [ ] **P5** - Airflow triggerer running and managed by systemd
+- [ ] **P6** - Airflow UI and public REST API are reachable through trusted HTTPS/OIDC; port 8088, if retained internally, is not an unauthenticated production ingress
+- [ ] **P7** - Airflow DAG import check reports no errors
+- [ ] **P8** - All four DAGs exist: `stratus_landing_to_bronze`, `stratus_bronze_to_silver`, `stratus_silver_to_gold`, `stratus_table_maintenance`
+- [ ] **P9** - Airflow can submit Spark jobs to `spark-master.stratus.local:7077`
+- [ ] **P10** - Landing-to-bronze DAG detects a source file and writes a bronze Iceberg table
+- [ ] **P11** - Bronze-to-silver DAG runs quality checks and blocks downstream transform when a blocking failure exists
+- [ ] **P12** - Silver-to-gold DAG materialises a gold table when quality passes
+- [ ] **P13** - Maintenance DAG inspects Iceberg metadata tables, applies per-table policy, and runs or skips snapshot expiry and file rewrite operations with recorded evidence
+- [ ] **P14** - Task retries work for a transient failure
+- [ ] **P15** - Failure alerts fire when a task exhausts retries
+- [ ] **P16** - `AirflowOrchestrationVerificationTest` passes against the live platform
+- [ ] **P17** - Airflow task logs include run IDs, target tables, Spark application IDs, and quality gate decisions
+- [ ] **P18** - external metadata database and remote logs restore successfully; managed secrets and scheduler/DAG-processor availability meet the approved RTO/RPO design
 
 The developer gate may unblock Increment 5 engineering. Only the production gate marks Increment 4 accepted in the Phase 1 tracker.
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### Airflow API server cannot connect to metadata database
 
@@ -1321,7 +1338,7 @@ Common causes:
 
 ---
 
-## 17. References
+## 18. References
 
 - Apache Airflow documentation: https://airflow.apache.org/docs/
 - Airflow 3.3 prerequisites and supported databases/Python: https://airflow.apache.org/docs/apache-airflow/stable/installation/prerequisites.html

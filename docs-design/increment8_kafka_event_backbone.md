@@ -842,44 +842,60 @@ Expected: ISR recovers and alert clears.
 
 ---
 
-## 17. Completion Gates
+## 17. Implementation Task Track
+
+These stable tasks drive Increment 8. Evidence belongs under `evidence/phase2/increment8/<task-id>/`; each row must be assigned, verified, and accepted independently.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-8.S1` | Shared | Lock Kafka images, configs, topic templates, client/verifier artifacts, and compatibility matrix. | Build owner | Phase 1 readiness | `docker/kafka/`; `config/kafka/`; verifier | scans, digests, config lint, smoke | D1, P1-P3 | Platform owner | Version compatibility | Not started |
+| `P2-8.D1` | Developer | Deploy idempotent reduced KRaft profile with separate internal/external listeners. | Platform owner | `P2-8.S1` | `deploy/dev/kafka/` | repeated lifecycle, quorum and listener tests | D1 | Operations owner | Local ports/resources | Not started |
+| `P2-8.D2` | Developer | Create topic classes, lab identities/ACLs, TLS trust, and producer/consumer verification. | Data-platform owner | `P2-8.D1` | bootstrap/topic/policy files | positive/negative produce/consume and retention evidence | D1-D2 | Security owner | Credential handling | Not started |
+| `P2-8.P1` | Production | Deploy controller/broker topology across failure domains with storage, capacity, TLS, and managed identity. | Platform owner | `P2-8.S1`, Increment 7 | `deploy/prod/kafka/` | quorum, placement, TLS/auth and capacity | P1-P10 | Operations owner | Host/storage capacity | Not started |
+| `P2-8.P2` | Production | Apply production topic inventory, ACLs, retention, quotas, audit, and change controls. | Data-platform/security owners | `P2-8.P1` | production topic/policy records | policy matrix, unauthorized tests, config diff | P7-P14 | Security owner | Topic ownership | Not started |
+| `P2-8.R1` | Production | Implement observability/rebuild runbooks and execute broker, controller, disk, certificate, and restore/rebuild drills. | Operations owner | `P2-8.P2` | `runbooks/kafka/` | alerts, timed failures, recovery and rerun records | P15-P19 | Platform owner | Maintenance window | Not started |
+| `P2-8.V1` | Production | Run throughput, ordering, durability, replay, and full client regression. | QA/performance owners | `P2-8.R1` | production test reports | JUnit, metrics, offsets and loss checks | P18-P21 | Data owner | Representative load | Not started |
+| `P2-8.G-D` | Developer | Accept D1-D2. | Platform owner | `P2-8.D2` | developer gate record | gate/evidence matrix | D1-D2 | Data-platform owner | Open defect | Not started |
+| `P2-8.G-P` | Production | Accept P1-P21 with promotion manifest. | Platform owner | `P2-8.V1` | production gate record | complete evidence index | P1-P21 | Operations/security owners | Open production defect | Not started |
+
+## 18. Completion Gates
 
 ### Developer gate
 
-- [ ] Idempotent startup, health, topic bootstrap, producer/consumer round trip, ACL deny, shutdown, and reset procedures pass on Docker Desktop or Podman.
-- [ ] Developer-only replication, credentials, certificates, storage, and port exposure are recorded in the promotion manifest.
+- [ ] **D1** - Idempotent startup, health, topic bootstrap, producer/consumer round trip, ACL deny, shutdown, and reset procedures pass on Docker Desktop or Podman.
+- [ ] **D2** - Developer-only replication, credentials, certificates, storage, and port exposure are recorded in the promotion manifest.
 
 ### Production gate
 
 Increment 8 is accepted when:
 
-- [ ] Kafka 4.3.1 or the approved current release is pinned by image tag and digest
-- [ ] Kafka runs in KRaft mode with no ZooKeeper dependency
-- [ ] all three brokers/controllers are running and managed by systemd
-- [ ] KRaft quorum reports one leader and three voters
-- [ ] TLS is enabled on broker and controller traffic
-- [ ] the controller listener requires mTLS; the broker listener uses TLS plus SCRAM without accidentally requiring an unconfigured client certificate
-- [ ] normal client commands validate certificates without insecure overrides
-- [ ] SASL/SCRAM authentication is enabled for client traffic
-- [ ] `allow.everyone.if.no.acl.found=false`
-- [ ] `auto.create.topics.enable=false`
-- [ ] service users exist for admin, Connect, Debezium, Flink, Atlas, and verification
-- [ ] ACLs enforce least-privilege topic and group access
-- [ ] topic naming standards and retention classes are documented
-- [ ] verification and dead-letter topics are created with replication factor 3
-- [ ] Java verification suite passes
-- [ ] unauthorized produce or consume attempt fails
-- [ ] one-broker failure simulation behaves as expected
-- [ ] no one-node topology, replication factor `1`, generated credential, local-only volume, or developer certificate remains in production
-- [ ] Prometheus scrapes Kafka metrics
-- [ ] Grafana dashboard shows broker, quorum, partition, request, auth, and lag signals
-- [ ] Kafka runbook covers startup, shutdown, broker failure, topic creation, ACL change, retention change, and credential rotation
+- [ ] **P1** - Kafka 4.3.1 or the approved current release is pinned by image tag and digest
+- [ ] **P2** - Kafka runs in KRaft mode with no ZooKeeper dependency
+- [ ] **P3** - all three brokers/controllers are running and managed by systemd
+- [ ] **P4** - KRaft quorum reports one leader and three voters
+- [ ] **P5** - TLS is enabled on broker and controller traffic
+- [ ] **P6** - the controller listener requires mTLS; the broker listener uses TLS plus SCRAM without accidentally requiring an unconfigured client certificate
+- [ ] **P7** - normal client commands validate certificates without insecure overrides
+- [ ] **P8** - SASL/SCRAM authentication is enabled for client traffic
+- [ ] **P9** - `allow.everyone.if.no.acl.found=false`
+- [ ] **P10** - `auto.create.topics.enable=false`
+- [ ] **P11** - service users exist for admin, Connect, Debezium, Flink, Atlas, and verification
+- [ ] **P12** - ACLs enforce least-privilege topic and group access
+- [ ] **P13** - topic naming standards and retention classes are documented
+- [ ] **P14** - verification and dead-letter topics are created with replication factor 3
+- [ ] **P15** - Java verification suite passes
+- [ ] **P16** - unauthorized produce or consume attempt fails
+- [ ] **P17** - one-broker failure simulation behaves as expected
+- [ ] **P18** - no one-node topology, replication factor `1`, generated credential, local-only volume, or developer certificate remains in production
+- [ ] **P19** - Prometheus scrapes Kafka metrics
+- [ ] **P20** - Grafana dashboard shows broker, quorum, partition, request, auth, and lag signals
+- [ ] **P21** - Kafka runbook covers startup, shutdown, broker failure, topic creation, ACL change, retention change, and credential rotation
 
 The developer gate may unblock Increment 9 engineering. Only the production gate marks Increment 8 accepted in the Phase 2 tracker.
 
 ---
 
-## 18. Troubleshooting
+## 19. Troubleshooting
 
 ### Broker starts but quorum does not form
 
@@ -925,7 +941,7 @@ The developer gate may unblock Increment 9 engineering. Only the production gate
 
 ---
 
-## 19. References
+## 20. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)

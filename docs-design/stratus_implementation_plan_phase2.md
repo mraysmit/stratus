@@ -60,6 +60,21 @@ Kafka comes before Kafka Connect and Debezium because Connect stores connector c
 
 No Increment 8-13 production gate accepts a developer-only replica count, plaintext control API, local filesystem state, generated bootstrap identity, or untested reset procedure. Promotion is an explicit configuration change with evidence, not a relabelling of the same deployment.
 
+### 3.2 Phase 2 Task and Gate Tracker
+
+The owning increment documents contain the executable task rows. Their `P2-*` IDs are canonical and must be used in issues, pull requests, evidence directories, blockers, and acceptance records. This table is the portfolio roll-up; it does not replace task-level status in the increment documents.
+
+| Increment | Canonical task IDs | Delivery owner | Depends on | Roll-up exit evidence | Developer gate | Production gate | Status |
+|---|---|---|---|---|---|---|---|
+| 8 Kafka event backbone | `P2-8.S1`, `P2-8.D1`-`D2`, `P2-8.P1`-`P2`, `P2-8.R1`, `P2-8.V1`, `P2-8.G-D`, `P2-8.G-P` | Data-platform owner | Phase 1 readiness | immutable artifacts, KRaft health, topic/ACL inventory, client tests, failure/rebuild evidence | Not started | Not started | Not started |
+| 9 Connect and Debezium | `P2-9.S1`, `P2-9.D1`-`D2`, `P2-9.P1`-`P2`, `P2-9.R1`, `P2-9.V1`, `P2-9.G-D`, `P2-9.G-P` | Data-integration owner | Increment 8 appropriate gate | image/plugin lock, connector/offset/schema evidence, restart/recovery results | Not started | Not started | Not started |
+| 10 Flink compute | `P2-10.S1`, `P2-10.D1`-`D2`, `P2-10.P1`-`P2`, `P2-10.R1`, `P2-10.V1`, `P2-10.G-D`, `P2-10.G-P` | Streaming-platform owner | Increment 8 appropriate gate | runtime/job artifacts, checkpoint/savepoint/HA and recovery evidence | Not started | Not started | Not started |
+| 11 Streaming Iceberg | `P2-11.S1`, `P2-11.D1`-`D2`, `P2-11.P1`-`P2`, `P2-11.R1`, `P2-11.V1`, `P2-11.G-D`, `P2-11.G-P` | Data-engineering owner | Increment 10 appropriate gate | table/commit/replay/maintenance/query evidence | Not started | Not started | Not started |
+| 12 Atlas event lineage | `P2-12.S1`, `P2-12.D1`-`D2`, `P2-12.P1`-`P2`, `P2-12.R1`, `P2-12.V1`, `P2-12.G-D`, `P2-12.G-P` | Governance owner | Increment 11 appropriate gate | event/model/publisher, reconciliation, DLQ and recovery evidence | Not started | Not started | Not started |
+| 13 Production readiness | `P2-13.E-D`, `P2-13.S1`, `P2-13.R1`-`R4`, `P2-13.V1`, `P2-13.G-P` | Platform owner | Increments 8-12 production gates | frozen manifest, completed drills, defect reruns, residual-risk decisions, signoff | Evidence only | Not started | Not started |
+
+Valid task states are `Not started`, `In progress`, `Blocked`, `Built`, `Verified`, and `Accepted`. A roll-up may become `Accepted` only when every canonical child task required by the applicable gate is accepted and its evidence link resolves. Aggregate wording such as “appropriate gate” means the developer gate for downstream engineering and the production gate for production acceptance.
+
 ---
 
 ## 4. Reference Documentation Audit

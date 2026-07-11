@@ -491,38 +491,54 @@ Minimum alerts:
 
 ---
 
-## 14. Completion Gates
+## 14. Implementation Task Track
+
+Evidence for these stable tasks belongs under `evidence/phase2/increment10/<task-id>/`.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-10.S1` | Shared | Lock Flink, connector, Iceberg, job, image, savepoint compatibility, and verifier artifacts. | Build owner | P2-8 developer gate | `docker/flink/`; jobs/locks | scan, digest, job startup and connector smoke | D1, P1-P3 | Platform owner | Connector compatibility | Not started |
+| `P2-10.D1` | Developer | Deploy idempotent reduced Flink with local state and Kafka connectivity. | Data-engineering owner | `P2-10.S1` | `deploy/dev/flink/` | lifecycle, TaskManager registration, checkpoint | D1 | Platform owner | Local resources | Not started |
+| `P2-10.D2` | Developer | Implement baseline streaming job, secret rendering, checkpoint/restart, and savepoint upgrade test. | Data-engineering owner | `P2-10.D1` | `jobs/flink/`; config renderer | event output, checkpoint, restart/savepoint evidence | D1-D2 | Data owner | Deterministic test events | Not started |
+| `P2-10.P1` | Production | Deploy HA JobManagers/TaskManagers, ZooKeeper namespace, placement, capacity, and restricted REST. | Platform owner | `P2-10.S1`, P2-8 production gate | `deploy/prod/flink/` | leader failover, worker loss, capacity | P1-P8 | Operations owner | HA exception | Not started |
+| `P2-10.P2` | Production | Configure Ceph checkpoints/savepoints/HA state, internal TLS/mTLS, managed secrets, and Kafka ACLs. | Security/data-platform owners | `P2-10.P1` | `config/flink/prod/` | state read/write, TLS/auth negative tests, rotation | P5-P11 | Security owner | State compatibility | Not started |
+| `P2-10.R1` | Production | Execute JM/TM/Kafka/Ceph outage, restore, upgrade/rollback, alert, and orphan-state cleanup drills. | Operations owner | `P2-10.P2` | `runbooks/flink/` | timed drills, savepoint restore, alerts | P10-P14 | Platform owner | Maintenance window | Not started |
+| `P2-10.V1` | Production | Run correctness, exactly-once assumptions, lag, throughput, recovery, and observability regression. | QA/performance owners | `P2-10.R1` | production reports | JUnit, checkpoints, metrics, output comparison | P13-P15 | Data owner | Representative workload | Not started |
+| `P2-10.G-D` | Developer | Accept D1-D2. | Platform owner | `P2-10.D2` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P2-10.G-P` | Production | Accept P1-P15. | Platform owner | `P2-10.V1` | production gate record | evidence/promotion index | P1-P15 | Operations owner | Open production defect | Not started |
+
+## 15. Completion Gates
 
 ### Developer gate
 
-- [ ] Reduced topology startup/shutdown, Kafka consumption, local checkpoint, local savepoint/restore, TaskManager restart, and reset pass on Docker Desktop or Podman.
-- [ ] Local state and HTTP REST exposure are recorded as developer-only in the promotion manifest.
+- [ ] **D1** - Reduced topology startup/shutdown, Kafka consumption, local checkpoint, local savepoint/restore, TaskManager restart, and reset pass on Docker Desktop or Podman.
+- [ ] **D2** - Local state and HTTP REST exposure are recorded as developer-only in the promotion manifest.
 
 ### Production gate
 
 Increment 10 is accepted when:
 
-- [ ] Flink version and connector versions are pinned by image tag and digest
-- [ ] Flink 2.1.3 compatibility decision is recorded against Kafka Connector 5.0.0-2.1 and Iceberg 1.11.0 Flink 2.1 runtime
-- [ ] JobManager and two TaskManagers are running and managed by systemd
-- [ ] at least two production JobManagers use the approved ZooKeeper HA namespace and Ceph RGW HA metadata path, or an explicit RTO/RPO exception is accepted
-- [ ] Flink REST API is authenticated HTTPS and restricted to platform operators and deployment automation
-- [ ] `svc-flink` can consume only approved Kafka topics and groups
-- [ ] verification streaming job consumes Kafka events
-- [ ] checkpointing completes successfully
-- [ ] savepoint creation and restore are verified
-- [ ] job recovers from TaskManager failure
-- [ ] Kafka consumer lag is visible
-- [ ] Prometheus and Grafana expose Flink cluster and job metrics
-- [ ] Java verification suite passes
-- [ ] operational runbook covers submit, stop, drain, savepoint, restore, restart, and upgrade
-- [ ] checkpoints and savepoints use Ceph RGW durable shared paths and survive loss of a JobManager host; no production state path uses `file://`
+- [ ] **P1** - Flink version and connector versions are pinned by image tag and digest
+- [ ] **P2** - Flink 2.1.3 compatibility decision is recorded against Kafka Connector 5.0.0-2.1 and Iceberg 1.11.0 Flink 2.1 runtime
+- [ ] **P3** - JobManager and two TaskManagers are running and managed by systemd
+- [ ] **P4** - at least two production JobManagers use the approved ZooKeeper HA namespace and Ceph RGW HA metadata path, or an explicit RTO/RPO exception is accepted
+- [ ] **P5** - Flink REST API is authenticated HTTPS and restricted to platform operators and deployment automation
+- [ ] **P6** - `svc-flink` can consume only approved Kafka topics and groups
+- [ ] **P7** - verification streaming job consumes Kafka events
+- [ ] **P8** - checkpointing completes successfully
+- [ ] **P9** - savepoint creation and restore are verified
+- [ ] **P10** - job recovers from TaskManager failure
+- [ ] **P11** - Kafka consumer lag is visible
+- [ ] **P12** - Prometheus and Grafana expose Flink cluster and job metrics
+- [ ] **P13** - Java verification suite passes
+- [ ] **P14** - operational runbook covers submit, stop, drain, savepoint, restore, restart, and upgrade
+- [ ] **P15** - checkpoints and savepoints use Ceph RGW durable shared paths and survive loss of a JobManager host; no production state path uses `file://`
 
 The developer gate may unblock Increment 11 engineering. Only the production gate marks Increment 10 accepted in the Phase 2 tracker.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### TaskManagers do not register
 
@@ -558,7 +574,7 @@ The developer gate may unblock Increment 11 engineering. Only the production gat
 
 ---
 
-## 16. References
+## 17. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)

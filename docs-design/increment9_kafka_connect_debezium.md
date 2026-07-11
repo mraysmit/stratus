@@ -587,40 +587,56 @@ Minimum alerts:
 
 ---
 
-## 15. Completion Gates
+## 15. Implementation Task Track
+
+Evidence for these stable tasks belongs under `evidence/phase2/increment9/<task-id>/`.
+
+| ID | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `P2-9.S1` | Shared | Lock Connect/Debezium image, plugins, JDBC drivers, config provider, connector schemas, and verifier. | Build owner | P2-8 developer gate | `docker/connect/`; locks/verifier | scans, digests, plugin and config-provider smoke | D1, P1-P3 | Platform owner | Plugin/driver licensing | Not started |
+| `P2-9.D1` | Developer | Deploy idempotent Connect profile, source fixture, internal topics, and protected file-secret provider. | Data-platform owner | `P2-9.S1` | `deploy/dev/connect/` | lifecycle, secret expansion, internal-topic health | D1 | Security owner | Source DB fixture | Not started |
+| `P2-9.D2` | Developer | Configure Debezium connector and prove snapshot, inserts, updates, deletes, restart, and schema change. | Data-engineering owner | `P2-9.D1` | connector templates/tests | event/offset/schema evidence | D1-D2 | Data owner | DB log configuration | Not started |
+| `P2-9.P1` | Production | Deploy distributed Connect workers with replicated internal topics, HTTPS/mTLS, managed secrets, and least privilege. | Platform owner | `P2-9.S1`, P2-8 production gate | `deploy/prod/connect/` | worker loss, auth, topic durability | P1-P9 | Operations owner | Connector capacity | Not started |
+| `P2-9.P2` | Production | Onboard approved source with credential rotation, schema policy, DLQ, replay boundaries, and change controls. | Data owner | `P2-9.P1` | production connector/config records | positive/negative CDC, rotation, schema/DLQ tests | P7-P13 | Security owner | Source-impact approval | Not started |
+| `P2-9.R1` | Production | Execute worker/source/Kafka outage, offset recovery, connector rollback, backup, and alert drills. | Operations owner | `P2-9.P2` | `runbooks/connect/` | timed drills, duplicate/loss analysis, alerts | P12-P16 | Platform owner | Maintenance window | Not started |
+| `P2-9.V1` | Production | Run end-to-end CDC correctness, restart, throughput, lag, and observability regression. | QA owner | `P2-9.R1` | production reports | JUnit, topic records, offsets, lag metrics | P14-P17 | Data owner | Representative change rate | Not started |
+| `P2-9.G-D` | Developer | Accept D1-D2. | Platform owner | `P2-9.D2` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P2-9.G-P` | Production | Accept P1-P17. | Platform owner | `P2-9.V1` | production gate record | evidence/promotion index | P1-P17 | Operations owner | Open production defect | Not started |
+
+## 16. Completion Gates
 
 ### Developer gate
 
-- [ ] A one-worker development stack starts and stops idempotently, lists the Debezium plugin, captures snapshot/insert/update/delete events, resumes offsets after restart, and resets without touching shared topics.
-- [ ] HTTP is bound only to loopback or an isolated developer network, and the promotion manifest records its HTTPS/authentication replacement.
+- [ ] **D1** - A one-worker development stack starts and stops idempotently, lists the Debezium plugin, captures snapshot/insert/update/delete events, resumes offsets after restart, and resets without touching shared topics.
+- [ ] **D2** - HTTP is bound only to loopback or an isolated developer network, and the promotion manifest records its HTTPS/authentication replacement.
 
 ### Production gate
 
 Increment 9 is accepted when:
 
-- [ ] Kafka Connect distributed cluster has three workers
-- [ ] workers are managed by systemd
-- [ ] Kafka Connect uses SASL_SSL to the Kafka backbone
-- [ ] Debezium 3.6.0.Final PostgreSQL connector plugin is installed and visible
-- [ ] Connect REST is HTTPS and authenticated with trusted certificates; unauthenticated connector administration fails
-- [ ] Connect internal topics exist with replication factor 3 and compacted cleanup
-- [ ] `svc-connect` ACLs are least-privilege
-- [ ] PostgreSQL verification source is configured for logical replication
-- [ ] verification connector performs initial snapshot
-- [ ] insert, update, and delete source changes appear in Kafka
-- [ ] delete and tombstone behavior is documented
-- [ ] connector resumes from stored offsets after worker restart
-- [ ] DLQ or fail-fast behavior is tested and documented
-- [ ] connector credentials are not stored in source control
-- [ ] Prometheus and Grafana expose worker, connector, task, lag, and error signals
-- [ ] Java verification suite passes
-- [ ] no one-worker topology, plaintext control API, generated source credential, or disposable internal-topic setting remains in production
+- [ ] **P1** - Kafka Connect distributed cluster has three workers
+- [ ] **P2** - workers are managed by systemd
+- [ ] **P3** - Kafka Connect uses SASL_SSL to the Kafka backbone
+- [ ] **P4** - Debezium 3.6.0.Final PostgreSQL connector plugin is installed and visible
+- [ ] **P5** - Connect REST is HTTPS and authenticated with trusted certificates; unauthenticated connector administration fails
+- [ ] **P6** - Connect internal topics exist with replication factor 3 and compacted cleanup
+- [ ] **P7** - `svc-connect` ACLs are least-privilege
+- [ ] **P8** - PostgreSQL verification source is configured for logical replication
+- [ ] **P9** - verification connector performs initial snapshot
+- [ ] **P10** - insert, update, and delete source changes appear in Kafka
+- [ ] **P11** - delete and tombstone behavior is documented
+- [ ] **P12** - connector resumes from stored offsets after worker restart
+- [ ] **P13** - DLQ or fail-fast behavior is tested and documented
+- [ ] **P14** - connector credentials are not stored in source control
+- [ ] **P15** - Prometheus and Grafana expose worker, connector, task, lag, and error signals
+- [ ] **P16** - Java verification suite passes
+- [ ] **P17** - no one-worker topology, plaintext control API, generated source credential, or disposable internal-topic setting remains in production
 
 The developer gate may unblock Increment 10 engineering. Only the production gate marks Increment 9 accepted in the Phase 2 tracker.
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### Debezium plugin does not appear
 
@@ -656,7 +672,7 @@ The developer gate may unblock Increment 10 engineering. Only the production gat
 
 ---
 
-## 17. References
+## 18. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
