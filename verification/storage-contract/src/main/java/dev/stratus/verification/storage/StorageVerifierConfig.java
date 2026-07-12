@@ -43,7 +43,7 @@ public record StorageVerifierConfig(
             throw new IllegalArgumentException("CEPH_RGW_ENDPOINT must use http or https");
         }
         if (endpoint.getUserInfo() != null || endpoint.getQuery() != null || endpoint.getFragment() != null
-                || (endpoint.getPath() != null && !endpoint.getPath().isBlank() && !"/".equals(endpoint.getPath()))) {
+                || (!endpoint.getPath().isEmpty() && !"/".equals(endpoint.getPath()))) {
             throw new IllegalArgumentException("CEPH_RGW_ENDPOINT must be an origin URL without credentials, path, query, or fragment");
         }
         var orderedBuckets = new LinkedHashSet<>(REQUIRED_BUCKETS);
