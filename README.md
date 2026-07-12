@@ -80,6 +80,27 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 | **Grafana Loki** | Log aggregation |
 | **Firebolt Core** | Optional low-latency SQL serving over curated Iceberg datasets (Phase 3+) |
 
+## Repository Organization
+
+The monorepo is organized by stable capability, not implementation sequence:
+
+| Directory | Purpose |
+|---|---|
+| `applications/` | Stratus-owned long-running services |
+| `jobs/` | Spark and Flink workloads |
+| `verification/` | executable platform contract suites |
+| `platform/` | open-source product integration and deployment assets |
+| `environments/` | developer, lab, and production inventory and overlays without secrets |
+| `operations/` | monitoring, alerting, backup/restore, security, drills, and runbooks |
+| `testing/` | cross-component end-to-end and non-functional suites |
+| `schemas/` | shared governed event and data contracts |
+| `build-support/` | centralized dependency and Maven build policy |
+| `docs/` | architecture, decisions, implementation, operations, and reference documentation |
+
+The current executable module is the [storage contract verifier](verification/storage-contract/). The corresponding Docker/Podman environment is the [Ceph developer harness](platform/ceph/developer/).
+
+Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versions are owned by `build-support/stratus-build-parent`. Child module POMs do not pin dependency or plugin versions.
+
 ## Data Lifecycle
 
 | Zone | Purpose | Typical Producers |
@@ -149,8 +170,8 @@ The platform is Linux-only with no Windows dependencies.
 
 ## Design Documents
 
-- [docs-design/stratus_on_prem_data_fabric_architecture.md](docs-design/stratus_on_prem_data_fabric_architecture.md) — full architecture specification
+- [On-premises data fabric architecture](docs/architecture/stratus_on_prem_data_fabric_architecture.md) — full architecture specification
 
 ## Status
 
-Architecture and design baseline. Implementation has not started. The Stratus-owned Java build and verifier baseline is Java 25 LTS; third-party component runtimes follow their selected release's documented Java support matrix.
+The Ceph storage capability implementation is in progress. The Java 25 Ceph RGW storage contract verifier, Docker/Podman client harness, Maven 3.9.16 wrapper, container image, configuration validation, bucket bootstrap, certificate helpers, and idempotent lifecycle scripts are implemented and locally tested. Live Ceph RGW contract, performance, policy, and failure-drill evidence remains open until a scoped endpoint is configured. Third-party component runtimes follow their selected release's documented Java support matrix.

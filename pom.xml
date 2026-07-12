@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>dev.mars</groupId>
-    <artifactId>stratus</artifactId>
+    <groupId>dev.stratus</groupId>
+    <artifactId>stratus-reactor</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
 
-    <properties>
-        <maven.compiler.source>26</maven.compiler.source>
-        <maven.compiler.target>26</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
+    <name>Stratus Reactor</name>
+    <description>Build reactor for the Stratus on-premises data platform</description>
 
+    <modules>
+        <module>build-support/stratus-bom</module>
+        <module>build-support/stratus-build-parent</module>
+        <module>verification/storage-contract</module>
+    </modules>
 </project>

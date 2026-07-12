@@ -1,0 +1,7 @@
+.env
+certs/*.crt
+certs/*.csr
+certs/*.srl
+private/
+evidence/*
+!evidence/.gitkeep
