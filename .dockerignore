@@ -1,0 +1,3 @@
+*
+!verification/storage-contract/target/stratus-storage-contract-verifier.jar
+!verification/storage-contract/image/Dockerfile
