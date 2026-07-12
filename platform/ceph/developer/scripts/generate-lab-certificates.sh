@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
-command -v openssl >/dev/null 2>&1 || fail "openssl is required"
+command -v openssl >/dev/null 2>&1 || fail "OpenSSL is required. Run ./scripts/install-prerequisites.sh, then retry certificate generation."
 mkdir -p "$HARNESS_DIR/certs" "$HARNESS_DIR/private"
 umask 077
 ca_key="$HARNESS_DIR/private/stratus-lab-ca.key"

@@ -59,6 +59,42 @@ class StorageVerifierConfigTest {
         assertFalse(config.toString().contains("verification-secret"));
     }
 
+    @Test
+    void rejectsMissingMalformedAndUnsupportedConfiguration() {
+        for (var name : new String[]{"CEPH_RGW_ENDPOINT", "CEPH_RGW_ACCESS_KEY", "CEPH_RGW_SECRET_KEY"}) {
+            var missing = environment();
+            missing.remove(name);
+            assertThrows(IllegalArgumentException.class, () -> StorageVerifierConfig.from(missing));
+        }
+        for (var endpoint : new String[]{"not a uri", "relative", "https:opaque", "ftp://object-store.stratus.local",
+                "https://object-store.stratus.local?query=yes", "https://object-store.stratus.local#fragment"}) {
+            var invalid = environment();
+            invalid.put("CEPH_RGW_ENDPOINT", endpoint);
+            invalid.put("CEPH_RGW_ALLOW_HTTP", "true");
+            assertThrows(IllegalArgumentException.class, () -> StorageVerifierConfig.from(invalid));
+        }
+    }
+
+    @Test
+    void validatesDirectConstructionAndOptionalSettings() {
+        assertThrows(NullPointerException.class, () -> new StorageVerifierConfig(null, "key", "secret", true,
+                StorageVerifierConfig.REQUIRED_BUCKETS, "stratus-landing"));
+        assertThrows(IllegalArgumentException.class, () -> new StorageVerifierConfig(
+                java.net.URI.create("https://host"), " ", "secret", true, StorageVerifierConfig.REQUIRED_BUCKETS, "stratus-landing"));
+        assertThrows(IllegalArgumentException.class, () -> new StorageVerifierConfig(
+                java.net.URI.create("https://host"), "key", " ", true, StorageVerifierConfig.REQUIRED_BUCKETS, "stratus-landing"));
+        assertThrows(IllegalArgumentException.class, () -> new StorageVerifierConfig(
+                java.net.URI.create("https://host"), "key", "secret", true, StorageVerifierConfig.REQUIRED_BUCKETS, "other"));
+        var custom = environment();
+        custom.put("S3_PATH_STYLE_ACCESS", "false");
+        custom.put("CEPH_RGW_PROBE_BUCKET", "stratus-gold");
+        assertFalse(StorageVerifierConfig.from(custom).pathStyleAccess());
+        assertEquals("stratus-gold", StorageVerifierConfig.from(custom).probeBucket());
+        var rootPath = environment();
+        rootPath.put("CEPH_RGW_ENDPOINT", "https://object-store.stratus.local/");
+        assertEquals("/", StorageVerifierConfig.from(rootPath).endpoint().getPath());
+    }
+
     private static Map<String, String> environment() {
         var environment = new HashMap<String, String>();
         environment.put("CEPH_RGW_ENDPOINT", "https://object-store.stratus.local");

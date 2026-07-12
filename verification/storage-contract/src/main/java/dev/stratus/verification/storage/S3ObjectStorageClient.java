@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 public final class S3ObjectStorageClient implements ObjectStorageClient {
     private final S3Client client;
 
-    private S3ObjectStorageClient(S3Client client) {
+    S3ObjectStorageClient(S3Client client) {
         this.client = client;
     }
 

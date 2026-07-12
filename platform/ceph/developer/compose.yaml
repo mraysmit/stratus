@@ -35,6 +35,10 @@ services:
       CEPH_RGW_ALLOW_HTTP: ${CEPH_RGW_ALLOW_HTTP:-false}
       S3_PATH_STYLE_ACCESS: ${S3_PATH_STYLE_ACCESS:-true}
       USE_SYSTEM_CA_CERTS: ${USE_SYSTEM_CA_CERTS-1}
+      STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-INFO}
+      STRATUS_LOG_FILE: ${STRATUS_LOG_FILE:-/evidence/logs/storage-contract-verifier.%g.log}
+      STRATUS_LOG_MAX_BYTES: ${STRATUS_LOG_MAX_BYTES:-10485760}
+      STRATUS_LOG_FILE_COUNT: ${STRATUS_LOG_FILE_COUNT:-5}
     volumes:
       - ./certs/stratus-ca.crt:/certificates/stratus-ca.crt:ro
       - ./evidence:/evidence

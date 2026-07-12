@@ -34,6 +34,7 @@ platform/ceph/developer/
     ├── check.sh / check.ps1
     ├── verify-java.sh / verify-java.ps1
     ├── shutdown.sh / shutdown.ps1
+    ├── install-prerequisites.sh / install-prerequisites.ps1
     └── generate-lab-certificates.sh / generate-lab-certificates.ps1
 ```
 
@@ -92,7 +93,43 @@ Set `COMPOSE_IMPLEMENTATION=podman` explicitly when both Docker and Podman are i
 
 ### Certificate generation
 
-The optional disposable-lab certificate scripts require OpenSSL. On Windows, use OpenSSL from WSL or install an OpenSSL distribution available to PowerShell.
+The optional disposable-lab certificate scripts require the OpenSSL command-line tools. Install them with the repository helper before generating certificates.
+
+Windows PowerShell:
+
+```powershell
+.\scripts\install-prerequisites.ps1
+openssl version
+```
+
+The PowerShell helper is idempotent. It returns immediately when OpenSSL is already available; otherwise it uses `winget` to install `ShiningLight.OpenSSL.Light` without pinning an obsolete package version. Run PowerShell as Administrator if the package installer requests elevation. If `winget` is unavailable, install or update Microsoft App Installer, open a new PowerShell window, and rerun the helper.
+
+Manual Windows equivalent:
+
+```powershell
+winget install --id ShiningLight.OpenSSL.Light --exact --accept-package-agreements --accept-source-agreements
+openssl version
+```
+
+Linux:
+
+```bash
+chmod +x scripts/*.sh
+./scripts/install-prerequisites.sh
+openssl version
+```
+
+The Linux helper is idempotent and supports `apt-get`, `dnf`, `yum`, `zypper`, `apk`, and `pacman`. It uses `sudo` when the current user is not root and installs the distribution's current `openssl` and `ca-certificates` packages. It fails without changing files when no supported package manager or privilege-elevation path is available.
+
+Manual Linux equivalents are:
+
+```bash
+# Debian or Ubuntu
+sudo apt-get update && sudo apt-get install -y openssl ca-certificates
+
+# Fedora or RHEL family
+sudo dnf install -y openssl ca-certificates
+```
 
 ## Required Ceph Identities
 
@@ -131,11 +168,49 @@ Use the bootstrap identity only while running `bootstrap-buckets`. Replace it wi
 
 ## Configuration
 
-Create the local environment file:
+This harness is a client of an existing Ceph RGW service. It does not discover an RGW endpoint, create an RGW user, or retrieve secrets from the Ceph cluster. Before configuring it, identify which of these tracks applies:
+
+| Track | Endpoint and identity | Certificate |
+|---|---|---|
+| Shared lab or production-backed development | Supplied by the Ceph service owner through the approved secret-delivery channel | Public CA chain supplied by the PKI or Ceph service owner |
+| Disposable isolated lab | Supplied by the operator of that lab RGW instance | Generated locally, then installed on that lab RGW instance by its operator |
+
+Do not put Ceph administrator credentials into this harness. The access and secret keys are an RGW application identity, comparable to a username and password for the object-storage API. They are not cloud credentials and do not require an AWS account.
+
+### 1. Obtain the RGW connection details
+
+For a shared environment, request a **Stratus RGW verification connection bundle** from the Ceph service owner. It must contain:
+
+- the HTTPS origin of the RGW service, for example `https://object-store.stratus.local`
+- the scoped verification user's RGW access key
+- the matching RGW secret key, delivered through the organization's secret manager or another approved one-time channel
+- the PEM-encoded public CA certificate or CA chain that validates the endpoint
+- the bucket to use for probes, normally `stratus-landing`
+
+The endpoint must be an origin only: scheme, hostname, and optional port. Do not append a bucket name or API path. Your workstation must be able to resolve the hostname and reach its port. Check this before handling credentials:
+
+```powershell
+Resolve-DnsName object-store.stratus.local
+Test-NetConnection object-store.stratus.local -Port 443
+```
+
+Linux:
+
+```bash
+getent hosts object-store.stratus.local
+timeout 5 bash -c '</dev/tcp/object-store.stratus.local/443'
+```
+
+If these checks fail, stop and ask the network or Ceph service owner for the correct DNS, VPN, firewall, or proxy configuration. Changing the endpoint to HTTP is not a valid workaround.
+
+### 2. Create the local environment file
+
+From the repository root, create the untracked working copy:
 
 ```bash
 cd platform/ceph/developer
 cp .env.template .env
+chmod 600 .env
 ```
 
 PowerShell:
@@ -145,7 +220,88 @@ Set-Location platform\ceph\developer
 Copy-Item .env.template .env
 ```
 
-`.env` is ignored by Git. Keep its filesystem permissions restricted to the current user.
+On a shared Windows workstation, restrict the file to your account:
+
+```powershell
+icacls .env /inheritance:r /grant:r "${env:USERNAME}:(R,W)"
+```
+
+Edit `.env` and replace only the three `REPLACE_WITH_...`/example connection values:
+
+```dotenv
+CEPH_RGW_ENDPOINT=https://object-store.stratus.local
+CEPH_RGW_ACCESS_KEY=<access key supplied for the verification user>
+CEPH_RGW_SECRET_KEY=<matching secret delivered securely>
+CEPH_RGW_PROBE_BUCKET=stratus-landing
+```
+
+Leave `CEPH_RGW_ALLOW_HTTP=false`, `S3_PATH_STYLE_ACCESS=true`, and `USE_SYSTEM_CA_CERTS=1` for normal use. Select `COMPOSE_IMPLEMENTATION=docker` or `podman` when you need to force a particular runtime; `auto` uses Docker when both are installed.
+
+The repository ignores `.env`, but that is only an accidental-commit safeguard. Never paste its contents into tickets, logs, chat, screenshots, or test evidence. If a key is exposed, ask the Ceph service owner to rotate the RGW identity.
+
+### 3. Install the public CA certificate
+
+Create the local certificate directory if necessary and copy the **public CA certificate or CA chain**, not the RGW server certificate and never a private key:
+
+```powershell
+New-Item -ItemType Directory -Force certs | Out-Null
+Copy-Item C:\path\from\pki-owner\stratus-ca.crt certs\stratus-ca.crt
+openssl x509 -in certs\stratus-ca.crt -noout -subject -issuer -dates
+```
+
+Linux:
+
+```bash
+mkdir -p certs
+cp /path/from/pki-owner/stratus-ca.crt certs/stratus-ca.crt
+chmod 644 certs/stratus-ca.crt
+openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
+```
+
+It is safe for the containers to read this public CA file. The corresponding CA private key and the RGW endpoint private key must remain with the PKI/Ceph operator. The repository ignores generated files under `certs/`, but the public certificate should still be obtained from a trusted source rather than copied from an unverified network response.
+
+### 4. Validate the endpoint certificate
+
+Replace the host and port below when your supplied endpoint differs:
+
+```bash
+openssl s_client \
+  -connect object-store.stratus.local:443 \
+  -servername object-store.stratus.local \
+  -CAfile certs/stratus-ca.crt \
+  -verify_return_error </dev/null
+```
+
+PowerShell:
+
+```powershell
+'' | openssl s_client `
+  -connect object-store.stratus.local:443 `
+  -servername object-store.stratus.local `
+  -CAfile certs\stratus-ca.crt `
+  -verify_return_error
+```
+
+A successful result ends with `Verify return code: 0 (ok)`. A hostname, expiry, issuer, or trust error must be resolved with the PKI/Ceph owner before startup.
+
+### 5. Start and verify
+
+Run `scripts/startup.ps1` on Windows or `./scripts/startup.sh` on Linux. Startup checks that `.env` and `certs/stratus-ca.crt` exist, validates the endpoint policy, builds the verifier, and starts the selected Compose implementation. Then run `scripts/check.ps1`/`check.sh` for read-only bucket visibility and `scripts/verify-java.ps1`/`verify-java.sh` for the write/read/multipart/delete contract.
+
+Generated reports go under `evidence/` and may contain endpoint names, bucket names, object keys, timings, and failure details. They are ignored by Git by default. Review and sanitize them before intentionally promoting approved results into the repository-level evidence process.
+
+### Persistent logs
+
+Verifier logs survive container replacement because `/evidence` is bind-mounted to the developer harness. On the host, the active and rotated files are:
+
+```text
+platform/ceph/developer/evidence/logs/storage-contract-verifier.0.log
+platform/ceph/developer/evidence/logs/storage-contract-verifier.1.log
+platform/ceph/developer/evidence/logs/storage-contract-verifier.2.log
+...
+```
+
+Generation `0` is the active file. When it reaches `STRATUS_LOG_MAX_BYTES`, Java rotates the generations and retains at most `STRATUS_LOG_FILE_COUNT` files. Startup appends to the existing generation rather than truncating it. The entire `evidence/` working directory remains ignored by Git; sanitize logs before promoting selected evidence because endpoint and object metadata may be operationally sensitive.
 
 ### Parameter reference
 
@@ -158,6 +314,10 @@ Copy-Item .env.template .env
 | `CEPH_RGW_ALLOW_HTTP` | no | `false` | Allows a plaintext endpoint only for a disposable isolated lifecycle test; HTTP results are not valid Increment 1 evidence |
 | `S3_PATH_STYLE_ACCESS` | no | `true` | Uses path-style bucket URLs, which is the Stratus baseline for the internal RGW endpoint |
 | `USE_SYSTEM_CA_CERTS` | no | `1` | Imports mounted PEM certificates into the Temurin container trust configuration; leave enabled for HTTPS verification |
+| `STRATUS_LOG_LEVEL` | no | `INFO` | Verifier operational logging level: `INFO` for lifecycle outcomes or `DEBUG` for bucket, object, and multipart diagnostic detail; credentials and payloads are never logged |
+| `STRATUS_LOG_FILE` | no | `/evidence/logs/storage-contract-verifier.%g.log` | Persistent rotating log pattern; `%g` is replaced with the rotation generation number |
+| `STRATUS_LOG_MAX_BYTES` | no | `10485760` | Maximum size of one log generation in bytes (10 MiB by default) |
+| `STRATUS_LOG_FILE_COUNT` | no | `5` | Number of log generations retained, including the active generation |
 | `COMPOSE_IMPLEMENTATION` | no | `auto` | Selects `auto`, `docker`, or `podman`; `auto` prefers Docker when available |
 | `S3CLIENT_IMAGE` | no | `rclone/rclone:1.74.4` | S3-protocol diagnostic image; pin by digest in shared environments |
 | `VERIFIER_IMAGE` | no | `stratus/storage-contract-verifier:dev` | Locally built Java verifier image name; shared environments use an approved registry digest |
@@ -175,6 +335,10 @@ CEPH_RGW_PROBE_BUCKET=stratus-landing
 CEPH_RGW_ALLOW_HTTP=false
 S3_PATH_STYLE_ACCESS=true
 USE_SYSTEM_CA_CERTS=1
+STRATUS_LOG_LEVEL=INFO
+STRATUS_LOG_FILE=/evidence/logs/storage-contract-verifier.%g.log
+STRATUS_LOG_MAX_BYTES=10485760
+STRATUS_LOG_FILE_COUNT=5
 COMPOSE_IMPLEMENTATION=auto
 S3CLIENT_IMAGE=rclone/rclone:1.74.4
 VERIFIER_IMAGE=stratus/storage-contract-verifier:dev

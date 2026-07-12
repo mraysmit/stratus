@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
-if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) { throw 'openssl is required' }
+if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) {
+    throw 'OpenSSL is required. Run .\scripts\install-prerequisites.ps1, then retry certificate generation.'
+}
 $harness = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $certs = Join-Path $harness 'certs'
 $private = Join-Path $harness 'private'
