@@ -12,6 +12,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class CephRgwIntegrationTest {
     @Test
     void verifiesLiveCephRgwContract() {
+        if (Boolean.getBoolean("ceph.integration.required")) {
+            assertTrue(Boolean.parseBoolean(System.getenv("CEPH_RGW_INTEGRATION")),
+                    "CEPH_RGW_INTEGRATION=true is required by the selected Maven profile");
+        }
         assumeTrue(Boolean.parseBoolean(System.getenv("CEPH_RGW_INTEGRATION")),
                 "Set CEPH_RGW_INTEGRATION=true to run against a live Ceph RGW endpoint");
         var config = StorageVerifierConfig.from(System.getenv());
