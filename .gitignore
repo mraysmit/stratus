@@ -5,9 +5,6 @@ target/
 
 ### Log Files ###
 logs/
-peegeeq-db/logs/
-peegeeq-examples/logs/
-peegeeq-native/logs/
 target/test-logs/
 */target/test-logs/
 *.log
@@ -18,10 +15,6 @@ target/test-logs/
 /*.json
 !package.json
 !package-lock.json
-
-### TestContainers auto-generated files ###
-peegeeq-management-ui/testcontainers-db.json
-peegeeq-management-ui/.testcontainers-state.json
 
 ### Prevent test files in root directory ###
 # Test SQL files should go in test resources

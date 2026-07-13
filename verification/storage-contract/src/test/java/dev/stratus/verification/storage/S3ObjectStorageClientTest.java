@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("protocol")
 class S3ObjectStorageClientTest {
     private ProtocolEndpoint endpoint;
     private S3ObjectStorageClient storage;

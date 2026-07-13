@@ -12,9 +12,61 @@
     <name>Stratus Reactor</name>
     <description>Build reactor for the Stratus on-premises data platform</description>
 
+    <properties>
+        <test.groups>unit | protocol</test.groups>
+        <test.excludedGroups>ceph-integration</test.excludedGroups>
+        <coverage.skip>false</coverage.skip>
+        <ceph.integration.required>false</ceph.integration.required>
+    </properties>
+
     <modules>
         <module>build-support/stratus-bom</module>
         <module>build-support/stratus-build-parent</module>
         <module>verification/storage-contract</module>
     </modules>
+
+    <profiles>
+        <profile>
+            <id>unit-tests</id>
+            <properties>
+                <test.groups>unit</test.groups>
+                <test.excludedGroups>protocol | ceph-integration</test.excludedGroups>
+                <coverage.skip>true</coverage.skip>
+            </properties>
+        </profile>
+        <profile>
+            <id>protocol-tests</id>
+            <properties>
+                <test.groups>protocol</test.groups>
+                <test.excludedGroups>unit | ceph-integration</test.excludedGroups>
+                <coverage.skip>true</coverage.skip>
+            </properties>
+        </profile>
+        <profile>
+            <id>ceph-integration-tests</id>
+            <properties>
+                <test.groups>ceph-integration</test.groups>
+                <test.excludedGroups></test.excludedGroups>
+                <coverage.skip>true</coverage.skip>
+                <ceph.integration.required>true</ceph.integration.required>
+            </properties>
+        </profile>
+        <profile>
+            <id>all-tests</id>
+            <properties>
+                <test.groups></test.groups>
+                <test.excludedGroups></test.excludedGroups>
+                <coverage.skip>false</coverage.skip>
+                <ceph.integration.required>true</ceph.integration.required>
+            </properties>
+        </profile>
+        <profile>
+            <id>untagged-tests</id>
+            <properties>
+                <test.groups></test.groups>
+                <test.excludedGroups>unit | protocol | ceph-integration</test.excludedGroups>
+                <coverage.skip>true</coverage.skip>
+            </properties>
+        </profile>
+    </profiles>
 </project>

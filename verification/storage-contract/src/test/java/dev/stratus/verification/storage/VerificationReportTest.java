@@ -1,6 +1,7 @@
 package dev.stratus.verification.storage;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -9,6 +10,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+@Tag("unit")
 class VerificationReportTest {
     @Test
     void serializesEveryFieldAndEscapesJsonControlCharacters() {

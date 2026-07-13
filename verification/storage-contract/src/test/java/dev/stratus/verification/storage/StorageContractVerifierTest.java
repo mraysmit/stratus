@@ -1,6 +1,7 @@
 package dev.stratus.verification.storage;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
 class StorageContractVerifierTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-07-12T10:15:30Z"), ZoneOffset.UTC);
 
