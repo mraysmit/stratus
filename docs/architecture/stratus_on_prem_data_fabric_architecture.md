@@ -1510,7 +1510,7 @@ Current Phase 1 target baseline as of 2026-07-10:
 | Trino | 482 |
 | Keycloak | 26.6.4 |
 | Keycloak metadata database | PostgreSQL 18.4, latest patch in Keycloak's newest supported PostgreSQL major |
-| Ceph RGW | Ceph Tentacle 20.2.2, pinned by package version or image tag plus digest |
+| Ceph RGW | Ceph Tentacle 20.2.2, verified as the current Tentacle patch on 2026-07-14; pin by package version or image tag plus digest |
 | Apache Atlas | 2.5.0, built as an internal image and pinned by tag plus digest after dependency compatibility review |
 | Apache Ranger | 2.8.0, built as an internal image and pinned by tag plus digest after plugin/database compatibility review |
 | FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |

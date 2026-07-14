@@ -10,12 +10,12 @@ The default invocation applies these properties to every Java module:
 
 | Property | Default | Meaning |
 |---|---|---|
-| `test.groups` | `unit \| protocol` | Run deterministic unit tests and real local protocol tests |
+| `test.groups` | empty | Do not positively filter tests; run tagged and untagged tests unless explicitly excluded |
 | `test.excludedGroups` | `ceph-integration` | Exclude tests requiring a live secured Ceph RGW endpoint |
 | `coverage.skip` | `false` | Enforce 100% line and branch coverage |
 | `ceph.integration.required` | `false` | Permit the live Ceph test to remain unselected |
 
-Therefore, `mvnw clean verify` is the complete local regression command. It runs every deterministic test, builds the deployable artifact, generates the JaCoCo report, and enforces 100% line and branch coverage.
+Therefore, `mvnw clean verify` is the complete local regression command. It runs every test that does not require the live Ceph environment, including any accidentally untagged test, builds the deployable artifact, generates the JaCoCo report, and enforces 100% line and branch coverage.
 
 ## Available Profiles
 
@@ -61,42 +61,42 @@ Create the ignored command-log directory once per workstation:
 
 ```powershell
 New-Item -ItemType Directory -Force logs | Out-Null
-$date = Get-Date -Format yyyyMMdd
+$timestamp = Get-Date -Format yyyyMMdd-HHmmss
 ```
 
 ### Complete local regression
 
 ```powershell
 .\mvnw.cmd clean verify 2>&1 |
-    Tee-Object -FilePath "logs\local-regression-$date.txt"
+    Tee-Object -FilePath "logs\local-regression-$timestamp.txt"
 ```
 
 ### Full local and live Ceph regression
 
 ```powershell
 .\mvnw.cmd clean verify -Pall-tests 2>&1 |
-    Tee-Object -FilePath "logs\all-tests-$date.txt"
+    Tee-Object -FilePath "logs\all-tests-$timestamp.txt"
 ```
 
 ### Targeted unit diagnosis
 
 ```powershell
 .\mvnw.cmd test -Punit-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-unit-$date.txt"
+    Tee-Object -FilePath "logs\storage-contract-unit-$timestamp.txt"
 ```
 
 ### Targeted protocol diagnosis
 
 ```powershell
 .\mvnw.cmd test -Pprotocol-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-protocol-$date.txt"
+    Tee-Object -FilePath "logs\storage-contract-protocol-$timestamp.txt"
 ```
 
 ### Targeted live Ceph diagnosis
 
 ```powershell
 .\mvnw.cmd test -Pceph-integration-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-ceph-$date.txt"
+    Tee-Object -FilePath "logs\storage-contract-ceph-$timestamp.txt"
 ```
 
 ### Resume after a known reactor failure
@@ -105,14 +105,14 @@ Use resume only after correcting a failure from a complete command. Repeat the o
 
 ```powershell
 .\mvnw.cmd verify -rf :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\resume-storage-contract-$date.txt"
+    Tee-Object -FilePath "logs\resume-storage-contract-$timestamp.txt"
 ```
 
 ### Tagging audit
 
 ```powershell
 .\mvnw.cmd test -Puntagged-tests 2>&1 |
-    Tee-Object -FilePath "logs\untagged-audit-$date.txt"
+    Tee-Object -FilePath "logs\untagged-audit-$timestamp.txt"
 ```
 
 A healthy tagging audit reports zero tests executed.
@@ -120,7 +120,7 @@ A healthy tagging audit reports zero tests executed.
 ### Inspect the result
 
 ```powershell
-Get-Content "logs\local-regression-$date.txt" -Tail 40
+Get-Content "logs\local-regression-$timestamp.txt" -Tail 40
 ```
 
 Do not filter the live Maven stream through `Select-String` or `Select-Object`; doing so can hide context or delay failures. Capture the complete stream with `Tee-Object`, then inspect the saved file.
@@ -128,42 +128,43 @@ Do not filter the live Maven stream through `Select-String` or `Select-Object`; 
 ## Bash Commands
 
 ```bash
+set -euo pipefail
 mkdir -p logs
-date_suffix="$(date +%Y%m%d)"
+timestamp="$(date +%Y%m%d-%H%M%S)"
 ```
 
 ### Complete local regression
 
 ```bash
-./mvnw clean verify 2>&1 | tee "logs/local-regression-${date_suffix}.txt"
+./mvnw clean verify 2>&1 | tee "logs/local-regression-${timestamp}.txt"
 ```
 
 ### Full local and live Ceph regression
 
 ```bash
-./mvnw clean verify -Pall-tests 2>&1 | tee "logs/all-tests-${date_suffix}.txt"
+./mvnw clean verify -Pall-tests 2>&1 | tee "logs/all-tests-${timestamp}.txt"
 ```
 
 ### Targeted profiles
 
 ```bash
 ./mvnw test -Punit-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-unit-${date_suffix}.txt"
+  | tee "logs/storage-contract-unit-${timestamp}.txt"
 
 ./mvnw test -Pprotocol-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-protocol-${date_suffix}.txt"
+  | tee "logs/storage-contract-protocol-${timestamp}.txt"
 
 ./mvnw test -Pceph-integration-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-ceph-${date_suffix}.txt"
+  | tee "logs/storage-contract-ceph-${timestamp}.txt"
 
 ./mvnw test -Puntagged-tests 2>&1 \
-  | tee "logs/untagged-audit-${date_suffix}.txt"
+  | tee "logs/untagged-audit-${timestamp}.txt"
 ```
 
 ### Inspect the result
 
 ```bash
-tail -n 40 "logs/local-regression-${date_suffix}.txt"
+tail -n 40 "logs/local-regression-${timestamp}.txt"
 ```
 
 ## Module Selection
@@ -194,7 +195,7 @@ Do not use a targeted module command as final regression evidence. The complete 
 Expected values:
 
 ```text
-test.groups=unit | protocol
+test.groups=(empty)
 test.excludedGroups=ceph-integration
 coverage.skip=false
 ```
@@ -235,13 +236,14 @@ Expected output: none.
 - `stratus-storage-contract-verifier` owns unit, local S3-protocol, and live Ceph RGW contract tests.
 - `S3ObjectStorageClientTest` uses a real in-process HTTP protocol endpoint and the actual SDK client. Mockito and all other mocking frameworks are prohibited.
 - `CephRgwIntegrationTest` is the live product-compatibility boundary. It is not selected by the default local regression command.
-- JaCoCo reports are generated under `verification/storage-contract/target/site/jacoco/` by complete coverage-enforcing profiles.
-- Surefire reports are generated under `verification/storage-contract/target/surefire-reports/`.
+- JaCoCo reports are generated under `verification/storage/target/site/jacoco/` by complete coverage-enforcing profiles.
+- Surefire reports are generated under `verification/storage/target/surefire-reports/`.
 
 ## Completion Checklist
 
 - [ ] The complete local regression command passed from a clean reactor.
 - [ ] The saved Maven log contains `BUILD SUCCESS`.
+- [ ] The saved Maven log contains no build, logging-binding, packaging, or test-fixture warnings.
 - [ ] JaCoCo reports zero missed production lines and branches.
 - [ ] INFO and DEBUG logging assertions passed.
 - [ ] The untagged audit executes zero tests after adding or moving test classes.

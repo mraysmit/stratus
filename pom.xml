@@ -13,7 +13,7 @@
     <description>Build reactor for the Stratus on-premises data platform</description>
 
     <properties>
-        <test.groups>unit | protocol</test.groups>
+        <test.groups></test.groups>
         <test.excludedGroups>ceph-integration</test.excludedGroups>
         <coverage.skip>false</coverage.skip>
         <ceph.integration.required>false</ceph.integration.required>
@@ -22,7 +22,7 @@
     <modules>
         <module>build-support/stratus-bom</module>
         <module>build-support/stratus-build-parent</module>
-        <module>verification/storage-contract</module>
+        <module>verification/storage</module>
     </modules>
 
     <profiles>

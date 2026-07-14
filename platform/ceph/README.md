@@ -5,8 +5,8 @@ Ceph is the Stratus object-storage baseline. This directory owns Ceph-specific d
 ```text
 ceph/
 ├── bootstrap/   # buckets, RGW identities, quotas, and policy automation
-├── cephadm/     # Linux host inventory, service specs, and templates
-└── developer/   # Docker/Podman client harness for an existing RGW endpoint
+├── lab/     # production Linux-host inventory, service specs, and templates
+└── local/   # disposable genuine Ceph/RGW local Docker environment
 ```
 
-The `developer` environment does not deploy Ceph. MON, MGR, OSD, and RGW lifecycle remains under cephadm in `cephadm/`.
+The `local` environment deploys three genuine Ceph MONs, two MGRs, three BlueStore OSDs, and two RGW daemons in separate local Docker containers. Production lifecycle remains separately managed by cephadm assets in `lab/`.
