@@ -91,13 +91,13 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
-| P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | Not started |
-| P1-1.1 | Ceph decision due diligence | Platform architect | Architecture storage requirements | Confirmed Ceph baseline, retained comparison record, proof-of-fit targets, production topology, and explicit reconsideration triggers | Architecture owner | Not started |
-| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | Not started |
-| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | Not started |
-| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | Not started |
-| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | Not started |
-| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | Not started |
+| P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | In progress |
+| P1-1.1 | Ceph decision due diligence | Platform architect | Architecture storage requirements | Confirmed Ceph baseline, retained comparison record, proof-of-fit targets, production topology, and explicit reconsideration triggers | Architecture owner | Accepted |
+| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | In progress |
+| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | In progress |
+| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | In progress |
+| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | In progress |
+| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | In progress |
 | P1-2.1 | Polaris production metadata store | Data platform owner | P1-1 accepted | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Not started |
 | P1-2.2 | Polaris service deployment | Data platform owner | P1-2.1 | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | Not started |
 | P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2, P1-1.4 | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | Not started |
@@ -132,6 +132,22 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 | P1-7.5 | Encryption-at-rest and credential rotation | Security owner | P1-7.1, P1-1.4 | Ceph/RGW encryption evidence for gold/platform zones and rotation runbook test | Security owner | Not started |
 | P1-7.6 | Integrated security verification | Security owner | P1-7.3, P1-7.4, P1-7.5 | Positive and negative authentication, authorization, TLS, and no-shared-credential evidence | Platform owner | Not started |
 | P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, concurrent Spark/Trino/Polaris/storage qualification, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
+
+### P1-0.1 Build and artifact delivery acceptance checklist
+
+`P1-0.1` is one Phase 1 prerequisite work package. It is not an increment and does not introduce a separate child-task namespace. The work package is complete only when all of the following are true:
+
+- [ ] The platform and security owners approve the build service, artifact repository, container registry, publishing identity, read-only verification identity, and durable evidence location.
+- [ ] Immutable versioning maps the source revision to artifact coordinates and SHA-256, image tag and digest, SBOM, scan, provenance, and signature or attestation.
+- [ ] A reusable verifier-image template accepts a prebuilt artifact, contains only the runtime and artifact, runs as non-root, and contains no source or build toolchain.
+- [ ] A clean protected build worker runs canonical tests, packages the artifact, builds and scans the image, publishes it by immutable digest, and exports evidence.
+- [ ] The verification workflow requires a digest-qualified image, uses read-only registry access, injects protected configuration, mounts trust material read-only, and exports results without building.
+- [ ] An independent verification environment pulls and validates a published smoke verifier, executes it, and records the complete evidence manifest.
+- [ ] Platform and security owners accept the evidence and confirm that no build capability or registry write credential exists in the verification environment.
+
+Runtime and verification scripts must not invoke Maven or Gradle, build an image, mount a source tree, copy from a developer workstation `target/` directory, or resolve build dependencies.
+
+Current status: `P1-0.1` is In progress and formal CI/CD is deferred by owner direction on 2026-07-14. Local development may continue only as an explicit development-only sequencing exception: builds run outside verification containers, while immutable publication and all dependent acceptance claims remain blocked. The repository contains a local Java verifier and an image-specific Dockerfile, but no approved build service, pipeline, artifact repository, registry path, workload identities, image digest, SBOM, scan, provenance, attestation, or smoke evidence.
 
 ### Phase 1 Gate Tracker
 
