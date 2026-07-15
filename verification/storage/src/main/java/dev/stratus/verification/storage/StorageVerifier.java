@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import java.nio.charset.StandardCharsets;
@@ -17,6 +20,15 @@ import java.io.UncheckedIOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 
+/**
+ * Implementation of StorageVerifier functionality.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 public final class StorageVerifier {
     static final String CONTRACT_DESCRIPTION =
             "Stratus storage contract verification evidence: success=true means every S3 contract check against Ceph RGW passed";

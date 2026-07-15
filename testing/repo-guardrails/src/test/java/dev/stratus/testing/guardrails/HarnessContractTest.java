@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.testing.guardrails;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,10 +18,13 @@ import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 /**
- * Contract between the Ceph developer harness's compose file, its .env
- * template, its scripts, and its ignore rules. Guards against dead template
- * variables, unguarded port publishing, missing restart/health policies, and
- * trackable key material.
+ * Contract between the Ceph developer harness's compose file, its .env template, its scripts, and its ignore rules. Guards against dead template variables, unguarded port publishing, missing restart/health policies, and trackable key material.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
  */
 @Tag("unit")
 final class HarnessContractTest {

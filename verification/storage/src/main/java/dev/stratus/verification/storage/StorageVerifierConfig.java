@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import java.net.URI;
@@ -8,6 +11,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.time.Duration;
 
+/**
+ * Immutable data carrier for StorageVerifierConfig values.
+ *
+ * This record is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 public record StorageVerifierConfig(
         URI endpoint,
         String accessKey,

@@ -76,6 +76,13 @@ The local CA, server certificate, and private key are generated into ignored `ce
 
 On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/install-prerequisites.sh` when necessary.
 
+## Testing and validation
+
+For a complete, self-contained guide to every test and validation process for
+this module — the static and JVM tests, this live harness, the live Maven
+contract test, and the harness self-test, each with how to run it, what it does,
+and the expected results — see [VALIDATION.md](VALIDATION.md).
+
 ## Workflow
 
 From `platform/ceph/local`:
