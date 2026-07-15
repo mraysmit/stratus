@@ -2,18 +2,20 @@
 
 <#
 .SYNOPSIS
-    Updates comment headers in Java class files with author information.
+    Updates comment headers in Java class files with license and author information.
 
 .DESCRIPTION
     Scans all Java files under the repository root and ensures each has:
-      1. The Apache License 2.0 header immediately after the package declaration.
+      1. A two-line SPDX Apache-2.0 license header at the very top of the file:
+             // Copyright <year> <author>
+             // SPDX-License-Identifier: Apache-2.0
       2. A type-level JavaDoc comment with an @author tag, inserted directly
          before the type declaration (and before any annotations on it).
 
     An existing type-level JavaDoc is replaced, preserving its first
-    descriptive paragraph. The generated JavaDoc deliberately carries no
-    @since or @version tags: previous runs stamped @since with the script's
-    run date, which misleads readers, and git history records versioning.
+    descriptive paragraph. The generated JavaDoc carries @author, @since, and
+    @version tags. @since is set per file from the file's creation date
+    (formatted with -SinceDateFormat); @version is the fixed -Version value.
 
     Preserves each file's original line endings (CRLF/LF) and
     trailing-newline state. Excluded directories: target, .history,
@@ -28,7 +30,14 @@
     Shows what changes would be made without actually modifying files.
 
 .PARAMETER CopyrightYear
-    Year used in the copyright line. Defaults to the current year.
+    Year used in the copyright line. Defaults to 2026.
+
+.PARAMETER SinceDateFormat
+    .NET date format for the JavaDoc @since tag, which is set per file from the
+    file's creation date. Defaults to yyyy-MM-dd.
+
+.PARAMETER Version
+    Value stamped into the JavaDoc @version tag. Defaults to 1.0.0.
 
 .PARAMETER Verbose
     Enables verbose output showing detailed processing information.
@@ -38,38 +47,28 @@
     Shows what changes would be made without modifying files.
 
 .EXAMPLE
-    .\update-java-headers.ps1 -Path peegeeq-db\src\main\java -DryRun
+    .\update-java-headers.ps1 -Path verification\storage\src\main\java -DryRun
     Shows what changes would be made to files under one directory.
 #>
 
 param(
     [string]$Path,
     [switch]$DryRun,
-    [string]$CopyrightYear = (Get-Date).Year.ToString(),
+    [string]$CopyrightYear = "2026",
+    [string]$SinceDateFormat = "yyyy-MM-dd",
+    [string]$Version = "1.0.0",
     [switch]$Verbose
 )
 
 # Configuration
 $AUTHOR_NAME = "Mark Andrew Ray-Smith Cityline Ltd"
-$PROJECT_NAME = "PeeGeeQ"
+$PROJECT_NAME = "Stratus"
 $EXCLUDED_DIRS = '\\(target|\.history|node_modules|\.git)\\'
 
+# SPDX Apache-2.0 header template (two line comments at the top of the file)
 $LICENSE_HEADER = @"
-/*
- * Copyright $CopyrightYear $AUTHOR_NAME
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright $CopyrightYear $AUTHOR_NAME
+// SPDX-License-Identifier: Apache-2.0
 "@
 
 # Matches a type declaration line (annotations on preceding lines are handled separately)
@@ -128,13 +127,14 @@ function Get-JavadocDescription {
     return $null
 }
 
-# Function to generate the type-level JavaDoc. Deliberately no @since/@version:
-# run-date @since tags mislead readers, and git records version history.
+# Function to generate the type-level JavaDoc. @since is the file's creation
+# date (passed in per file); @version is the fixed -Version value.
 function New-TypeJavadoc {
     param(
         [string]$FileType,
         [string]$ClassName,
-        [string]$ExistingDescription
+        [string]$ExistingDescription,
+        [string]$Since
     )
 
     $defaultDescription = switch ($FileType) {
@@ -151,47 +151,34 @@ function New-TypeJavadoc {
 /**
  * $description
  *
- * This $FileType is part of the $PROJECT_NAME message queue system, providing
- * production-ready PostgreSQL-based message queuing capabilities.
+ * This $FileType is part of the $PROJECT_NAME on-premises data fabric platform.
  *
  * @author $AUTHOR_NAME
+ * @since $Since
+ * @version $Version
  */
 "@
 }
 
-# Function to insert the license header after the package declaration (or at
-# the top of the file when there is no package declaration). Returns the lines.
+# Function to insert the SPDX license header at the very top of the file.
+# Returns the lines.
 function Add-LicenseLines {
     param([string[]]$Lines)
 
     $headerLines = $LICENSE_HEADER -split "`r?`n"
 
-    $pkgIndex = -1
-    for ($i = 0; $i -lt $Lines.Length; $i++) {
-        if ($Lines[$i].Trim() -match '^package\s+') {
-            $pkgIndex = $i
-            break
-        }
+    # The SPDX header goes at the top, followed by one blank line and then the
+    # file's original content (leading blank lines collapsed away).
+    $restStart = 0
+    while ($restStart -lt $Lines.Length -and $Lines[$restStart].Trim() -eq "") {
+        $restStart++
     }
 
     $newLines = @()
-    if ($pkgIndex -ge 0) {
-        $newLines += $Lines[0..$pkgIndex]
+    $newLines += $headerLines
+    if ($restStart -lt $Lines.Length) {
         $newLines += ""
-        $newLines += $headerLines
-
-        $restStart = $pkgIndex + 1
-        while ($restStart -lt $Lines.Length -and $Lines[$restStart].Trim() -eq "") {
-            $restStart++
-        }
-        if ($restStart -lt $Lines.Length) {
-            $newLines += ""
-            $newLines += $Lines[$restStart..($Lines.Length - 1)]
-        }
-    } else {
-        $newLines += $headerLines
-        $newLines += ""
-        $newLines += $Lines
+        $newLines += $Lines[$restStart..($Lines.Length - 1)]
     }
 
     return $newLines
@@ -243,7 +230,7 @@ function Update-JavaFile {
             return $false
         }
 
-        $hasLicense = $content -match "Licensed under the Apache License"
+        $hasLicense = $content -match "SPDX-License-Identifier:"
         $hasAuthor = $content -match "@author\s+.*$([regex]::Escape($AUTHOR_NAME))"
 
         if ($hasLicense -and $hasAuthor) {
@@ -257,7 +244,7 @@ function Update-JavaFile {
         $hadTrailingNewline = $content.EndsWith("`n")
         $lines = $content -split "`r?`n"
 
-        # Step 1: license header after the package declaration
+        # Step 1: SPDX license header at the top of the file
         if (-not $hasLicense) {
             $lines = Add-LicenseLines -Lines $lines
         }
@@ -296,7 +283,7 @@ function Update-JavaFile {
                     for ($k = $j; $k -ge 0; $k--) {
                         $t = $lines[$k].TrimStart()
                         if ($t.StartsWith('/**')) { $jdStart = $k; $jdEnd = $j; break }
-                        if ($t.StartsWith('/*')) { break }  # license block, not JavaDoc
+                        if ($t.StartsWith('/*')) { break }  # block comment, not JavaDoc
                     }
                 }
 
@@ -304,7 +291,8 @@ function Update-JavaFile {
                     $existingDescription = Get-JavadocDescription -JavadocLines $lines[$jdStart..$jdEnd]
                 }
 
-                $javadocLines = (New-TypeJavadoc -FileType $typeInfo.Type -ClassName $typeInfo.Name -ExistingDescription $existingDescription) -split "`r?`n"
+                $sinceDate = (Get-Item -LiteralPath $FilePath).CreationTime.ToString($SinceDateFormat)
+                $javadocLines = (New-TypeJavadoc -FileType $typeInfo.Type -ClassName $typeInfo.Name -ExistingDescription $existingDescription -Since $sinceDate) -split "`r?`n"
 
                 # Rebuild: everything before the insertion point (minus the old
                 # JavaDoc), one blank line, new JavaDoc, then the declaration

@@ -1,8 +1,20 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Immutable data carrier for VerificationReport values.
+ *
+ * This record is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 public record VerificationReport(String description, Instant timestamp, boolean success, List<VerificationCheck> checks) {
     public VerificationReport {
         checks = List.copyOf(checks);

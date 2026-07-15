@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.testing.guardrails;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,9 +17,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The harness ships every script as a PowerShell/bash pair. These checks
- * catch the drift that actually happens: a missing twin, a missing fail-fast
- * preamble, or twins referencing different runtime artifacts.
+ * The harness ships every script as a PowerShell/bash pair. These checks catch the drift that actually happens: a missing twin, a missing fail-fast preamble, or twins referencing different runtime artifacts.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
  */
 @Tag("unit")
 final class ScriptParityTest {

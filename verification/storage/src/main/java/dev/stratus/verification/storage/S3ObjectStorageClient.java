@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -29,6 +32,15 @@ import java.util.stream.Collectors;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 
+/**
+ * Implementation of S3ObjectStorageClient functionality.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 public final class S3ObjectStorageClient implements ObjectStorageClient {
     private final S3Client client;
 

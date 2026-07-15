@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.testing.guardrails;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,9 +23,13 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 /**
- * Naming rules the repository has already paid to establish: capability-named
- * implementation documents, no resurrection of retired names, and documented
- * Maven module selectors that actually exist in the reactor.
+ * Naming rules the repository has already paid to establish: capability-named implementation documents, no resurrection of retired names, and documented Maven module selectors that actually exist in the reactor.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
  */
 @Tag("unit")
 final class NamingConventionTest {
