@@ -41,6 +41,46 @@ class StorageVerifierMainTest {
     }
 
     @Test
+    void writesPureJsonReportToConfiguredEvidenceFile() throws java.io.IOException {
+        var evidenceFile = java.nio.file.Path.of("target", "test-logs", "evidence-report.json");
+        java.nio.file.Files.deleteIfExists(evidenceFile);
+        var withEvidence = new HashMap<>(environment());
+        withEvidence.put("STRATUS_EVIDENCE_FILE", evidenceFile.toString());
+        assertEquals(0, StorageVerifierMain.run(withEvidence,
+                ignored -> new StubClient(Set.copyOf(StorageVerifierConfig.REQUIRED_BUCKETS)),
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream())));
+        var content = java.nio.file.Files.readString(evidenceFile);
+        assertTrue(content.startsWith("{\"description\":"),
+                "Evidence file must contain only the report JSON: " + content);
+        assertTrue(content.contains("\"success\":true"));
+    }
+
+    @Test
+    void reportsFailureWhenEvidenceFileCannotBeWritten() {
+        var withUnwritableEvidence = new HashMap<>(environment());
+        withUnwritableEvidence.put("STRATUS_EVIDENCE_FILE", java.nio.file.Path.of("target", "test-logs").toString());
+        var error = new ByteArrayOutputStream();
+        assertEquals(2, StorageVerifierMain.run(withUnwritableEvidence,
+                ignored -> new StubClient(Set.copyOf(StorageVerifierConfig.REQUIRED_BUCKETS)),
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(error)));
+        assertTrue(error.toString().contains("Cannot write evidence file"));
+    }
+
+    @Test
+    void persistentLogRecordsUseIsoTimestampedSingleLines() throws java.io.IOException {
+        StorageVerifierMain.run(environment(), ignored -> new StubClient(Set.copyOf(StorageVerifierConfig.REQUIRED_BUCKETS)),
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+        var logLines = java.nio.file.Files.readAllLines(java.nio.file.Path.of("target/test-logs/storage-verifier.0.log"));
+        var completion = logLines.stream()
+                .filter(line -> line.contains("Storage contract verification completed"))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertTrue(completion.matches(
+                "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[+-]\\d{4} INFO \\S.*"),
+                "Log records must be single lines starting with an ISO-8601 offset timestamp: " + completion);
+    }
+
+    @Test
     void returnsFailureForContractConfigurationAndRuntimeErrors() {
         var sink = new ByteArrayOutputStream();
         assertEquals(2, StorageVerifierMain.run(environment(), ignored -> new StubClient(Set.of()),
@@ -136,7 +176,8 @@ class StorageVerifierMainTest {
     private static final class StubClient implements ObjectStorageClient {
         private final Set<String> buckets;
         private final boolean failNegativeChecks;
-        private final Map<String, byte[]> objects = new HashMap<>();
+        // The verifier's concurrent-access check drives this from eight threads.
+        private final Map<String, byte[]> objects = new java.util.concurrent.ConcurrentHashMap<>();
         StubClient(Set<String> buckets) { this(buckets, false); }
         StubClient(Set<String> buckets, boolean failNegativeChecks) {
             this.buckets = buckets;

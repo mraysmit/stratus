@@ -23,6 +23,7 @@
         <module>build-support/stratus-bom</module>
         <module>build-support/stratus-build-parent</module>
         <module>verification/storage</module>
+        <module>testing/repo-guardrails</module>
     </modules>
 
     <profiles>

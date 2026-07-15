@@ -412,19 +412,19 @@ Phase 2 should hand off:
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) - Phase 3 query acceleration and data products implementation plan
 - [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate
-- [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md) - Increment 8 Kafka event backbone implementation plan
-- [increment9_kafka_connect_debezium.md](increment9_kafka_connect_debezium.md) - Increment 9 Kafka Connect and Debezium CDC implementation plan
-- [increment10_flink_streaming_compute.md](increment10_flink_streaming_compute.md) - Increment 10 Flink streaming compute implementation plan
-- [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md) - Increment 11 streaming writes to Iceberg implementation plan
-- [increment12_atlas_event_lineage.md](increment12_atlas_event_lineage.md) - Increment 12 Atlas event bus and lineage automation implementation plan
-- [increment13_streaming_production_readiness.md](increment13_streaming_production_readiness.md) - Increment 13 streaming operations and production readiness checklist
-- [increment1_ceph.md](increment1_ceph.md) - Phase 1 storage foundation (Ceph RGW)
-- [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) - Phase 1 table and catalog foundation
-- [increment3_spark.md](increment3_spark.md) - Phase 1 batch compute
-- [increment4_airflow.md](increment4_airflow.md) - Phase 1 orchestration
-- [increment5_trino.md](increment5_trino.md) - Phase 1 interactive query
-- [increment6_atlas_ranger.md](increment6_atlas_ranger.md) - Phase 1 governance
-- [increment7_identity_security.md](increment7_identity_security.md) - Phase 1 identity and security hardening
+- [kafka_event_backbone.md](kafka_event_backbone.md) - Increment 8 Kafka event backbone implementation plan
+- [kafka_connect_debezium_cdc.md](kafka_connect_debezium_cdc.md) - Increment 9 Kafka Connect and Debezium CDC implementation plan
+- [flink_streaming_compute.md](flink_streaming_compute.md) - Increment 10 Flink streaming compute implementation plan
+- [flink_streaming_iceberg.md](flink_streaming_iceberg.md) - Increment 11 streaming writes to Iceberg implementation plan
+- [atlas_streaming_lineage.md](atlas_streaming_lineage.md) - Increment 12 Atlas event bus and lineage automation implementation plan
+- [streaming_production_readiness.md](streaming_production_readiness.md) - Increment 13 streaming operations and production readiness checklist
+- [ceph_storage.md](ceph_storage.md) - Phase 1 storage foundation (Ceph RGW)
+- [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md) - Phase 1 table and catalog foundation
+- [spark_compute.md](spark_compute.md) - Phase 1 batch compute
+- [airflow_orchestration.md](airflow_orchestration.md) - Phase 1 orchestration
+- [trino_query.md](trino_query.md) - Phase 1 interactive query
+- [atlas_ranger_governance.md](atlas_ranger_governance.md) - Phase 1 governance
+- [freeipa_keycloak_identity.md](freeipa_keycloak_identity.md) - Phase 1 identity and security hardening
 
 ---
 

@@ -1,7 +1,11 @@
 .env
-certs/*.crt
-certs/*.csr
-certs/*.srl
+certs/
 private/
 evidence/*
 !evidence/.gitkeep
+logs/
+# Backstop for key material generated outside the expected directories.
+*.key
+*.csr
+*.srl
+*.pem

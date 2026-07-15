@@ -81,22 +81,22 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
 ### Targeted unit diagnosis
 
 ```powershell
-.\mvnw.cmd test -Punit-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-unit-$timestamp.txt"
+.\mvnw.cmd test -Punit-tests -pl :stratus-storage-verifier 2>&1 |
+    Tee-Object -FilePath "logs\storage-verifier-unit-$timestamp.txt"
 ```
 
 ### Targeted protocol diagnosis
 
 ```powershell
-.\mvnw.cmd test -Pprotocol-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-protocol-$timestamp.txt"
+.\mvnw.cmd test -Pprotocol-tests -pl :stratus-storage-verifier 2>&1 |
+    Tee-Object -FilePath "logs\storage-verifier-protocol-$timestamp.txt"
 ```
 
 ### Targeted live Ceph diagnosis
 
 ```powershell
-.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-contract-ceph-$timestamp.txt"
+.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-storage-verifier 2>&1 |
+    Tee-Object -FilePath "logs\storage-verifier-ceph-$timestamp.txt"
 ```
 
 ### Resume after a known reactor failure
@@ -104,8 +104,8 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
 Use resume only after correcting a failure from a complete command. Repeat the original complete command without `-rf` before declaring the change complete.
 
 ```powershell
-.\mvnw.cmd verify -rf :stratus-storage-contract-verifier 2>&1 |
-    Tee-Object -FilePath "logs\resume-storage-contract-$timestamp.txt"
+.\mvnw.cmd verify -rf :stratus-storage-verifier 2>&1 |
+    Tee-Object -FilePath "logs\resume-storage-verifier-$timestamp.txt"
 ```
 
 ### Tagging audit
@@ -148,14 +148,14 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 ### Targeted profiles
 
 ```bash
-./mvnw test -Punit-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-unit-${timestamp}.txt"
+./mvnw test -Punit-tests -pl :stratus-storage-verifier 2>&1 \
+  | tee "logs/storage-verifier-unit-${timestamp}.txt"
 
-./mvnw test -Pprotocol-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-protocol-${timestamp}.txt"
+./mvnw test -Pprotocol-tests -pl :stratus-storage-verifier 2>&1 \
+  | tee "logs/storage-verifier-protocol-${timestamp}.txt"
 
-./mvnw test -Pceph-integration-tests -pl :stratus-storage-contract-verifier 2>&1 \
-  | tee "logs/storage-contract-ceph-${timestamp}.txt"
+./mvnw test -Pceph-integration-tests -pl :stratus-storage-verifier 2>&1 \
+  | tee "logs/storage-verifier-ceph-${timestamp}.txt"
 
 ./mvnw test -Puntagged-tests 2>&1 \
   | tee "logs/untagged-audit-${timestamp}.txt"
@@ -172,13 +172,13 @@ tail -n 40 "logs/local-regression-${timestamp}.txt"
 Prefer Maven artifact IDs over filesystem paths:
 
 ```powershell
-.\mvnw.cmd test -Punit-tests -pl :stratus-storage-contract-verifier
+.\mvnw.cmd test -Punit-tests -pl :stratus-storage-verifier
 ```
 
 When a selected module requires upstream reactor modules, add `-am`:
 
 ```powershell
-.\mvnw.cmd verify -pl :stratus-storage-contract-verifier -am
+.\mvnw.cmd verify -pl :stratus-storage-verifier -am
 ```
 
 Do not use a targeted module command as final regression evidence. The complete reactor command remains mandatory.
@@ -188,7 +188,7 @@ Do not use a targeted module command as final regression evidence. The complete 
 ### Confirm effective default selection
 
 ```powershell
-.\mvnw.cmd help:effective-pom -pl :stratus-storage-contract-verifier 2>&1 |
+.\mvnw.cmd help:effective-pom -pl :stratus-storage-verifier 2>&1 |
     Select-String -Pattern 'test.groups|test.excludedGroups|coverage.skip'
 ```
 
@@ -203,7 +203,7 @@ coverage.skip=false
 ### Confirm `all-tests` removes filters
 
 ```powershell
-.\mvnw.cmd help:effective-pom -pl :stratus-storage-contract-verifier -Pall-tests 2>&1 |
+.\mvnw.cmd help:effective-pom -pl :stratus-storage-verifier -Pall-tests 2>&1 |
     Select-String -Pattern 'test.groups|test.excludedGroups|ceph.integration.required'
 ```
 
@@ -233,7 +233,7 @@ Expected output: none.
 
 ## Current Module Notes
 
-- `stratus-storage-contract-verifier` owns unit, local S3-protocol, and live Ceph RGW contract tests.
+- `stratus-storage-verifier` owns unit, local S3-protocol, and live Ceph RGW contract tests.
 - `S3ObjectStorageClientTest` uses a real in-process HTTP protocol endpoint and the actual SDK client. Mockito and all other mocking frameworks are prohibited.
 - `CephRgwIntegrationTest` is the live product-compatibility boundary. It is not selected by the default local regression command.
 - JaCoCo reports are generated under `verification/storage/target/site/jacoco/` by complete coverage-enforcing profiles.

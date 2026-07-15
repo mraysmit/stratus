@@ -6,9 +6,9 @@ RUN groupadd --gid 10001 stratus \
     && mkdir -p /opt/stratus /evidence \
     && chown -R stratus:stratus /opt/stratus /evidence
 
-COPY --chown=stratus:stratus verification/storage/target/stratus-storage-verifier.jar /opt/stratus/storage-contract-verifier.jar
+COPY --chown=stratus:stratus verification/storage/target/stratus-storage-verifier.jar /opt/stratus/storage-verifier.jar
 
 USER 10001:10001
 WORKDIR /opt/stratus
 
-CMD ["java", "-jar", "/opt/stratus/storage-contract-verifier.jar"]
+CMD ["java", "-jar", "/opt/stratus/storage-verifier.jar"]
