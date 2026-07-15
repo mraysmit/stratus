@@ -13,6 +13,12 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     $lines = $lines -replace '^CEPH_DENIED_ACCESS_KEY=.*', "CEPH_DENIED_ACCESS_KEY=stratus-denied-$(New-RandomHex 6)"
     $lines = $lines -replace '^CEPH_DENIED_SECRET_KEY=.*', "CEPH_DENIED_SECRET_KEY=$(New-RandomHex 20)"
     Set-Content -LiteralPath $envFile -Value $lines
+    # Best-effort: restrict the generated secrets to the current user (parity
+    # with the bash twin's chmod 600).
+    try {
+        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        & icacls $envFile /inheritance:r /grant:r "${currentUser}:F" *> $null
+    } catch { }
     Write-HarnessLog "Generated $envFile with per-machine disposable credentials"
 }
 # Idempotent: generates on first run, renews when a certificate nears expiry.
