@@ -1,5 +1,7 @@
 # Cephadm Deployment
 
+This directory is a reserved placeholder. The host inventory, service specifications, and templates listed below are delivered by the production-track tasks of the Increment 1 implementation plan ([ceph_storage.md](../../../docs/implementation/ceph_storage.md)); nothing here is implemented yet.
+
 This directory owns Ceph Linux deployment assets:
 
 - host inventory templates

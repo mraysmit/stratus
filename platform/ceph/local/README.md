@@ -8,6 +8,8 @@ It does not use an S3 mock and it does not require an external Ceph endpoint.
 
 | Service | Purpose |
 |---|---|
+| `ceph-bootstrap` | One-shot job that generates the cluster fsid, keyrings, and monitor stores on first start |
+| `ceph-configure` | One-shot job that creates the pools, the verifier identity, and the separate denied owner |
 | `mon1`-`mon3` | Three genuine Ceph monitors forming a quorum |
 | `mgr1`-`mgr2` | Genuine active/standby Ceph managers |
 | `osd1`-`osd3` | Three genuine BlueStore OSDs, each with its own disposable Docker volume and CRUSH host |
@@ -60,15 +62,17 @@ Java and Maven are not required on the verification environment.
 
 ## Configuration
 
-The first startup copies `.env.template` to the ignored `.env` file. The template uses explicitly disposable local credentials and the endpoint:
+The first startup creates the ignored `.env` file from `.env.template`, replacing the credential placeholders with generated per-machine disposable secrets. The endpoint is:
 
 ```text
 https://object-store.stratus.local:8443
 ```
 
+The published port binds to `127.0.0.1` by default; set `CEPH_RGW_BIND_ADDRESS` only when remote access is deliberate.
+
 Change `VERIFIER_IMAGE` to the immutable image reference produced by the build system. Do not add a Compose `build` section.
 
-The local CA, server certificate, and private key are generated into ignored `certs/` and `private/` directories. Client and verifier containers receive only the public CA. The server private key is mounted only into the TLS proxy.
+The local CA, server certificate, and private key are generated into ignored `certs/` and `private/` directories. Certificates renew automatically at startup when within seven days of expiry; leaf renewal preserves the existing CA. Client and verifier containers receive only the public CA. The server private key is mounted only into the TLS proxy and is deliberately unencrypted — it must never leave the developer machine.
 
 On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/install-prerequisites.sh` when necessary.
 
@@ -100,23 +104,35 @@ Bash:
 
 `shutdown` removes containers and the project network but preserves Ceph volumes so the environment can restart.
 
+Capture run transcripts into the ignored harness-local `logs/` directory (the repository-root `logs/` is reserved for Maven build logs). Use `*>&1` so PowerShell status lines are included:
+
+```powershell
+$timestamp = Get-Date -Format yyyyMMdd-HHmmss
+& { .\scripts\startup.ps1 && .\scripts\bootstrap-buckets.ps1 && .\scripts\check.ps1 && .\scripts\verify-java.ps1 && .\scripts\verify-security.ps1 && .\scripts\shutdown.ps1 } *>&1 |
+    Tee-Object -FilePath "logs\ceph-local-verification-$timestamp.txt"
+```
+
 ## Destructive reset
 
-Reset removes only this Compose project's disposable Ceph configuration and data volumes. It preserves `.env`, generated certificates, pulled images, and evidence.
+Reset removes only this Compose project's disposable Ceph configuration and data volumes. It preserves `.env`, generated certificates, pulled images, and evidence. It prompts for confirmation unless forced.
 
 PowerShell:
 
 ```powershell
-.\scripts\reset.ps1
+.\scripts\reset.ps1 -Force
 ```
 
 Bash:
 
 ```bash
-./scripts/reset.sh
+./scripts/reset.sh --force
 ```
 
 The next startup creates a new Ceph cluster, the verifier identity, and the separate owner used for the access-boundary test.
+
+## Harness self-test
+
+`scripts/selftest.{ps1,sh}` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
 
 ## Direct inspection
 
@@ -134,7 +150,7 @@ The steady-state developer health target is `HEALTH_OK`, with all three OSDs `up
 
 ## Evidence
 
-Verifier JSON and logs are written beneath the ignored `evidence/` directory. Evidence must record:
+Verifier reports (pure JSON, written directly by the verifier via `STRATUS_EVIDENCE_FILE`, each opening with a `description` field stating what the evidence proves), per-run rotating verifier logs (`storage-verifier-<timestamp>.N.log`, single-line ISO-8601 timestamped records), and an `environment-<timestamp>.json` snapshot are written directly under the ignored `evidence/` directory. The snapshot is captured by `verify-java` and records the compose runtime and platform, the resolved Ceph and verifier image identities, `ceph version`, `ceph status`, and the OSD tree. Evidence must record:
 
 - Ceph image digest and `ceph version`
 - Docker version and architecture
@@ -146,3 +162,5 @@ Verifier JSON and logs are written beneath the ignored `evidence/` directory. Ev
 - DEBUG operation/attempt logs when `STRATUS_LOG_LEVEL=DEBUG`
 
 Never include RGW secret keys, CA private keys, or the TLS server private key in evidence.
+
+Transcripts and the untrusted-TLS evidence log contain the JVM line `Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=... -Djavax.net.ssl.trustStorePassword=changeit`. This is not a leaked secret: it is emitted by the standard Temurin base-image CA entrypoint, `changeit` is the JVM's publicly documented default keystore password, and the truststore is an ephemeral tmpfs file holding only public certificates. Truststore passwords protect integrity, not confidentiality.

@@ -3,14 +3,15 @@ package dev.stratus.verification.storage;
 import java.time.Instant;
 import java.util.List;
 
-public record VerificationReport(Instant timestamp, boolean success, List<VerificationCheck> checks) {
+public record VerificationReport(String description, Instant timestamp, boolean success, List<VerificationCheck> checks) {
     public VerificationReport {
         checks = List.copyOf(checks);
     }
 
     public String toJson() {
         var output = new StringBuilder();
-        output.append("{\"timestamp\":\"").append(timestamp).append("\",\"success\":").append(success).append(",\"checks\":[");
+        output.append("{\"description\":\"").append(escape(description))
+                .append("\",\"timestamp\":\"").append(timestamp).append("\",\"success\":").append(success).append(",\"checks\":[");
         for (var index = 0; index < checks.size(); index++) {
             if (index > 0) output.append(',');
             var check = checks.get(index);

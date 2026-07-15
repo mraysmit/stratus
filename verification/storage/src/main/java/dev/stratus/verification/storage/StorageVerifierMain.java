@@ -38,15 +38,25 @@ public final class StorageVerifierMain {
                 var report = switch (environment.getOrDefault("STRATUS_VERIFICATION_MODE", "CONTRACT")) {
                     case "CONTRACT" -> new StorageVerifier(client, clock)
                             .verify(config.requiredBuckets(), config.probeBucket());
-                    case "AUTH_FAILURE" -> negativeReport(clock, "invalid-credentials-rejected",
+                    case "AUTH_FAILURE" -> negativeReport(clock,
+                            "Stratus negative security evidence (invalid credentials): success=true means "
+                                    + "Ceph RGW rejected the deliberately invalid credentials",
+                            "invalid-credentials-rejected",
                             "Ceph RGW rejected the deliberately invalid credentials", client::verifyCredentialsRejected);
-                    case "ACCESS_DENIED" -> negativeReport(clock, "cross-identity-access-denied",
+                    case "ACCESS_DENIED" -> negativeReport(clock,
+                            "Stratus negative security evidence (cross-identity denial): success=true means "
+                                    + "Ceph RGW denied the verifier access to a bucket owned by a separate identity",
+                            "cross-identity-access-denied",
                             "Ceph RGW denied listing a bucket owned by a separate identity",
                             () -> client.verifyListDenied(requireEnvironment(environment, "CEPH_RGW_DENIED_BUCKET")));
                     default -> throw new IllegalArgumentException(
                             "STRATUS_VERIFICATION_MODE must be CONTRACT, AUTH_FAILURE, or ACCESS_DENIED");
                 };
                 output.println(report.toJson());
+                var evidenceFile = environment.getOrDefault("STRATUS_EVIDENCE_FILE", "");
+                if (!evidenceFile.isEmpty()) {
+                    writeEvidence(Path.of(evidenceFile), report.toJson());
+                }
                 return report.success() ? 0 : 2;
             }
         } catch (IllegalArgumentException exception) {
@@ -62,14 +72,24 @@ public final class StorageVerifierMain {
         }
     }
 
-    private static VerificationReport negativeReport(Clock clock, String name, String successDetail, Runnable action) {
+    private static VerificationReport negativeReport(
+            Clock clock, String description, String name, String successDetail, Runnable action) {
         var timestamp = Instant.now(clock);
         try {
             action.run();
-            return new VerificationReport(timestamp, true, List.of(VerificationCheck.passed(name, successDetail)));
+            return new VerificationReport(description, timestamp, true, List.of(VerificationCheck.passed(name, successDetail)));
         } catch (RuntimeException exception) {
             StorageVerifier.LOGGER.log(Level.WARNING, "Negative storage check " + name + " failed", exception);
-            return new VerificationReport(timestamp, false, List.of(VerificationCheck.failed(name, exception)));
+            return new VerificationReport(description, timestamp, false, List.of(VerificationCheck.failed(name, exception)));
+        }
+    }
+
+    private static void writeEvidence(Path evidenceFile, String reportJson) {
+        try {
+            java.nio.file.Files.createDirectories(evidenceFile.toAbsolutePath().getParent());
+            java.nio.file.Files.writeString(evidenceFile, reportJson + System.lineSeparator());
+        } catch (java.io.IOException exception) {
+            throw new java.io.UncheckedIOException("Cannot write evidence file " + evidenceFile, exception);
         }
     }
 

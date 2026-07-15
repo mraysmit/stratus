@@ -8,11 +8,11 @@ Initial audit date: 2026-07-11. Remediation validation date: 2026-07-11.
 
 Active scope:
 
-- Phase 1: `increment1_ceph.md` through `increment7_identity_security.md`
-- Phase 2: `increment8_kafka_event_backbone.md` through `increment13_streaming_production_readiness.md`
+- Phase 1 (Increments 1-7): `ceph_storage.md`, `iceberg_polaris_catalog.md`, `spark_compute.md`, `airflow_orchestration.md`, `trino_query.md`, `atlas_ranger_governance.md`, `freeipa_keycloak_identity.md`
+- Phase 2 (Increments 8-13): `kafka_event_backbone.md`, `kafka_connect_debezium_cdc.md`, `flink_streaming_compute.md`, `flink_streaming_iceberg.md`, `atlas_streaming_lineage.md`, `streaming_production_readiness.md`
 - Cross-checks: both implementation plans and the Phase 1 operational-readiness document
 
-The superseded `increment1_minio.md` and `increment1_ozone.md` alternatives were inventoried but are not active remediation targets while Ceph remains the storage baseline.
+The superseded `minio_storage.md` and `ozone_storage.md` alternatives were inventoried but are not active remediation targets while Ceph remains the storage baseline.
 
 ---
 
@@ -90,7 +90,7 @@ Initial task-track gaps:
 - Production promotion does not map each developer shortcut to its replacement task.
 - No task-to-gate matrix proves that all 27 gate checks have producing tasks and evidence owners.
 
-Remediation status: **complete on 2026-07-11**. Section 17 of `increment1_ceph.md` expands `P1-1.1` through `P1-1.6` into 26 shared, developer, production, readiness, and gate tasks. It includes exact artifact paths, verification evidence, acceptance roles, status and blocker fields, developer-to-production promotion and rollback controls, and producing-task mappings for D1-D14 and P1-P13.
+Remediation status: **complete on 2026-07-11**. Section 17 of `ceph_storage.md` expands `P1-1.1` through `P1-1.6` into 26 shared, developer, production, readiness, and gate tasks. It includes exact artifact paths, verification evidence, acceptance roles, status and blocker fields, developer-to-production promotion and rollback controls, and producing-task mappings for D1-D14 and P1-P13.
 
 ### Increment 2 - Iceberg and Polaris
 

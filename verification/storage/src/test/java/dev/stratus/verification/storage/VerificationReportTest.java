@@ -17,10 +17,12 @@ class VerificationReportTest {
         var checks = new ArrayList<>(List.of(
                 VerificationCheck.passed("first", "slash\\ quote\" return\r newline\n"),
                 new VerificationCheck("second", false, "failed")));
-        var report = new VerificationReport(Instant.parse("2026-07-12T10:15:30Z"), false, checks);
+        var report = new VerificationReport("what \"this\" evidence proves",
+                Instant.parse("2026-07-12T10:15:30Z"), false, checks);
         checks.clear();
 
-        assertEquals("{\"timestamp\":\"2026-07-12T10:15:30Z\",\"success\":false,\"checks\":["
+        assertEquals("{\"description\":\"what \\\"this\\\" evidence proves\","
+                + "\"timestamp\":\"2026-07-12T10:15:30Z\",\"success\":false,\"checks\":["
                 + "{\"name\":\"first\",\"passed\":true,\"detail\":\"slash\\\\ quote\\\" return\\r newline\\n\"},"
                 + "{\"name\":\"second\",\"passed\":false,\"detail\":\"failed\"}]}", report.toJson());
         assertFalse(report.checks().isEmpty());

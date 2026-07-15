@@ -1,4 +1,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
-Import-HarnessEnvironment
-Invoke-HarnessCompose --profile verification down --remove-orphans
+if (Test-Path -LiteralPath (Join-Path $script:HarnessDir '.env')) {
+    Import-HarnessEnvironmentFile
+    Invoke-HarnessCompose --profile verification down --remove-orphans
+} else {
+    Invoke-HarnessComposeTeardown down --remove-orphans
+}

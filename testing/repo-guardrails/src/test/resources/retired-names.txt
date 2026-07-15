@@ -1,0 +1,8 @@
+# Names deliberately removed from the repository. One lowercase token per
+# line; the guardrail test fails any tracked text file that still contains
+# one. When a rename retires a name, add the old name here with a comment
+# naming its replacement.
+
+# Renamed to stratus-storage-verifier (module), stratus/storage-verifier
+# (image), and storage-verifier (jar/log prefix) in July 2026.
+storage-contract

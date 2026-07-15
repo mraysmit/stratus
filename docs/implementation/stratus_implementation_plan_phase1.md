@@ -87,7 +87,7 @@ Evidence should be durable enough that another engineer can understand what pass
 
 ### Phase 1 Work-Package Tracker
 
-The rows below are portfolio-level parent work packages. Each owning increment document decomposes its parent IDs into shared (`S`), developer (`D`), production (`P`), verification (`V`), recovery (`R`), and gate (`G`) child tasks with deliverable paths and gate mappings. The execution sources of truth are the Implementation Task Track sections in [Increment 1](increment1_ceph.md#17-implementation-task-track), [Increment 2](increment2_iceberg_polaris.md#12-implementation-task-track), [Increment 3](increment3_spark.md#12-implementation-task-track), [Increment 4](increment4_airflow.md#15-implementation-task-track), [Increment 5](increment5_trino.md#13-implementation-task-track), [Increment 6](increment6_atlas_ranger.md#15-implementation-task-track), and [Increment 7](increment7_identity_security.md#16-implementation-task-track). This table remains the portfolio roll-up.
+The rows below are portfolio-level parent work packages. Each owning increment document decomposes its parent IDs into shared (`S`), developer (`D`), production (`P`), verification (`V`), recovery (`R`), and gate (`G`) child tasks with deliverable paths and gate mappings. The execution sources of truth are the Implementation Task Track sections in [Increment 1](ceph_storage.md#17-implementation-task-track), [Increment 2](iceberg_polaris_catalog.md#12-implementation-task-track), [Increment 3](spark_compute.md#12-implementation-task-track), [Increment 4](airflow_orchestration.md#15-implementation-task-track), [Increment 5](trino_query.md#13-implementation-task-track), [Increment 6](atlas_ranger_governance.md#15-implementation-task-track), and [Increment 7](freeipa_keycloak_identity.md#16-implementation-task-track). This table remains the portfolio roll-up.
 
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
@@ -495,13 +495,13 @@ Operational production-readiness signoff is covered by [stratus_phase1_operation
 ## 13. Design Documents
 
 - [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md) — full architecture specification and component decisions
-- [increment1_ceph.md](increment1_ceph.md) — Increment 1 Ceph object storage foundation implementation plan
-- [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md) — Increment 2 table and catalog implementation plan
-- [increment3_spark.md](increment3_spark.md) — Increment 3 batch compute implementation plan
-- [increment4_airflow.md](increment4_airflow.md) — Increment 4 orchestration implementation plan
-- [increment5_trino.md](increment5_trino.md) — Increment 5 interactive query implementation plan
-- [increment6_atlas_ranger.md](increment6_atlas_ranger.md) — Increment 6 metadata and governance implementation plan
-- [increment7_identity_security.md](increment7_identity_security.md) — Increment 7 identity and security hardening implementation plan
+- [ceph_storage.md](ceph_storage.md) — Increment 1 Ceph object storage foundation implementation plan
+- [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md) — Increment 2 table and catalog implementation plan
+- [spark_compute.md](spark_compute.md) — Increment 3 batch compute implementation plan
+- [airflow_orchestration.md](airflow_orchestration.md) — Increment 4 orchestration implementation plan
+- [trino_query.md](trino_query.md) — Increment 5 interactive query implementation plan
+- [atlas_ranger_governance.md](atlas_ranger_governance.md) — Increment 6 metadata and governance implementation plan
+- [freeipa_keycloak_identity.md](freeipa_keycloak_identity.md) — Increment 7 identity and security hardening implementation plan
 - [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md) — Phase 1 operational acceptance and production readiness checklist
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) — Phase 2 streaming and operational maturity implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) — Phase 3 query acceleration and data products implementation plan

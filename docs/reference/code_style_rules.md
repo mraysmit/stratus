@@ -23,7 +23,7 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Runtime names MUST NOT contain phase or increment identifiers such as `phase1`, `increment1`, or `p1-1`.
 - Phase and increment identifiers MAY appear in implementation plans, task tracking, acceptance evidence metadata, and historical records.
 - Java group and package names MUST use the `dev.stratus` namespace.
-- Directories and artifact IDs MUST use lowercase kebab case, for example `storage-contract` and `stratus-storage-contract-verifier`.
+- Directories and artifact IDs MUST use lowercase kebab case, for example `build-support` and `stratus-storage-verifier`.
 - Java package segments MUST use lowercase words without underscores or hyphens.
 - Environment-specific inventory MUST live under `environments/`; reusable product integration belongs under `platform/`.
 
