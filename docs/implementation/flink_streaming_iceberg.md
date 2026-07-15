@@ -590,11 +590,11 @@ The developer gate may unblock Increment 12 engineering. Only the production gat
 ## 17. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
-- Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
-- Increment 9 - Kafka Connect and Debezium CDC: [increment9_kafka_connect_debezium.md](increment9_kafka_connect_debezium.md)
-- Increment 10 - Flink Streaming Compute: [increment10_flink_streaming_compute.md](increment10_flink_streaming_compute.md)
-- Increment 2 - Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
-- Increment 5 - Trino: [increment5_trino.md](increment5_trino.md)
+- Increment 8 - Kafka Event Backbone: [kafka_event_backbone.md](kafka_event_backbone.md)
+- Increment 9 - Kafka Connect and Debezium CDC: [kafka_connect_debezium_cdc.md](kafka_connect_debezium_cdc.md)
+- Increment 10 - Flink Streaming Compute: [flink_streaming_compute.md](flink_streaming_compute.md)
+- Increment 2 - Iceberg and Polaris: [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md)
+- Increment 5 - Trino: [trino_query.md](trino_query.md)
 - Apache Iceberg Flink integration: https://iceberg.apache.org/docs/latest/flink/
 - Apache Iceberg Flink writes: https://iceberg.apache.org/docs/latest/flink-writes/
 - Apache Iceberg Flink configuration: https://iceberg.apache.org/docs/latest/flink-configuration/

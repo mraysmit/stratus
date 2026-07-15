@@ -946,7 +946,7 @@ The developer gate may unblock Increment 9 engineering. Only the production gate
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Phase 1 operational readiness: [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md)
-- Increment 7 - Identity and Security: [increment7_identity_security.md](increment7_identity_security.md)
+- Increment 7 - Identity and Security: [freeipa_keycloak_identity.md](freeipa_keycloak_identity.md)
 - Apache Kafka downloads: https://downloads.apache.org/kafka/
 - Apache Kafka documentation: https://kafka.apache.org/documentation/
 - Kafka KRaft documentation: https://kafka.apache.org/documentation/#kraft

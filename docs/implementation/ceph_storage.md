@@ -809,8 +809,10 @@ The developer Podman path is useful when engineers want their local client runti
 
 ```text
 platform/ceph/local/
+  README.md
   compose.yaml
   .env.template
+  .gitignore
   ceph/
     bootstrap.sh
     configure.sh
@@ -819,58 +821,34 @@ platform/ceph/local/
   certs/                     # ignored generated public certificates
   private/                   # ignored generated private keys
   evidence/                  # ignored verifier evidence
-  scripts/
-    startup.sh
-    shutdown.sh
-    reset.sh
-    bootstrap-buckets.sh
-    check.sh
-    verify-java.sh
+  scripts/                   # each script ships as a .ps1/.sh pair
+    bootstrap-buckets.{ps1,sh}
+    check.{ps1,sh}
+    common.{ps1,sh}
+    generate-lab-certificates.{ps1,sh}
+    install-prerequisites.{ps1,sh}
+    reset.{ps1,sh}
+    shutdown.{ps1,sh}
+    startup.{ps1,sh}
+    verify-java.{ps1,sh}
+    verify-security.{ps1,sh}
 ```
 
 The directory should be created once and then reused by developers. `.env` and private key material are local files and must not be committed.
 
-### `.env.template`
+### `.env.template` and `.env`
 
-Commit this template so new developers know exactly what to fill in:
+The normative variable contract is the committed file `platform/ceph/local/.env.template`; this runbook deliberately does not duplicate it. The first startup creates the ignored `.env` from that template and replaces the credential placeholders with generated per-machine disposable secrets.
 
-```bash
-# HTTPS endpoint exposed by the local Docker RGW proxy.
-CEPH_RGW_ENDPOINT=https://object-store.stratus.local:8443
-CEPH_RGW_PORT=8443
+The variables a developer must review or change:
 
-# Disposable local RGW verification user. Never reuse outside the local lab.
-CEPH_DEMO_UID=stratus-verifier
-CEPH_RGW_ACCESS_KEY=stratus-local-access
-CEPH_RGW_SECRET_KEY=stratus-local-secret-change-before-shared-use
+| Variable | Action |
+|---|---|
+| `VERIFIER_IMAGE` | Replace with the immutable verifier image reference produced by the build system before any recorded run. The template's `:dev` default is a local-build convenience only. |
+| `COMPOSE_IMPLEMENTATION` | `docker` (required baseline), `podman`, or `auto`. |
+| `CEPH_RGW_BIND_ADDRESS` | Loopback by default. Change only when remote access to the harness is deliberate. |
 
-# Use path-style addressing for the first implementation.
-S3_PATH_STYLE_ACCESS=true
-
-# Required pinned Ceph image and local Compose implementation.
-CEPH_IMAGE=quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644
-COMPOSE_IMPLEMENTATION=docker
-
-# Pinned internal registry images. The verifier image is produced by the build system
-# and contains the already-built storage verifier artifact.
-S3CLIENT_IMAGE=REPLACE_WITH_PINNED_RCLONE_IMAGE
-VERIFIER_IMAGE=REPLACE_WITH_PINNED_STRATUS_STORAGE_VERIFIER_IMAGE
-```
-
-### `.env`
-
-The developer harness targets the Ceph RGW endpoint directly. These variables describe the Ceph RGW S3-compatible endpoint, the RGW verification user, TLS trust, and S3 client behavior. They do not describe cloud infrastructure.
-
-```bash
-CEPH_RGW_ENDPOINT=https://object-store.stratus.local:8443
-CEPH_RGW_ACCESS_KEY=stratus-local-access
-CEPH_RGW_SECRET_KEY=stratus-local-secret-change-before-shared-use
-S3_PATH_STYLE_ACCESS=true
-COMPOSE_IMPLEMENTATION=docker
-CEPH_IMAGE=quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644
-S3CLIENT_IMAGE=REPLACE_WITH_PINNED_RCLONE_IMAGE
-VERIFIER_IMAGE=REPLACE_WITH_PINNED_STRATUS_STORAGE_VERIFIER_IMAGE
-```
+All other values (endpoint, generated credentials, denied-owner identity, timeouts, logging, pinned images) are correct as generated. The developer harness targets the Ceph RGW endpoint directly; nothing in `.env` describes cloud infrastructure. `.env` and private key material are local files and must not be committed.
 
 ### `compose.yaml`
 
@@ -893,7 +871,7 @@ The Compose harness is intentionally small, but every parameter must be explicit
 | `COMPOSE_IMPLEMENTATION` | No | scripts | `docker` | Selects Docker Compose for the required baseline; optional Podman compatibility is separate evidence. |
 | `CEPH_IMAGE` | Yes | Ceph bootstrap/configuration and daemon services | pinned 20.2.2 digest | Official Ceph image used for the genuine local daemons. |
 | `S3CLIENT_IMAGE` | Yes | `s3client` | `REPLACE_WITH_PINNED_RCLONE_IMAGE` | Pinned S3-compatible client image. Replace with an internally mirrored image where required. |
-| `VERIFIER_IMAGE` | Yes | `verifier` | `registry.stratus.local/stratus/storage-contract-verifier:<version>@sha256:<digest>` | Pinned runtime image produced by the build system. It contains the prebuilt storage verifier JAR and a compatible JRE, but no source tree or build toolchain. |
+| `VERIFIER_IMAGE` | Yes | `verifier` | `registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>` | Pinned runtime image produced by the build system. It contains the prebuilt storage verifier JAR and a compatible JRE, but no source tree or build toolchain. |
 | `RCLONE_CONFIG_CEPHRGW_TYPE` | Yes | `s3client` | `s3` | Declares the `cephrgw` rclone remote as S3-compatible storage. |
 | `RCLONE_CONFIG_CEPHRGW_PROVIDER` | Yes | `s3client` | `Ceph` | Selects Ceph-specific S3 client behavior where rclone supports it. |
 | `RCLONE_CONFIG_CEPHRGW_ENDPOINT` | Derived | `s3client` | `${CEPH_RGW_ENDPOINT}` | Maps the Ceph RGW endpoint into the rclone remote. |
@@ -1104,13 +1082,19 @@ $compose_cmd --profile verification down --remove-orphans
 After writing the scripts, mark them executable on Linux or WSL:
 
 ```bash
-chmod +x scripts/startup.sh scripts/check.sh scripts/verify-java.sh scripts/verify-security.sh scripts/shutdown.sh
+chmod +x scripts/startup.sh scripts/bootstrap-buckets.sh scripts/check.sh scripts/verify-java.sh scripts/verify-security.sh scripts/shutdown.sh
 ```
 
 Start the harness:
 
 ```bash
 scripts/startup.sh
+```
+
+Bootstrap the Stratus buckets (creates the five Stratus buckets and the isolated denial-test bucket):
+
+```bash
+scripts/bootstrap-buckets.sh
 ```
 
 Check the harness:
@@ -1367,7 +1351,7 @@ podman run --rm \
   --env-file /etc/stratus/verifiers/storage.env \
   -v /etc/stratus/pki/stratus-ca.crt:/certs/stratus-ca.crt:ro,z \
   -v /data/stratus/evidence/increment1:/evidence:z \
-  registry.stratus.local/stratus/storage-contract-verifier:<version>@sha256:<digest>
+  registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
 ```
 
 All tests must pass before Increment 2 begins.

@@ -900,4 +900,4 @@ Common causes:
 - Ceph Tentacle RGW S3 API compatibility: https://docs.ceph.com/en/tentacle/radosgw/s3/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
+- Increment 1 — Ceph object storage foundation: [ceph_storage.md](ceph_storage.md)
