@@ -2,12 +2,14 @@
 
 <#
 .SYNOPSIS
-    Adds Apache License 2.0 headers to Java files in the PeeGeeQ project.
+    Adds SPDX Apache-2.0 license headers to Java files in the Stratus project.
 
 .DESCRIPTION
-    Inserts the Apache License 2.0 header immediately after the package
-    declaration of every Java file under the repository root (or at the top
-    of the file if there is no package declaration).
+    Inserts a two-line SPDX license header at the very top of every Java file
+    under the repository root:
+
+        // Copyright <year> <author>
+        // SPDX-License-Identifier: Apache-2.0
 
     Preserves each file's original line endings (CRLF/LF) and
     trailing-newline state, so diffs contain only the header change.
@@ -24,12 +26,12 @@
 
 .PARAMETER Force
     Re-processes files that already have a license header: every existing
-    Apache license block is removed (wherever it appears, before or after
-    the package declaration, including accidental duplicates) and a single
-    fresh header is inserted after the package declaration.
+    SPDX header (and any legacy full Apache-2.0 block from an earlier
+    convention) is removed and a single fresh SPDX header is inserted at the
+    top.
 
 .PARAMETER CopyrightYear
-    Year used in the copyright line. Defaults to 2025.
+    Year used in the copyright line. Defaults to 2026.
 
 .PARAMETER Verbose
     Shows per-file processing and skip messages.
@@ -40,10 +42,10 @@
 
 .EXAMPLE
     .\add-license-headers.ps1 -Force
-    Normalizes all files to a single license header after the package declaration.
+    Normalizes all files to a single SPDX header at the top of the file.
 
 .EXAMPLE
-    .\add-license-headers.ps1 -Path peegeeq-api\src\main\java\dev\mars\peegeeq\api\database\ConnectionProvider.java -Force
+    .\add-license-headers.ps1 -Path verification\storage\src\main\java\dev\stratus\verification\storage\StorageVerifier.java -Force
     Normalizes the license header of a single file.
 #>
 
@@ -51,7 +53,7 @@ param(
     [string]$Path,
     [switch]$DryRun,
     [switch]$Force,
-    [string]$CopyrightYear = "2025",
+    [string]$CopyrightYear = "2026",
     [switch]$Verbose
 )
 
@@ -59,23 +61,10 @@ param(
 $AUTHOR_NAME = "Mark Andrew Ray-Smith Cityline Ltd"
 $EXCLUDED_DIRS = '\\(target|\.history|node_modules|\.git)\\'
 
-# Apache License 2.0 header template
+# SPDX Apache-2.0 header template (two line comments at the top of the file)
 $LICENSE_HEADER = @"
-/*
- * Copyright $CopyrightYear $AUTHOR_NAME
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright $CopyrightYear $AUTHOR_NAME
+// SPDX-License-Identifier: Apache-2.0
 "@
 
 # Function to detect the file's predominant line ending
@@ -86,21 +75,36 @@ function Get-LineEnding {
     return "`n"
 }
 
-# Function to check if file already has license header
+# Function to check if file already has an SPDX license header
 function Test-HasLicenseHeader {
     param([string]$Content)
 
-    return $Content -match "Licensed under the Apache License"
+    return $Content -match "SPDX-License-Identifier:"
 }
 
-# Function to remove every existing Apache license block, wherever it appears.
-# The lazy (?!\*/) guards keep the match inside a single comment block.
+# Function to remove every existing license block, wherever it appears: the
+# current SPDX two-line header, a stray SPDX line, and any legacy full
+# Apache-2.0 block from the earlier convention.
 function Remove-ExistingLicense {
     param([string]$Content)
 
-    return [regex]::Replace($Content,
+    # Legacy '/* ... Licensed under the Apache License ... */' block. The lazy
+    # (?!\*/) guards keep the match inside a single comment block.
+    $Content = [regex]::Replace($Content,
         '(?s)[ \t]*/\*(?:(?!\*/).)*?Licensed under the Apache License(?:(?!\*/).)*?\*/[ \t]*(\r?\n)*',
         '')
+
+    # SPDX header: a Copyright line immediately followed by an SPDX line.
+    $Content = [regex]::Replace($Content,
+        '(?m)^[ \t]*//[ \t]*Copyright\b.*\r?\n[ \t]*//[ \t]*SPDX-License-Identifier:.*\r?\n?',
+        '')
+
+    # Any remaining stray SPDX line on its own.
+    $Content = [regex]::Replace($Content,
+        '(?m)^[ \t]*//[ \t]*SPDX-License-Identifier:.*\r?\n?',
+        '')
+
+    return $Content
 }
 
 # Function to process a single Java file
@@ -137,7 +141,7 @@ function Add-LicenseHeader {
         $hadTrailingNewline = $content.EndsWith("`n")
 
         # In Force mode, strip all existing license blocks first (this also
-        # collapses accidental duplicates and headers placed before the package)
+        # collapses accidental duplicates and migrates legacy Apache blocks)
         if ($Force) {
             $content = Remove-ExistingLicense -Content $content
         }
@@ -145,37 +149,19 @@ function Add-LicenseHeader {
         $lines = $content -split "`r?`n"
         $headerLines = $LICENSE_HEADER -split "`r?`n"
 
-        # Find the package declaration
-        $pkgIndex = -1
-        for ($i = 0; $i -lt $lines.Length; $i++) {
-            if ($lines[$i].Trim() -match '^package\s+') {
-                $pkgIndex = $i
-                break
-            }
+        # The SPDX header goes at the very top of the file, followed by one
+        # blank line and then the file's original content (leading blank lines
+        # collapsed away).
+        $restStart = 0
+        while ($restStart -lt $lines.Length -and $lines[$restStart].Trim() -eq "") {
+            $restStart++
         }
 
         $newLines = @()
-
-        if ($pkgIndex -ge 0) {
-            # Insert the header after the package declaration
-            $newLines += $lines[0..$pkgIndex]
+        $newLines += $headerLines
+        if ($restStart -lt $lines.Length) {
             $newLines += ""
-            $newLines += $headerLines
-
-            # Remainder of the file, with leading blank lines collapsed to one
-            $restStart = $pkgIndex + 1
-            while ($restStart -lt $lines.Length -and $lines[$restStart].Trim() -eq "") {
-                $restStart++
-            }
-            if ($restStart -lt $lines.Length) {
-                $newLines += ""
-                $newLines += $lines[$restStart..($lines.Length - 1)]
-            }
-        } else {
-            # No package declaration: header goes at the very top
-            $newLines += $headerLines
-            $newLines += ""
-            $newLines += $lines
+            $newLines += $lines[$restStart..($lines.Length - 1)]
         }
 
         # Preserve the file's original line endings and trailing-newline state
@@ -201,7 +187,7 @@ function Add-LicenseHeader {
 
 # Main execution
 Write-Host "License Header Addition Script" -ForegroundColor Magenta
-Write-Host "Apache License 2.0" -ForegroundColor Magenta
+Write-Host "SPDX Apache-2.0" -ForegroundColor Magenta
 Write-Host "=============================" -ForegroundColor Magenta
 Write-Host ""
 

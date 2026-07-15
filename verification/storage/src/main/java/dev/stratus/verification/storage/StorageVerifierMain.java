@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import java.time.Clock;
@@ -11,6 +14,15 @@ import java.util.logging.Level;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Implementation of StorageVerifierMain functionality.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 public final class StorageVerifierMain {
     static Supplier<Map<String, String>> environment = System::getenv;
     static Function<StorageVerifierConfig, ObjectStorageClient> clientFactory = S3ObjectStorageClient::create;

@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.verification.storage;
 
 import org.junit.jupiter.api.Test;
@@ -12,6 +15,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Implementation of StorageVerifierConfigTest functionality.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 @Tag("unit")
 class StorageVerifierConfigTest {
     @Test

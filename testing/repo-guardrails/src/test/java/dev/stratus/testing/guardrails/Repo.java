@@ -1,3 +1,6 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 package dev.stratus.testing.guardrails;
 
 import java.io.IOException;
@@ -8,7 +11,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Read-only access to the repository tree for guardrail tests. */
+/**
+ * Read-only access to the repository tree for guardrail tests.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-07-15
+ * @version 1.0.0
+ */
 final class Repo {
 
     private Repo() {
