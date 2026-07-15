@@ -675,7 +675,7 @@ The developer gate may unblock Increment 10 engineering. Only the production gat
 ## 18. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
-- Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
+- Increment 8 - Kafka Event Backbone: [kafka_event_backbone.md](kafka_event_backbone.md)
 - Apache Kafka Connect documentation: https://kafka.apache.org/documentation/#connect
 - Debezium releases: https://debezium.io/releases/
 - Debezium PostgreSQL connector: https://debezium.io/documentation/reference/stable/connectors/postgresql.html

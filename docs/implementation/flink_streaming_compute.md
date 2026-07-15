@@ -577,8 +577,8 @@ The developer gate may unblock Increment 11 engineering. Only the production gat
 ## 17. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
-- Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
-- Increment 9 - Kafka Connect and Debezium CDC: [increment9_kafka_connect_debezium.md](increment9_kafka_connect_debezium.md)
+- Increment 8 - Kafka Event Backbone: [kafka_event_backbone.md](kafka_event_backbone.md)
+- Increment 9 - Kafka Connect and Debezium CDC: [kafka_connect_debezium_cdc.md](kafka_connect_debezium_cdc.md)
 - Apache Flink downloads: https://flink.apache.org/downloads/
 - Apache Flink documentation: https://nightlies.apache.org/flink/flink-docs-stable/
 - Apache Flink Kafka connector: https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/datastream/kafka/

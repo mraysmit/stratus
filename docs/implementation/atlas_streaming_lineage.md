@@ -423,9 +423,9 @@ The developer gate completes engineering integration. Only the production gate a
 ## 15. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
-- Increment 6 - Atlas and Ranger: [increment6_atlas_ranger.md](increment6_atlas_ranger.md)
-- Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
-- Increment 11 - Streaming Writes to Iceberg: [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md)
+- Increment 6 - Atlas and Ranger: [atlas_ranger_governance.md](atlas_ranger_governance.md)
+- Increment 8 - Kafka Event Backbone: [kafka_event_backbone.md](kafka_event_backbone.md)
+- Increment 11 - Streaming Writes to Iceberg: [flink_streaming_iceberg.md](flink_streaming_iceberg.md)
 - Apache Atlas: https://atlas.apache.org/
 - Apache Atlas REST API: https://atlas.apache.org/api/v2/index.html
 - Apache Ranger: https://ranger.apache.org/
