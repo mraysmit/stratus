@@ -1352,6 +1352,6 @@ Common causes:
 - Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
-- Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
-- Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
+- Increment 1 — Ceph object storage foundation: [ceph_storage.md](ceph_storage.md)
+- Increment 2 — Iceberg and Polaris: [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md)
+- Increment 3 — Spark: [spark_compute.md](spark_compute.md)

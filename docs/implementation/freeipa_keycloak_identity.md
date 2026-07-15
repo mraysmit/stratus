@@ -338,7 +338,7 @@ Issue certificates for:
 
 | Hostname | Service |
 |---|---|
-| `object-store.stratus.local` | Ceph RGW S3 endpoint (already issued in Increment 1 — see [increment1_ceph.md](increment1_ceph.md)) |
+| `object-store.stratus.local` | Ceph RGW S3 endpoint (already issued in Increment 1 — see [ceph_storage.md](ceph_storage.md)) |
 | `polaris.stratus.local` | Polaris REST catalog |
 | `airflow.stratus.local` | Airflow UI/API |
 | `trino-coordinator.stratus.local` | Trino coordinator UI/JDBC |
@@ -1198,9 +1198,9 @@ The developer gate supports regression work. Only the production gate completes 
 - Apache Atlas: https://atlas.apache.org/
 - Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
 - Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph object storage foundation: [increment1_ceph.md](increment1_ceph.md)
-- Increment 2 — Iceberg and Polaris: [increment2_iceberg_polaris.md](increment2_iceberg_polaris.md)
-- Increment 3 — Spark: [increment3_spark.md](increment3_spark.md)
-- Increment 4 — Airflow: [increment4_airflow.md](increment4_airflow.md)
-- Increment 5 — Trino: [increment5_trino.md](increment5_trino.md)
-- Increment 6 — Atlas and Ranger: [increment6_atlas_ranger.md](increment6_atlas_ranger.md)
+- Increment 1 — Ceph object storage foundation: [ceph_storage.md](ceph_storage.md)
+- Increment 2 — Iceberg and Polaris: [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md)
+- Increment 3 — Spark: [spark_compute.md](spark_compute.md)
+- Increment 4 — Airflow: [airflow_orchestration.md](airflow_orchestration.md)
+- Increment 5 — Trino: [trino_query.md](trino_query.md)
+- Increment 6 — Atlas and Ranger: [atlas_ranger_governance.md](atlas_ranger_governance.md)

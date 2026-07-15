@@ -1,6 +1,6 @@
 # Stratus Increment 1 - Object Storage Foundation (MinIO / AIStor)
 
-> **Status: superseded.** The Stratus storage architecture decision ([stratus_on_prem_data_fabric_architecture.md §2.8](../architecture/stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 storage baseline. The current Increment 1 implementation plan is [increment1_ceph.md](increment1_ceph.md). This document is retained for historical reference and as the MinIO/AIStor reference implementation should the platform later revisit that path; it is not the active runbook.
+> **Status: superseded.** The Stratus storage architecture decision ([stratus_on_prem_data_fabric_architecture.md §2.8](../architecture/stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 storage baseline. The current Increment 1 implementation plan is [ceph_storage.md](ceph_storage.md). This document is retained for historical reference and as the MinIO/AIStor reference implementation should the platform later revisit that path; it is not the active runbook.
 
 ## 1. Purpose
 
@@ -684,7 +684,7 @@ export STRATUS_S3_SECRET_KEY=change-me-before-use
 export STRATUS_S3_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
 export STRATUS_S3_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
 
-export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-contract-verifier:<version>@sha256:<digest>
+export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/storage.env \
   -v /data/stratus/evidence/increment1:/evidence:z \
   ${STRATUS_STORAGE_VERIFIER_IMAGE}

@@ -1,6 +1,6 @@
 # Stratus Increment 1 - Apache Ozone Storage Foundation
 
-> **Status: superseded.** The Stratus storage architecture decision ([stratus_on_prem_data_fabric_architecture.md section 2.8](../architecture/stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 baseline. The active runbook is [increment1_ceph.md](increment1_ceph.md). This document preserves the evaluated Ozone path for a future architecture decision; its commands, versions, and configuration examples are not normative or maintained as part of the active Stratus implementation.
+> **Status: superseded.** The Stratus storage architecture decision ([stratus_on_prem_data_fabric_architecture.md section 2.8](../architecture/stratus_on_prem_data_fabric_architecture.md#28-storage-architecture-decision)) selected **Ceph RGW** as the Phase 1 baseline. The active runbook is [ceph_storage.md](ceph_storage.md). This document preserves the evaluated Ozone path for a future architecture decision; its commands, versions, and configuration examples are not normative or maintained as part of the active Stratus implementation.
 
 ## 1. Purpose
 
@@ -522,7 +522,7 @@ export STRATUS_S3_SECRET_KEY=<verification secret key>
 export STRATUS_S3_AIRFLOW_ACCESS_KEY=<svc-airflow access key>
 export STRATUS_S3_AIRFLOW_SECRET_KEY=<svc-airflow secret key>
 
-export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-contract-verifier:<version>@sha256:<digest>
+export STRATUS_STORAGE_VERIFIER_IMAGE=registry.stratus.local/stratus/storage-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/storage.env \
   -v /data/stratus/evidence/increment1:/evidence:z \
   ${STRATUS_STORAGE_VERIFIER_IMAGE}
