@@ -10,3 +10,5 @@ ceph/
 ```
 
 The `local` environment deploys three genuine Ceph MONs, two MGRs, three BlueStore OSDs, and two RGW daemons in separate local Docker containers. Production lifecycle remains separately managed by cephadm assets in `lab/`.
+
+`local/` is the only implemented environment for Increment 1. `bootstrap/` and `lab/` are reserved placeholders whose content is delivered by the production-track tasks in the Increment 1 implementation plan.

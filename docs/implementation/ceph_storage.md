@@ -880,7 +880,7 @@ The Compose harness is intentionally small, but every parameter must be explicit
 | `RCLONE_CONFIG_CEPHRGW_FORCE_PATH_STYLE` | Derived | `s3client` | `${S3_PATH_STYLE_ACCESS}` | Keeps the rclone remote aligned with the Stratus path-style default. |
 | `RCLONE_CA_CERT` | Yes | `s3client` | `/certs/stratus-ca.crt` | CA bundle used by the S3 client to validate the Ceph RGW TLS certificate. Do not bypass TLS verification. |
 | `JAVA_TOOL_OPTIONS` | Yes | `verifier` | `-Djavax.net.ssl.trustStore=/tmp/stratus-cacerts ...` | Injects the temporary Java truststore so SDK tests validate RGW TLS. |
-| `STRATUS_EVIDENCE_DIR` | Yes | `verifier` | `/evidence` | Directory where the prebuilt verifier writes its machine-readable result bundle. |
+| `STRATUS_EVIDENCE_FILE` | Yes | `verifier` | `/evidence/storage-verification-<timestamp>.json` | File where the verifier writes its report as pure JSON (stdout repeats the report for the run transcript). The harness scripts set this per run. |
 | `/certs/stratus-ca.crt` | Yes | `s3client`, `verifier` | mounted from `./certs/stratus-ca.crt` | CA certificate that issued or anchors the RGW endpoint certificate. |
 | `/evidence` | Yes | `verifier` | mounted from `./evidence` | Dedicated writable output location for machine-readable verification results. The verifier artifact and container filesystem remain read-only where practical. |
 

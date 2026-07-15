@@ -12,6 +12,12 @@ if [[ -f /etc/ceph/STRATUS_CLUSTER_BOOTSTRAPPED ]]; then
   exit 0
 fi
 
+# The sentinel is the sole source of truth: a missing sentinel with leftover
+# artifacts means an earlier bootstrap failed part-way. Clear them so a re-run
+# never mixes keys, monmaps, or fsids from different attempts.
+rm -f "$conf" "$admin_keyring" "$mon_keyring" "$monmap"
+rm -rf "$keys" /var/lib/ceph/mon1/* /var/lib/ceph/mon2/* /var/lib/ceph/mon3/*
+
 mkdir -p "$keys" /var/lib/ceph/mon1 /var/lib/ceph/mon2 /var/lib/ceph/mon3
 fsid=$(uuidgen)
 

@@ -18,6 +18,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 
 public final class StorageVerifier {
+    static final String CONTRACT_DESCRIPTION =
+            "Stratus storage contract verification evidence: success=true means every S3 contract check against Ceph RGW passed";
+
+    // ISO-8601 timestamp with offset, single line per record: the standard JUL
+    // SimpleFormatter format property, applied before any formatter exists.
+    static final String LOG_FORMAT = "%1$tFT%1$tT.%1$tL%1$tz %4$s %2$s %5$s%6$s%n";
+
+    static {
+        System.setProperty("java.util.logging.SimpleFormatter.format", LOG_FORMAT);
+    }
+
     static final Logger LOGGER = Logger.getLogger(StorageVerifier.class.getName());
     private static FileHandler persistentHandler;
     private static final int MULTIPART_PART_SIZE = 5 * 1024 * 1024;
@@ -85,7 +96,7 @@ public final class StorageVerifier {
             LOGGER.fine("Required bucket check passed");
         } catch (RuntimeException exception) {
             recordFailure(checks, "required-buckets", exception);
-            return new VerificationReport(timestamp, false, checks);
+            return new VerificationReport(CONTRACT_DESCRIPTION, timestamp, false, checks);
         }
 
         var prefix = "verification/" + timestamp.toEpochMilli() + "/";
@@ -186,7 +197,8 @@ public final class StorageVerifier {
         checks.add(cleanupFailures.isEmpty()
                 ? VerificationCheck.passed("probe-cleanup", "Removed all verification probe objects")
                 : new VerificationCheck("probe-cleanup", false, String.join("; ", cleanupFailures)));
-        var report = new VerificationReport(timestamp, checks.stream().allMatch(VerificationCheck::passed), checks);
+        var report = new VerificationReport(CONTRACT_DESCRIPTION, timestamp,
+                checks.stream().allMatch(VerificationCheck::passed), checks);
         LOGGER.info(() -> "Storage contract verification completed with success=" + report.success());
         return report;
     }

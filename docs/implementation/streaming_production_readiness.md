@@ -275,9 +275,9 @@ After this gate passes, controlled production streaming sources may onboard, and
 ## 11. References
 
 - Stratus Phase 2 implementation plan: [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md)
-- Increment 8 - Kafka Event Backbone: [increment8_kafka_event_backbone.md](increment8_kafka_event_backbone.md)
-- Increment 9 - Kafka Connect and Debezium CDC: [increment9_kafka_connect_debezium.md](increment9_kafka_connect_debezium.md)
-- Increment 10 - Flink Streaming Compute: [increment10_flink_streaming_compute.md](increment10_flink_streaming_compute.md)
-- Increment 11 - Streaming Writes to Iceberg: [increment11_streaming_iceberg.md](increment11_streaming_iceberg.md)
-- Increment 12 - Atlas Event Bus and Lineage Automation: [increment12_atlas_event_lineage.md](increment12_atlas_event_lineage.md)
+- Increment 8 - Kafka Event Backbone: [kafka_event_backbone.md](kafka_event_backbone.md)
+- Increment 9 - Kafka Connect and Debezium CDC: [kafka_connect_debezium_cdc.md](kafka_connect_debezium_cdc.md)
+- Increment 10 - Flink Streaming Compute: [flink_streaming_compute.md](flink_streaming_compute.md)
+- Increment 11 - Streaming Writes to Iceberg: [flink_streaming_iceberg.md](flink_streaming_iceberg.md)
+- Increment 12 - Atlas Event Bus and Lineage Automation: [atlas_streaming_lineage.md](atlas_streaming_lineage.md)
 - Phase 1 operational readiness: [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md)
