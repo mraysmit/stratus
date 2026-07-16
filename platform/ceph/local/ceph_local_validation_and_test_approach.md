@@ -477,13 +477,16 @@ A complete local validation from a clean state, in dependency order:
 7. scripts/verify/verify-java
 8. scripts/verify/verify-security
 9. (optional) mvnw clean verify -Pall-tests   Layer 3 — needs env + CA trust, cluster up
-10. scripts/lifecycle/shutdown
-11. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
-12. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
+10. (optional) scripts/verify/failure-drill   Layer 3 — real daemon outages and recovery
+11. scripts/lifecycle/shutdown
+12. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
+13. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
 ```
 
 Steps 2 and 4–8 are the normal validation. Add step 9 when the change touches the
-live Ceph contract. Run step 12 when you change harness scripts. Steps 11–12 are
+live Ceph contract, and step 10 when it affects resilience or failover behavior
+(the drill stops a real RGW, monitor, and OSD in turn and requires recovery to
+`HEALTH_OK`). Run step 13 when you change harness scripts. Steps 12–13 are
 destructive to the cluster; `reset` prompts for confirmation unless you pass
 `-Force` (PowerShell) / `--force` (bash).
 

@@ -96,24 +96,24 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Time-dependent code MUST use an injected `Clock` or equivalent controllable time source.
 - Tests MUST clean up files, processes, network listeners, containers, and remote probe objects they create.
 
-### 7.2 Mocking prohibition
+### 7.2 Mocking and simulation prohibition
 
 - Mockito is prohibited in every Stratus project.
 - No other mocking framework may be introduced as a substitute.
 - Tests MUST NOT verify call choreography against framework-generated mocks.
-- Small purpose-built fakes MAY be used for Stratus-owned domain interfaces when they model meaningful state and behavior.
-- External adapters SHOULD be tested through a real protocol endpoint that exercises serialization, transport, response parsing, error handling, retries, and cleanup.
-- A local protocol fixture does not prove product compatibility. Live integration tests MUST validate behavior that depends on Ceph, Iceberg, Spark, Airflow, Trino, Kafka, Flink, Atlas, Ranger, Keycloak, or another deployed product.
+- Tests MUST NOT substitute hand-written test doubles for Stratus-owned interfaces; behavior MUST be exercised through the real production implementation.
+- Tests MUST NOT simulate a product's protocol endpoint. In-process or scripted stand-ins for Ceph, Iceberg, Spark, Airflow, Trino, Kafka, Flink, Atlas, Ranger, Keycloak, or any other deployed product are prohibited: a test against a simulated product is worthless as verification.
+- Behavior that depends on a product MUST be tested against the live product — for Ceph RGW, the local Docker cluster in `platform/ceph/local`.
+- Real environmental failures (an unreachable address, a closed port, an unwritable path) are not simulations and MAY be used to test failure handling.
 
 ### 7.3 Coverage and test layers
 
-- Stratus-owned production Java MUST maintain 100% line coverage and 100% branch coverage.
-- Maven's `verify` phase MUST fail when either coverage ratio falls below 100%.
-- Production classes MUST NOT be excluded merely to satisfy the coverage gate.
+- Coverage is reported by every `verify` build for visibility; it is NOT a gate. A coverage gate rewards simulated endpoints, and simulated endpoints are prohibited by 7.2.
+- Coverage MUST NOT be raised through simulated endpoints or test doubles. Branches reachable only through a misbehaving product remain uncovered by JVM tests and are proven by live drills and harness verification instead.
+- Production classes MUST NOT be excluded from coverage reporting.
 - Coverage proves execution, not correctness. Assertions and integration evidence remain mandatory.
-- Unit tests SHOULD cover pure validation, transformations, reports, and orchestration decisions.
-- Protocol tests SHOULD exercise real client serialization and response parsing against a controlled endpoint.
-- Integration tests MUST exercise the selected product release with its real security and network configuration.
+- Unit tests SHOULD cover pure validation, transformations, reports, orchestration decisions, and real environmental failures.
+- Integration tests MUST exercise the selected product release with its real security and network configuration — for Ceph, the `ceph-integration` tag against the local cluster.
 - End-to-end and operational tests MUST prove cross-component contracts, recovery, observability, and cleanup.
 - Test output MUST make failures diagnosable without exposing secrets.
 
@@ -179,10 +179,10 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 A change is not complete until all applicable checks pass:
 
 - code follows the stable repository and naming boundaries
-- no mocking framework has been introduced
+- no mocking framework and no simulated product endpoint has been introduced
 - child POMs contain no dependency or plugin version pins
-- unit, protocol, integration, and operational tests appropriate to the change pass
-- line and branch coverage remain at 100% for Stratus-owned production Java
+- unit, live integration, and operational tests appropriate to the change pass
+- product-dependent behavior is proven against the live product, not a stand-in
 - INFO and DEBUG logging behavior is tested
 - persistent logs and resources are flushed and released
 - secrets are absent from source, logs, reports, examples, and Git status

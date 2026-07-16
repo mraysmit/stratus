@@ -18,7 +18,11 @@ public record VerificationCheck(String name, boolean passed, String detail) {
     }
 
     public static VerificationCheck failed(String name, Exception exception) {
-        var message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-        return new VerificationCheck(name, false, message);
+        return new VerificationCheck(name, false, describe(exception));
+    }
+
+    /** Failure detail for reports and logs; falls back to the exception type when the message is absent. */
+    static String describe(Exception exception) {
+        return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 }

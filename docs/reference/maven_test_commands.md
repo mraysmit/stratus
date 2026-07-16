@@ -12,23 +12,22 @@ The default invocation applies these properties to every Java module:
 |---|---|---|
 | `test.groups` | empty | Do not positively filter tests; run tagged and untagged tests unless explicitly excluded |
 | `test.excludedGroups` | `ceph-integration` | Exclude tests requiring a live secured Ceph RGW endpoint |
-| `coverage.skip` | `false` | Enforce 100% line and branch coverage |
-| `ceph.integration.required` | `false` | Permit the live Ceph test to remain unselected |
+| `coverage.skip` | `false` | Generate the JaCoCo coverage report |
+| `ceph.integration.required` | `false` | Permit the live Ceph tests to remain unselected |
 
-Therefore, `mvnw clean verify` is the complete local regression command. It runs every test that does not require the live Ceph environment, including any accidentally untagged test, builds the deployable artifact, generates the JaCoCo report, and enforces 100% line and branch coverage.
+Therefore, `mvnw clean verify` is the complete local regression command. It runs every test that does not require the live Ceph environment, including any accidentally untagged test, builds the deployable artifact, and generates the JaCoCo report. Coverage is reported, never gated: simulated product endpoints are prohibited (code_style_rules.md 7.2), so storage behavior — and the coverage it produces — is proven against the live local Ceph cluster instead.
 
 ## Available Profiles
 
-| Profile | Included tags | Coverage gate | External requirements | Purpose |
+| Profile | Included tags | Coverage report | External requirements | Purpose |
 |---|---|---:|---|---|
-| none | `unit`, `protocol` | yes | none | Complete local build and regression gate |
+| none | `unit` | yes | none | Complete local build and offline regression |
 | `-Punit-tests` | `unit` | no | none | Targeted diagnosis of a known unit-test failure |
-| `-Pprotocol-tests` | `protocol` | no | local loopback networking | Targeted diagnosis of a known protocol-test failure |
-| `-Pceph-integration-tests` | `ceph-integration` | no | live Ceph RGW configuration | Targeted live Ceph contract run |
-| `-Pall-tests` | all tags | yes | live Ceph RGW configuration | Full local plus live regression and acceptance boundary |
+| `-Pceph-integration-tests` | `ceph-integration` | no | running local Ceph harness | Targeted live Ceph suite run |
+| `-Pall-tests` | all tags | yes | running local Ceph harness | Full offline plus live regression and acceptance boundary |
 | `-Puntagged-tests` | no known tag | no | none | Audit for tests missing an approved tag |
 
-Targeted profiles deliberately skip the aggregate coverage gate because they execute only part of the production code. They are diagnostic commands, not completion evidence.
+Targeted profiles deliberately skip the aggregate coverage report because they execute only part of the production code. They are diagnostic commands, not completion evidence.
 
 ## Validation Rules
 
@@ -83,13 +82,6 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
 ```powershell
 .\mvnw.cmd test -Punit-tests -pl :stratus-storage-verifier 2>&1 |
     Tee-Object -FilePath "logs\storage-verifier-unit-$timestamp.txt"
-```
-
-### Targeted protocol diagnosis
-
-```powershell
-.\mvnw.cmd test -Pprotocol-tests -pl :stratus-storage-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-verifier-protocol-$timestamp.txt"
 ```
 
 ### Targeted live Ceph diagnosis
@@ -151,9 +143,6 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 ./mvnw test -Punit-tests -pl :stratus-storage-verifier 2>&1 \
   | tee "logs/storage-verifier-unit-${timestamp}.txt"
 
-./mvnw test -Pprotocol-tests -pl :stratus-storage-verifier 2>&1 \
-  | tee "logs/storage-verifier-protocol-${timestamp}.txt"
-
 ./mvnw test -Pceph-integration-tests -pl :stratus-storage-verifier 2>&1 \
   | tee "logs/storage-verifier-ceph-${timestamp}.txt"
 
@@ -213,7 +202,7 @@ Expected behavior: included and excluded group values are empty, and `ceph.integ
 
 ```powershell
 Get-ChildItem -Recurse -Filter pom.xml |
-    Select-String -Pattern '<id>(unit-tests|protocol-tests|ceph-integration-tests|all-tests|untagged-tests)</id>'
+    Select-String -Pattern '<id>(unit-tests|ceph-integration-tests|all-tests|untagged-tests)</id>'
 ```
 
 Every match MUST refer to the repository root `pom.xml`. A match in a module POM means test-selection policy has been decentralized and must be corrected.
@@ -223,7 +212,7 @@ Every match MUST refer to the repository root `pom.xml`. A match in a module POM
 ```powershell
 Get-ChildItem -Recurse -Filter '*Test.java' |
     ForEach-Object {
-        if (-not (Select-String -Quiet -LiteralPath $_.FullName -Pattern '@Tag\("(unit|protocol|ceph-integration)"\)')) {
+        if (-not (Select-String -Quiet -LiteralPath $_.FullName -Pattern '@Tag\("(unit|ceph-integration)"\)')) {
             $_.FullName
         }
     }
@@ -233,10 +222,17 @@ Expected output: none.
 
 ## Current Module Notes
 
-- `stratus-storage-verifier` owns unit, local S3-protocol, and live Ceph RGW contract tests.
-- `S3ObjectStorageClientTest` uses a real in-process HTTP protocol endpoint and the actual SDK client. Mockito and all other mocking frameworks are prohibited.
-- `CephRgwIntegrationTest` is the live product-compatibility boundary. It is not selected by the default local regression command.
-- JaCoCo reports are generated under `verification/storage/target/site/jacoco/` by complete coverage-enforcing profiles.
+- `stratus-storage-verifier` owns offline unit tests (pure logic and real
+  environmental failures only) and the live Ceph RGW suite.
+- `CephRgwIntegrationTest` is the product-compatibility boundary: the full S3
+  contract, missing-bucket detection, both security negatives, evidence
+  writing, and exit semantics, all against the live local cluster
+  (`platform/ceph/local`). It is not selected by the default local
+  regression command.
+- Mockito, all other mocking frameworks, and simulated S3 endpoints of any
+  kind are prohibited. Tests against a simulated Ceph are worthless as
+  verification (code_style_rules.md 7.2).
+- JaCoCo reports are generated under `verification/storage/target/site/jacoco/`.
 - Surefire reports are generated under `verification/storage/target/surefire-reports/`.
 
 ## Completion Checklist
@@ -244,11 +240,10 @@ Expected output: none.
 - [ ] The complete local regression command passed from a clean reactor.
 - [ ] The saved Maven log contains `BUILD SUCCESS`.
 - [ ] The saved Maven log contains no build, logging-binding, packaging, or test-fixture warnings.
-- [ ] JaCoCo reports zero missed production lines and branches.
 - [ ] INFO and DEBUG logging assertions passed.
 - [ ] The untagged audit executes zero tests after adding or moving test classes.
 - [ ] `-Pall-tests` passed when the change affects the live Ceph contract.
 - [ ] No test was silently skipped by a selected profile.
 - [ ] No module POM contains a test-selection profile.
 - [ ] No child POM pins dependency or plugin versions.
-- [ ] No mocking framework dependency or usage was introduced.
+- [ ] No mocking framework, test double, or simulated product endpoint was introduced.

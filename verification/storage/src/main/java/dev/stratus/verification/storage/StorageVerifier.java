@@ -228,8 +228,8 @@ public final class StorageVerifier {
 
     private static void recordFailure(ArrayList<VerificationCheck> checks, String name, RuntimeException exception) {
         checks.add(VerificationCheck.failed(name, exception));
-        var detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-        LOGGER.log(Level.WARNING, "Storage contract check " + name + " failed: " + detail, exception);
+        LOGGER.log(Level.WARNING, "Storage contract check " + name + " failed: "
+                + VerificationCheck.describe(exception), exception);
     }
 
     private void delete(String bucket, String key, ArrayList<String> failures) {
@@ -240,8 +240,7 @@ public final class StorageVerifier {
             }
             LOGGER.fine(() -> "Deleted verification probe bucket=" + bucket + " key=" + key);
         } catch (RuntimeException exception) {
-            var detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            failures.add(key + ": " + detail);
+            failures.add(key + ": " + VerificationCheck.describe(exception));
             LOGGER.log(Level.WARNING, "Verification probe cleanup failed bucket=" + bucket + " key=" + key, exception);
         }
     }
