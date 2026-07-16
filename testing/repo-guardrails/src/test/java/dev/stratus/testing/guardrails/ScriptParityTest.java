@@ -36,15 +36,10 @@ final class ScriptParityTest {
 
     @Test
     void everyScriptShipsAsAPair() {
-        Set<String> baseNames = new TreeSet<>();
         List<String> violations = new ArrayList<>();
-        for (Path script : scriptFiles()) {
-            String name = script.getFileName().toString();
-            baseNames.add(name.substring(0, name.lastIndexOf('.')));
-        }
-        for (String base : baseNames) {
+        for (String base : scriptBaseNames()) {
             for (String extension : List.of(".ps1", ".sh")) {
-                if (scriptFiles().stream().noneMatch(f -> f.getFileName().toString().equals(base + extension))) {
+                if (!SCRIPTS.resolve(base + extension).toFile().isFile()) {
                     violations.add(base + extension + " is missing; every script ships as a .ps1/.sh pair");
                 }
             }
@@ -90,12 +85,7 @@ final class ScriptParityTest {
     @Test
     void twinsReferenceTheSameRuntimeArtifacts() {
         List<String> violations = new ArrayList<>();
-        Set<String> baseNames = new TreeSet<>();
-        for (Path script : scriptFiles()) {
-            String name = script.getFileName().toString();
-            baseNames.add(name.substring(0, name.lastIndexOf('.')));
-        }
-        for (String base : baseNames) {
+        for (String base : scriptBaseNames()) {
             Path shell = SCRIPTS.resolve(base + ".sh");
             Path powershell = SCRIPTS.resolve(base + ".ps1");
             if (!shell.toFile().isFile() || !powershell.toFile().isFile()) {
@@ -109,6 +99,16 @@ final class ScriptParityTest {
         }
         assertTrue(violations.isEmpty(), () ->
             "Script twins reference different runtime artifacts:\n" + String.join("\n", violations));
+    }
+
+    /** Slash-normalized paths relative to scripts/, without extension, so twins pair within their subdirectory. */
+    private static Set<String> scriptBaseNames() {
+        Set<String> baseNames = new TreeSet<>();
+        for (Path script : scriptFiles()) {
+            String relative = SCRIPTS.relativize(script).toString().replace('\\', '/');
+            baseNames.add(relative.substring(0, relative.lastIndexOf('.')));
+        }
+        return baseNames;
     }
 
     private static List<Path> scriptFiles() {

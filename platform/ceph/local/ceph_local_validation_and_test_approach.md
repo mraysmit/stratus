@@ -237,24 +237,24 @@ PowerShell:
 
 ```powershell
 cd platform\ceph\local
-.\scripts\startup.ps1
-.\scripts\bootstrap-buckets.ps1
-.\scripts\check.ps1
-.\scripts\verify-java.ps1
-.\scripts\verify-security.ps1
-.\scripts\shutdown.ps1
+.\scripts\lifecycle\startup.ps1
+.\scripts\verify\bootstrap-buckets.ps1
+.\scripts\verify\check.ps1
+.\scripts\verify\verify-java.ps1
+.\scripts\verify\verify-security.ps1
+.\scripts\lifecycle\shutdown.ps1
 ```
 
 bash:
 
 ```bash
 cd platform/ceph/local
-./scripts/startup.sh
-./scripts/bootstrap-buckets.sh
-./scripts/check.sh
-./scripts/verify-java.sh
-./scripts/verify-security.sh
-./scripts/shutdown.sh
+./scripts/lifecycle/startup.sh
+./scripts/verify/bootstrap-buckets.sh
+./scripts/verify/check.sh
+./scripts/verify/verify-java.sh
+./scripts/verify/verify-security.sh
+./scripts/lifecycle/shutdown.sh
 ```
 
 To capture the whole run as a transcript (note `*>&1`, so PowerShell status
@@ -262,7 +262,7 @@ lines are included), use the one-liner from the [README](README.md#workflow).
 
 ### Step by step
 
-**`startup`** — [startup.ps1](scripts/startup.ps1) / [startup.sh](scripts/startup.sh)
+**`startup`** — [startup.ps1](scripts/lifecycle/startup.ps1) / [startup.sh](scripts/lifecycle/startup.sh)
 
 - On first run it creates the git-ignored `.env` from
   [.env.template](.env.template), replacing the credential placeholders with
@@ -299,8 +299,8 @@ steady-state cluster health target is `HEALTH_OK`, all three OSDs `up`/`in`, all
 placement groups `active+clean` (inspect directly with the commands in the
 [README](README.md#direct-inspection)).
 
-**`verify-java`** — [verify-java.ps1](scripts/verify-java.ps1) /
-[verify-java.sh](scripts/verify-java.sh) — runs the prebuilt verifier image once
+**`verify-java`** — [verify-java.ps1](scripts/verify/verify-java.ps1) /
+[verify-java.sh](scripts/verify/verify-java.sh) — runs the prebuilt verifier image once
 in `CONTRACT` mode against the live endpoint. It first writes an
 `environment-<timestamp>.json` snapshot (compose runtime and platform, resolved
 Ceph and verifier image digests, `ceph version`, `ceph status`, OSD tree), then
@@ -322,8 +322,8 @@ per check (`name` / `passed` / `detail`):
 evidence to `storage-verification-<timestamp>-FAILED.json`, and stops with a
 non-zero status.
 
-**`verify-security`** — [verify-security.ps1](scripts/verify-security.ps1) /
-[verify-security.sh](scripts/verify-security.sh) — runs three *negative* tests
+**`verify-security`** — [verify-security.ps1](scripts/verify/verify-security.ps1) /
+[verify-security.sh](scripts/verify/verify-security.sh) — runs three *negative* tests
 where **failure of the operation is the expected, asserted outcome**. Each run
 is bracketed with an `EXPECTED`-failure banner so the transcript self-documents;
 authentication errors, access-denied errors, and PKIX certificate errors in this
@@ -430,14 +430,14 @@ PowerShell:
 
 ```powershell
 cd platform\ceph\local
-.\scripts\selftest.ps1
+.\scripts\verify\selftest.ps1
 ```
 
 bash:
 
 ```bash
 cd platform/ceph/local
-./scripts/selftest.sh
+./scripts/verify/selftest.sh
 ```
 
 ### What it proves
@@ -471,15 +471,15 @@ A complete local validation from a clean state, in dependency order:
 1. Build the verifier image            (one-time / after verifier source changes)
 2. mvnw clean verify                   Layer 1  — no Docker
 3. cd platform/ceph/local
-4. scripts/startup                     Layer 2  — boots the cluster
-5. scripts/bootstrap-buckets
-6. scripts/check
-7. scripts/verify-java
-8. scripts/verify-security
+4. scripts/lifecycle/startup                     Layer 2  — boots the cluster
+5. scripts/verify/bootstrap-buckets
+6. scripts/verify/check
+7. scripts/verify/verify-java
+8. scripts/verify/verify-security
 9. (optional) mvnw clean verify -Pall-tests   Layer 3 — needs env + CA trust, cluster up
-10. scripts/shutdown
-11. scripts/reset --force              only if you want a fresh cluster next time
-12. scripts/selftest                   Layer 4 — requires the harness stopped, volumes gone
+10. scripts/lifecycle/shutdown
+11. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
+12. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
 ```
 
 Steps 2 and 4–8 are the normal validation. Add step 9 when the change touches the
@@ -531,7 +531,7 @@ section](README.md#evidence) has the full rationale.
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
 | `clean verify` fails in `ScriptParityTest` | A `.ps1`/`.sh` twin drifted or one lacks its fail-fast preamble | Re-sync the twins per the assertion message |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
-| `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/shutdown` then `scripts/reset --force`, then rerun |
+| `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
 
 For deeper cluster inspection (quorum, OSD tree, RGW users, manager status), use
 the `ceph` commands listed under [Direct

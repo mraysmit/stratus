@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$harness = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$harness = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $renewWindowSeconds = 604800
 
 # Same pinned image compose uses; only needed when host OpenSSL is unavailable.

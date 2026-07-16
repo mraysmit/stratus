@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot '../lib/common.ps1')
 
 # Behavior self-test for the harness scripts. Verifies what the static
 # guardrails in testing/repo-guardrails cannot: certificate renewal, rejection
@@ -12,10 +12,10 @@ $fakeImage = 'stratus/selftest-vacuous-verifier'
 $envFile = Join-Path $script:HarnessDir '.env'
 
 if (& $runtime ps -q --filter label=com.docker.compose.project=stratus-ceph-local) {
-    throw 'Stop the harness before running the self-test (scripts\shutdown.ps1)'
+    throw 'Stop the harness before running the self-test (scripts\lifecycle\shutdown.ps1)'
 }
 if (& $runtime volume ls -q --filter label=com.docker.compose.project=stratus-ceph-local) {
-    throw 'Cluster volumes exist and the self-test exercises destructive reset. Run scripts\reset.ps1 -Force first if losing them is intended.'
+    throw 'Cluster volumes exist and the self-test exercises destructive reset. Run scripts\lifecycle\reset.ps1 -Force first if losing them is intended.'
 }
 Assert-HarnessSubnetFree
 
@@ -41,7 +41,7 @@ $movedEnv = $null
 try {
     Write-Host ''
     Write-HarnessLog '=== SELFTEST: near-expiry leaf certificate renews while preserving the CA ==='
-    & (Join-Path $PSScriptRoot 'generate-lab-certificates.ps1') | Out-Null
+    & (Join-Path $PSScriptRoot '../lib/generate-lab-certificates.ps1') | Out-Null
     $caBefore = Invoke-OpenSsl -Arguments @('x509', '-sha256', '-fingerprint', '-noout', '-in', 'certs/stratus-ca.crt')
     [IO.File]::WriteAllText((Join-Path $script:HarnessDir 'private\rgw-extensions.cnf'),
         "subjectAltName=DNS:object-store.stratus.local`nextendedKeyUsage=serverAuth`n")
@@ -51,7 +51,7 @@ try {
     Invoke-OpenSsl -Arguments @('x509', '-req', '-sha256', '-days', '3', '-in', 'certs/object-store.stratus.local.csr',
         '-CA', 'certs/stratus-ca.crt', '-CAkey', 'private/stratus-lab-ca.key', '-CAcreateserial',
         '-extfile', 'private/rgw-extensions.cnf', '-out', 'certs/object-store.stratus.local.crt')
-    & (Join-Path $PSScriptRoot 'generate-lab-certificates.ps1') | Out-Null
+    & (Join-Path $PSScriptRoot '../lib/generate-lab-certificates.ps1') | Out-Null
     Invoke-OpenSsl -AllowFailure -Arguments @('x509', '-checkend', '604800', '-noout',
         '-in', 'certs/object-store.stratus.local.crt') | Out-Null
     if ($script:OpenSslExitCode -ne 0) {
@@ -108,8 +108,8 @@ try {
         $movedEnv = Join-Path $tmpDir 'env-backup'
         Move-Item -LiteralPath $envFile -Destination $movedEnv
     }
-    & (Join-Path $PSScriptRoot 'shutdown.ps1') | Out-Null
-    & (Join-Path $PSScriptRoot 'reset.ps1') -Force | Out-Null
+    & (Join-Path $PSScriptRoot '../lifecycle/shutdown.ps1') | Out-Null
+    & (Join-Path $PSScriptRoot '../lifecycle/reset.ps1') -Force | Out-Null
     if ($movedEnv) {
         Move-Item -LiteralPath $movedEnv -Destination $envFile
         $movedEnv = $null
