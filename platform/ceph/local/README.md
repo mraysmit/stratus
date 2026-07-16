@@ -172,6 +172,7 @@ In the order you meet them:
 | `verify/verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
 | `lifecycle/shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
 | `lifecycle/reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
+| `verify/failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
 | `verify/selftest` | Verifies the harness scripts' own runtime behavior (see "Harness self-test") | After changing the scripts |
 | `lib/generate-lab-certificates` | Creates or renews the lab CA and server certificate | Called by startup; rarely run directly |
 | `lib/common` | Shared helpers sourced by the other scripts | Never directly |
@@ -229,6 +230,29 @@ Bash:
 ```
 
 The next startup creates a new Ceph cluster, the verifier identity, and the separate owner used for the access-boundary test.
+
+## Failure drills
+
+`scripts/verify/failure-drill.{ps1,sh}` breaks the real cluster on purpose and
+proves it behaves as claimed — nothing is simulated. With the harness running
+and healthy, the drill executes three scenarios in sequence, each bracketed by
+`EXPECTED-DEGRADATION` banners so transcripts self-document:
+
+1. **RGW failover** — stops `rgw1`; the bucket smoke check must pass through
+   the surviving gateway behind the TLS proxy.
+2. **Monitor quorum loss** — stops `mon3`; asserts a two-monitor quorum forms
+   and the S3 contract still passes; restores and waits for a three-monitor
+   quorum.
+3. **OSD degraded writes and recovery** — stops `osd1`; asserts the cluster
+   reports two OSDs up, runs the bucket check *and* the full Java verifier
+   contract against the degraded cluster, restarts the OSD, and waits (up to
+   ten minutes) for every placement group to return to `active+clean`.
+
+Each scenario ends with a recovery gate: the drill fails unless the cluster
+returns to `HEALTH_OK` with all placement groups `active+clean`. This
+automates the degraded-operation, failover, and recovery claims in "What it
+proves"; it remains a single-Docker-host drill and does not demonstrate
+production resilience.
 
 ## Harness self-test
 
