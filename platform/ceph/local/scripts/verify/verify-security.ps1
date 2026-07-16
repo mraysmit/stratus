@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot '../lib/common.ps1')
 Import-HarnessEnvironment
 
 $evidenceDir = Join-Path $script:HarnessDir 'evidence'

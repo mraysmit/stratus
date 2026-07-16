@@ -48,6 +48,6 @@ elif command -v docker >/dev/null 2>&1; then
 elif command -v podman >/dev/null 2>&1; then
   podman run --rm --volume "$HARNESS_DIR:/work" --workdir /work --entrypoint /bin/bash "$ceph_image" -c "$generator"
 else
-  fail "OpenSSL, Docker, or Podman is required. Run ./scripts/install-prerequisites.sh, then retry certificate generation."
+  fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/install-prerequisites.sh, then retry certificate generation."
 fi
 log "Disposable lab certificate is current. Apply $HARNESS_DIR/certs/object-store.stratus.local.crt and its protected key to RGW; clients receive only $HARNESS_DIR/certs/stratus-ca.crt."

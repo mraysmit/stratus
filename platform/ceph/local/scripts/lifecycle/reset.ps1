@@ -1,6 +1,6 @@
 param([switch]$Force)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot '../lib/common.ps1')
 if (-not $Force) {
     $answer = Read-Host 'This permanently deletes the local Ceph containers and ALL cluster configuration and data volumes. Type yes to continue'
     if ($answer -ne 'yes') { throw 'Reset cancelled' }

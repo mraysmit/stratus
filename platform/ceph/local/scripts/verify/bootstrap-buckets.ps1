@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot '../lib/common.ps1')
 Import-HarnessEnvironment
 foreach ($name in 'CEPH_RGW_DENIED_BUCKET', 'CEPH_DENIED_UID') {
     if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {

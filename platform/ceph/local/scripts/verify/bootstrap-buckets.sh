@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/common.sh"
 load_environment
 : "${CEPH_RGW_DENIED_BUCKET:?CEPH_RGW_DENIED_BUCKET is required; update .env from .env.template}"
 : "${CEPH_DENIED_UID:?CEPH_DENIED_UID is required; update .env from .env.template}"
