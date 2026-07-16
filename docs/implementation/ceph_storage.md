@@ -917,7 +917,7 @@ Validate the CA file before startup:
 openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
 ```
 
-### `scripts/startup.sh`
+### `scripts/lifecycle/startup.sh`
 
 The startup script is idempotent. It creates missing local scaffolding, checks required parameters, validates the CA file, starts the Compose services, and runs a smoke check.
 
@@ -985,7 +985,7 @@ $compose_cmd ps
 $compose_cmd exec -T s3client rclone lsd cephrgw:
 ```
 
-### `scripts/check.sh`
+### `scripts/verify/check.sh`
 
 The check script is safe to run repeatedly. It verifies the harness is up and that RGW buckets are visible.
 
@@ -1016,7 +1016,7 @@ $compose_cmd exec -T s3client rclone lsd cephrgw:
 $compose_cmd exec -T s3client rclone lsf cephrgw:stratus-landing
 ```
 
-### `scripts/verify-java.sh`
+### `scripts/verify/verify-java.sh`
 
 The Java verification script is also safe to run repeatedly. It starts the pinned verifier image, which executes the prebuilt storage verifier artifact with the environment and truststore configured by Compose. Artifact construction and publication happen in the build system before this script is run.
 
@@ -1045,7 +1045,7 @@ fi
 $compose_cmd run --rm verifier
 ```
 
-### `scripts/shutdown.sh`
+### `scripts/lifecycle/shutdown.sh`
 
 The shutdown script is idempotent. It stops the developer harness without deleting `.env`, certificates, or local source files.
 
@@ -1082,43 +1082,43 @@ $compose_cmd --profile verification down --remove-orphans
 After writing the scripts, mark them executable on Linux or WSL:
 
 ```bash
-chmod +x scripts/startup.sh scripts/bootstrap-buckets.sh scripts/check.sh scripts/verify-java.sh scripts/verify-security.sh scripts/shutdown.sh
+chmod +x scripts/lifecycle/startup.sh scripts/verify/bootstrap-buckets.sh scripts/verify/check.sh scripts/verify/verify-java.sh scripts/verify/verify-security.sh scripts/lifecycle/shutdown.sh
 ```
 
 Start the harness:
 
 ```bash
-scripts/startup.sh
+scripts/lifecycle/startup.sh
 ```
 
 Bootstrap the Stratus buckets (creates the five Stratus buckets and the isolated denial-test bucket):
 
 ```bash
-scripts/bootstrap-buckets.sh
+scripts/verify/bootstrap-buckets.sh
 ```
 
 Check the harness:
 
 ```bash
-scripts/check.sh
+scripts/verify/check.sh
 ```
 
 Run Java verification:
 
 ```bash
-scripts/verify-java.sh
+scripts/verify/verify-java.sh
 ```
 
 Run the Java security negatives. This uses the same prebuilt image with deliberately invalid credentials, the verifier identity against a bucket owned by a separate RGW identity, and an untrusted verifier service with no lab CA mount. The command succeeds only when all three attempts fail closed for the expected reason:
 
 ```bash
-scripts/verify-security.sh
+scripts/verify/verify-security.sh
 ```
 
 Stop the harness:
 
 ```bash
-scripts/shutdown.sh
+scripts/lifecycle/shutdown.sh
 ```
 
 The verifier container copies the base JVM truststore to `/tmp/stratus-cacerts`, imports `stratus-ca.crt`, and points Java at that temporary truststore through `JAVA_TOOL_OPTIONS` before executing the prebuilt verifier JAR. Do not add `--no-verify-ssl` or disable Java TLS validation in routine tests; that would bypass a core Increment 1 requirement.
@@ -1459,7 +1459,7 @@ This section is the executable work breakdown for Increment 1. The technical sec
 | `P1-1.3-D1` | `P1-1.3` | Developer | Generate the developer CA chain and RGW certificate without copying private keys into client/verifier containers. Done when hostname validation succeeds. | Security engineering owner | `P1-1.2-D1` | ignored `platform/ceph/local/certs/` and `private/` paths | `openssl verify`, endpoint handshake, SAN validation, file-permission evidence | D5 | Security owner | Certificate chain verification passed; security acceptance remains | Verified |
 | `P1-1.2-D2` | `P1-1.2` | Developer | Deploy the disposable local Docker Ceph endpoint. Done when three MONs, two MGRs, three BlueStore OSDs, and two RGWs run from the pinned image and the single-host limitations are documented. | Storage owner | `P1-1.2-D1` | `platform/ceph/local/compose.yaml`; `platform/ceph/local/ceph/` | `ceph status`, quorum and manager inventory, OSD tree and pool detail, RGW S3 round trip, runtime/version output | D4, D7, D13 | Operations owner | Verified `HEALTH_OK`, 3/3 MON quorum, active/standby MGR, 3 OSDs `up`/`in`, two RGWs, and 321 placement groups `active+clean`; production acceptance remains | Verified |
 | `P1-1.3-D2` | `P1-1.3` | Developer | Configure the local RGW HTTPS proxy and apply the developer certificate. Done when trusted clients connect and plaintext/insecure paths are rejected. | Storage owner | `P1-1.3-D1`, `P1-1.2-D2` | `platform/ceph/local/ceph/nginx.conf`; Compose TLS mounts | TLS handshake, CA validation, HTTPS S3 list, negative HTTP or untrusted-CA test | D5 | Security owner | Trusted HTTPS passed; untrusted CA was rejected and plaintext RGW was not published; security acceptance remains | Verified |
-| `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and lab-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | local RGW users plus `platform/ceph/local/scripts/bootstrap-buckets.*` and `verify-security.*` | Bucket/user inventory plus invalid-credential and cross-identity denial reports | D6, D8, D9 | Security owner | Positive operations, invalid credentials, and cross-identity HTTP 403 passed locally; canonical evidence indexing and security acceptance remain | Built |
+| `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and lab-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | local RGW users plus `platform/ceph/local/scripts/verify/bootstrap-buckets.*` and `verify-security.*` | Bucket/user inventory plus invalid-credential and cross-identity denial reports | D6, D8, D9 | Security owner | Positive operations, invalid credentials, and cross-identity HTTP 403 passed locally; canonical evidence indexing and security acceptance remain | Built |
 | `P1-1.2-D3` | `P1-1.2` | Developer | Implement the idempotent local Docker Ceph and client/verifier harness. Done when startup, check, verifier, shutdown, reset, and repeated startup succeed without manual repair. | Developer-platform owner | `P1-1.3-D1`, `P1-1.4-D1`, `P1-1.6-S1` | `platform/ceph/local/compose.yaml`; `.env.template`; lifecycle scripts | Compose validation, real Ceph daemon health, HTTPS S3 round trip, clean reset/start transcript, no Compose build configuration | D3, D12 | Platform owner | Empty-volume recreation, rclone, and the externally prebuilt Java verifier passed; reset/shutdown also remove profiled verifier containers; formal image publication remains outside this task | Verified |
 | `P1-1.6-D1` | `P1-1.6` | Developer | Run the Java storage contract suite from the published verifier image. Done when all bucket, object, multipart, TLS, and access-boundary tests pass. | Quality engineering owner | `P1-1.2-D3` | `verification/storage/`; `platform/ceph/local/evidence/` | Image reference, 100% coverage report, twelve-check live report, invalid-auth/policy/TLS reports, persistent debug log | D10, D12 | Data platform owner | 39 Java tests plus live object, pagination, concurrency, multipart, invalid-auth, cross-identity, and untrusted-TLS checks pass from the locally prebuilt image; immutable registry publication remains deferred under `P1-0.1` | Built |
 | `P1-1.6-D2` | `P1-1.6` | Developer | Run storage-only concurrency, multipart, small-object, and prefix-listing baselines. Done when declared thresholds pass or an owned decision record accepts a variance. | Performance engineering owner | `P1-1.6-D1` | `verification/storage/`; benchmark result bundle | Raw runs, p50/p95/p99, throughput, errors/retries, object counts, environment manifest | D11 | Platform owner | Functional eight-way concurrency, forced pagination, multipart, throttling retry, and bounded timeout checks pass; quantitative latency/throughput/object-count thresholds and benchmark evidence remain | In progress |

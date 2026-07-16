@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:HarnessDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$script:HarnessDir = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $script:RepoDir = (Resolve-Path (Join-Path $script:HarnessDir '..\..\..')).Path
 
 # All harness status output carries an ISO-8601 UTC timestamp.

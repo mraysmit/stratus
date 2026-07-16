@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/common.sh"
 
 # Behavior self-test for the harness scripts. Verifies what the static
 # guardrails in testing/repo-guardrails cannot: certificate renewal, rejection
@@ -8,15 +8,17 @@ source "$(dirname "$0")/common.sh"
 # Podman and a fully stopped harness with no preserved cluster volumes.
 
 scripts_dir="$(cd "$(dirname "$0")" && pwd)"
+lifecycle_dir="$(cd "$scripts_dir/../lifecycle" && pwd)"
+lib_dir="$(cd "$scripts_dir/../lib" && pwd)"
 runtime="$(compose_runtime)"
 ceph_image='quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644'
 fake_image='stratus/selftest-vacuous-verifier'
 
 if [[ -n "$("$runtime" ps -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
-  fail "Stop the harness before running the self-test (scripts/shutdown.sh)"
+  fail "Stop the harness before running the self-test (scripts/lifecycle/shutdown.sh)"
 fi
 if [[ -n "$("$runtime" volume ls -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
-  fail "Cluster volumes exist and the self-test exercises destructive reset. Run scripts/reset.sh --force first if losing them is intended."
+  fail "Cluster volumes exist and the self-test exercises destructive reset. Run scripts/lifecycle/reset.sh --force first if losing them is intended."
 fi
 require_free_harness_subnet
 
@@ -43,7 +45,7 @@ cleanup() {
 trap cleanup EXIT
 
 scenario "near-expiry leaf certificate renews while preserving the CA"
-"$scripts_dir/generate-lab-certificates.sh" >/dev/null
+"$lib_dir/generate-lab-certificates.sh" >/dev/null
 ca_before="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
 printf 'subjectAltName=DNS:object-store.stratus.local\nextendedKeyUsage=serverAuth\n' >"$HARNESS_DIR/private/rgw-extensions.cnf"
 openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.local" \
@@ -51,7 +53,7 @@ openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.
 openssl_run x509 -req -sha256 -days 3 -in certs/object-store.stratus.local.csr \
   -CA certs/stratus-ca.crt -CAkey private/stratus-lab-ca.key -CAcreateserial \
   -extfile private/rgw-extensions.cnf -out certs/object-store.stratus.local.crt
-"$scripts_dir/generate-lab-certificates.sh" >/dev/null
+"$lib_dir/generate-lab-certificates.sh" >/dev/null
 openssl_run x509 -checkend 604800 -noout -in certs/object-store.stratus.local.crt >/dev/null \
   || fail "Leaf certificate was not renewed although it was within the renewal window"
 ca_after="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
@@ -91,8 +93,8 @@ elif [[ -f "$HARNESS_DIR/.env" ]]; then
   mv "$HARNESS_DIR/.env" "$tmp_dir/env-backup"
   moved_env="$tmp_dir/env-backup"
 fi
-"$scripts_dir/shutdown.sh" >/dev/null
-"$scripts_dir/reset.sh" --force >/dev/null
+"$lifecycle_dir/shutdown.sh" >/dev/null
+"$lifecycle_dir/reset.sh" --force >/dev/null
 if [[ -n "$moved_env" ]]; then
   mv "$moved_env" "$HARNESS_DIR/.env"
   moved_env=""
