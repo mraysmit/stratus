@@ -77,7 +77,7 @@ Not required for the developer profile. It remains useful for a representative l
 
 ## Consequences
 
-- `platform/ceph/local/compose.yaml` deploys Ceph, the HTTPS proxy, rclone, and the prebuilt verifier image.
+- `platform/ceph/developer/compose.yaml` deploys Ceph, the HTTPS proxy, rclone, and the prebuilt verifier image.
 - Compose contains no verifier `build` section and startup invokes no Maven command.
 - Ceph runtime initialization is deployment configuration; it does not compile Ceph or Stratus artifacts.
 - Developer volumes are disposable and may be removed only by the explicit reset operation.

@@ -29,7 +29,7 @@ import org.yaml.snakeyaml.Yaml;
 @Tag("unit")
 final class HarnessContractTest {
 
-    private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "local"));
+    private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "developer"));
     private static final Pattern COMPOSE_VARIABLE = Pattern.compile("\\$\\{([A-Z0-9_]+)(:-|:\\?)?");
     private static final Pattern TEMPLATE_KEY = Pattern.compile("^([A-Z0-9_]+)=", Pattern.MULTILINE);
 
@@ -122,7 +122,7 @@ final class HarnessContractTest {
             }
         }
         assertTrue(missing.isEmpty(), () ->
-            "platform/ceph/local/.gitignore must ignore generated secret material; missing patterns: " + missing);
+            "platform/ceph/developer/.gitignore must ignore generated secret material; missing patterns: " + missing);
     }
 
     @Test

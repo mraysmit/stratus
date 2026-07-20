@@ -97,7 +97,7 @@ The monorepo is organized by stable capability, not implementation sequence:
 | `build-support/` | centralized dependency and Maven build policy |
 | `docs/` | architecture, decisions, implementation, operations, and reference documentation |
 
-The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph developer harness](platform/ceph/local/).
+The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph developer harness](platform/ceph/developer/).
 
 Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versions are owned by `build-support/stratus-build-parent`. Child module POMs do not pin dependency or plugin versions.
 
