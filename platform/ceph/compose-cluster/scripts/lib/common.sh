@@ -44,13 +44,29 @@ compose_runtime() {
 }
 
 compose() {
-  "$(compose_runtime)" compose --project-directory "$HARNESS_DIR" --env-file "$HARNESS_DIR/.env" -f "$HARNESS_DIR/compose.yaml" "$@"
+  local runtime project_dir env_file compose_file
+  runtime="$(compose_runtime)"
+  project_dir="$HARNESS_DIR"
+  env_file="$HARNESS_DIR/.env"
+  compose_file="$HARNESS_DIR/compose.yaml"
+  if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+    project_dir="$(cygpath -w "$project_dir")"
+    env_file="$(cygpath -w "$env_file")"
+    compose_file="$(cygpath -w "$compose_file")"
+    MSYS_NO_PATHCONV=1 "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
+  else
+    "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
+  fi
 }
 
 # Tears down by compose project name alone, so it works even when .env is
 # missing and the compose file's required variables cannot be interpolated.
 compose_teardown() {
-  "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
+  if [[ -n "${MSYSTEM:-}" ]]; then
+    MSYS_NO_PATHCONV=1 "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
+  else
+    "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
+  fi
 }
 
 # The harness pins its network to 172.28.0.0/24. A foreign network on that

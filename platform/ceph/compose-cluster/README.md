@@ -1,8 +1,34 @@
 # Ceph/RGW Compose Cluster
 
-This is the disposable Ceph Compose cluster. It deploys a genuine Ceph Tentacle 20.2.2 cluster using Docker or Podman Compose, exposes RGW through trusted HTTPS, and runs prebuilt S3 client and Stratus verifier images against it. The current profile uses one container engine on one infrastructure host while preserving genuine Ceph daemon, quorum, replication, gateway, degradation, and recovery behavior.
+- Author: Mark Raysmith
+- Created: 2026-07-14
+- Last updated: 2026-07-20
+- Status: Implemented and validated
 
-It does not use an S3 mock and it does not require an external Ceph endpoint.
+This directory gives a developer a complete local object-storage service for
+building and testing Stratus. Run the startup script and it creates a Ceph
+cluster on the workstation, publishes an S3-compatible HTTPS endpoint at
+`https://object-store.stratus.local:8443`, generates disposable credentials and
+certificates, and starts the client tools used to prove that the service works.
+No cloud account, existing Ceph installation, or shared test environment is
+required.
+
+The environment runs real Ceph Tentacle 20.2.2 services in separate containers:
+three monitors coordinate the cluster, three storage daemons hold replicated
+data, two gateways serve S3 requests, and a proxy provides the stable HTTPS
+address. Because these are genuine Ceph services rather than an S3 mock, a
+developer can test normal object operations as well as gateway, monitor, and
+storage-daemon failures and recovery.
+
+"Disposable" means the cluster is safe to create, stop, reset, and rebuild on a
+developer workstation. Normal shutdown preserves its data for the next session;
+an explicit reset deletes the local cluster volumes and starts fresh. Everything
+still runs through one container engine on one host, so this environment is for
+development and component-level resilience testing, not evidence of production
+host, rack, or site availability.
+
+**New to this environment?** Start with the [Ceph Compose Cluster Quick Start
+Guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md).
 
 ## Services
 
@@ -109,13 +135,39 @@ The environment is a multi-container cluster on one Docker host. It proves daemo
 
 Those are handled by the separate acceptance and production cephadm tasks.
 
+## Validated workstation paths
+
+The complete developer lifecycle was revalidated on 2026-07-20 against Docker
+Desktop using both supported Windows command surfaces:
+
+| Host command surface | Container runtime | Result | Scope exercised |
+|---|---|---|---|
+| PowerShell | Docker Desktop | Passed | startup, bucket bootstrap/check, Java contract, security negatives, failure drill, shutdown, reset, and harness self-test |
+| Git for Windows Bash | Docker Desktop | Passed | the same complete lifecycle, including destructive reset and shell self-test |
+
+The live Java report passed all twelve S3 checks. Invalid credentials,
+cross-identity access, and untrusted TLS were rejected as required. The RGW,
+monitor, and OSD outage scenarios retained the expected service and recovered
+to `HEALTH_OK` with all placement groups `active+clean`.
+
+This record does not claim that Podman was exercised on the Windows
+workstation. Podman compatibility remains a separate runtime qualification.
+
 ## Prerequisites
 
 - Docker Desktop or Docker Engine with Compose v2
+- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows
 - enough Docker memory and disk for the official Ceph image and three 1 GiB disposable BlueStore volumes
 - a prebuilt verifier image identified by `VERIFIER_IMAGE`
 
 Java and Maven are not required on the verification environment.
+
+Git Bash talks directly to Docker Desktop through `docker.exe`; a user Ubuntu
+WSL distribution does not need to be running. The shared Bash Compose wrapper
+converts host-side paths to Windows form and disables MSYS conversion for
+container-side paths such as `/certs` and `/evidence`. Run the supplied scripts
+instead of reconstructing their `docker compose` calls. The repository
+`.gitattributes` keeps every `.sh` file at LF endings for Linux containers.
 
 ## Configuration
 
@@ -132,6 +184,16 @@ Change `VERIFIER_IMAGE` to the immutable image reference produced by the build s
 The local CA, server certificate, and private key are generated into ignored `certs/` and `private/` directories. Certificates renew automatically at startup when within seven days of expiry; leaf renewal preserves the existing CA. Client and verifier containers receive only the public CA. The server private key is mounted only into the TLS proxy and is deliberately unencrypted — it must never leave the developer machine.
 
 On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/lifecycle/install-prerequisites.sh` when necessary.
+
+`verify-java` also waits for the RGW hostname to resolve from a newly created
+verifier container before launching the contract. This closes the short Docker
+DNS registration window that can occur immediately after creating the Compose
+network; an unresolved name after the bounded wait is treated as a real startup
+failure.
+
+To inspect buckets and objects manually from Postman or another S3-compatible
+desktop client, follow [Access Ceph RGW with Postman or Another S3
+Client](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#12-access-ceph-rgw-with-postman-or-another-s3-client).
 
 ## Testing and validation
 
@@ -192,7 +254,7 @@ PowerShell:
 .\scripts\lifecycle\shutdown.ps1
 ```
 
-Bash:
+Bash (Linux, macOS, WSL, or Git for Windows):
 
 ```bash
 ./scripts/lifecycle/startup.sh
@@ -259,6 +321,10 @@ production resilience.
 `scripts/verify/selftest.{ps1,sh}` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
 
 ## Management console
+
+For a complete first-time procedure, including the Windows and Linux/macOS
+hosts-file commands, connectivity test, CA trust, and credential lookup, see
+[Access the Ceph Administration UI](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#11-access-the-ceph-administration-ui).
 
 The active manager serves the Ceph Dashboard, Ceph's built-in web UI, through
 the same TLS proxy as the S3 endpoint:

@@ -2,7 +2,8 @@
 
 - Author: Mark Raysmith
 - Created: 2026-07-15
-- Last updated: 2026-07-15
+- Last updated: 2026-07-20
+- Status: Active
 
 This is the complete, self-contained guide to every test and validation process
 that applies to the Ceph/RGW Compose cluster in `platform/ceph/compose-cluster`. It
@@ -13,6 +14,9 @@ just want commands, jump to [Run everything, in order](#run-everything-in-order)
 For what the environment *is* (its services, what it proves and does not prove,
 and its configuration), read the module [README.md](README.md) first. This
 document is about how you *test and validate* it.
+
+For the shortest first-run path, use the [Ceph Compose Cluster Quick Start
+Guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md).
 
 ## Contents
 
@@ -37,7 +41,7 @@ new contributor who has just cloned the repository. Everything here runs on a
 single workstation. You do not need access to any shared Ceph cluster.
 
 Commands are given for **PowerShell** (Windows, the primary environment) and
-**bash** (Linux/macOS/WSL). Run the one that matches your shell; they are
+**bash** (Linux/macOS/WSL/Git for Windows). Run the one that matches your shell; they are
 behavior-equivalent twins and a guardrail test enforces that they stay in sync.
 
 ## The four validation layers at a glance
@@ -57,6 +61,17 @@ The mandatory gate for any code change is **Layer 1** (`clean verify`). Layers 2
 and 3 are required additionally when a change touches Ceph endpoint behavior,
 TLS, credentials, request signing, bucket policy, or object operations. Layer 4
 is run when you change the harness scripts.
+
+### Current validated baseline
+
+The 2026-07-20 workstation validation used Docker Desktop from PowerShell and
+from Git for Windows Bash. Both command surfaces completed the full live
+lifecycle. The Bash run included all twelve S3 contract checks, all three
+security negatives, RGW/MON/OSD failure and recovery scenarios, shutdown,
+destructive reset, and the three harness self-test scenarios. `clean verify`
+passed 18 storage-verifier tests and 15 repository guardrail tests. Podman was
+not available in that environment and is therefore not claimed by this
+validation record.
 
 ## Mental model: two different verifiers
 
@@ -95,6 +110,9 @@ and they can disagree (for example, a working image built from stale source).
 - Docker Desktop / Docker Engine with Compose v2 (or Podman with `podman
   compose`; the scripts auto-detect, and `COMPOSE_IMPLEMENTATION=docker|podman`
   forces a choice).
+- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows. Git Bash is
+  supported directly against Docker Desktop and does not require a running WSL
+  distribution.
 - Enough Docker memory and disk for the official Ceph image and three 1 GiB
   disposable BlueStore volumes.
 - A prebuilt image tagged to match `VERIFIER_IMAGE`. See the next section.
@@ -212,7 +230,7 @@ To run only the guardrails while iterating on scripts or docs:
 PowerShell: `.\mvnw.cmd test -Punit-tests -pl :stratus-repo-guardrails`
 bash: `./mvnw test -Punit-tests -pl :stratus-repo-guardrails`
 
-A green guardrail run reports `Tests run: 14, Failures: 0, Errors: 0`.
+A green guardrail run reports `Tests run: 15, Failures: 0, Errors: 0`.
 
 ### When it fails
 
@@ -535,6 +553,10 @@ section](README.md#evidence) has the full rationale.
 | `clean verify` fails in `ScriptParityTest` | A `.ps1`/`.sh` twin drifted or one lacks its fail-fast preamble | Re-sync the twins per the assertion message |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
 | `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
+| Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/common.sh` |
+| First verifier run reports `UnknownHostException: object-store.stratus.local` | The verifier script is stale, or Docker DNS did not register the proxy alias within the bounded readiness period | Use the current `verify-java` script, then inspect the `stratus-ceph-local_ceph` network and the `rgw-proxy` alias; do not add an ad hoc hosts entry inside the container |
+| A shell script fails with `/usr/bin/env: 'bash\r'` or `^M` | CRLF line endings reached a Linux container | Keep `.gitattributes` with `*.sh text eol=lf`, restore the affected script with LF endings, and rerun `bash -n` |
+| Docker Desktop works while `wsl -l -v` shows Ubuntu stopped | Expected Docker Desktop architecture | No remediation is needed. Git Bash and PowerShell use Docker Desktop directly; the user Ubuntu distribution is not a prerequisite |
 
 For deeper cluster inspection (quorum, OSD tree, RGW users, manager status), use
 the `ceph` commands listed under [Direct

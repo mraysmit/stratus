@@ -24,7 +24,7 @@ require_free_harness_subnet
 
 openssl_run() {
   if command -v openssl >/dev/null 2>&1; then
-    (cd "$HARNESS_DIR" && openssl "$@" 2>/dev/null)
+    (cd "$HARNESS_DIR" && MSYS_NO_PATHCONV=1 openssl "$@" 2>/dev/null)
   else
     "$runtime" run --rm --volume "$HARNESS_DIR:/work" --workdir /work --entrypoint openssl "$ceph_image" "$@" 2>/dev/null
   fi
