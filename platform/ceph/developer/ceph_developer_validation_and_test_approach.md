@@ -1,11 +1,11 @@
-# Stratus Ceph Local: Testing and Validation Guide
+# Stratus Ceph Developer Environment: Testing and Validation Guide
 
 - Author: Mark Raysmith
 - Created: 2026-07-15
 - Last updated: 2026-07-15
 
 This is the complete, self-contained guide to every test and validation process
-that applies to the local Ceph/RGW developer module in `platform/ceph/local`. It
+that applies to the Ceph/RGW developer module in `platform/ceph/developer`. It
 assumes no prior knowledge of this module. If you have never run anything here,
 start at [Who this is for](#who-this-is-for) and read straight through; if you
 just want commands, jump to [Run everything, in order](#run-everything-in-order).
@@ -31,7 +31,7 @@ document is about how you *test and validate* it.
 
 ## Who this is for
 
-Anyone who needs to run or reason about the tests for the local Ceph module: a
+Anyone who needs to run or reason about the tests for the Ceph developer module: a
 developer changing the verifier, a reviewer confirming a change is sound, or a
 new contributor who has just cloned the repository. Everything here runs on a
 single workstation. You do not need access to any shared Ceph cluster.
@@ -229,14 +229,14 @@ buckets, checks cluster health, and runs the **prebuilt verifier image** against
 the live endpoint for both the positive S3 contract and the three security
 negatives.
 
-Run every command from the `platform/ceph/local` directory.
+Run every command from the `platform/ceph/developer` directory.
 
 ### The sequence
 
 PowerShell:
 
 ```powershell
-cd platform\ceph\local
+cd platform\ceph\developer
 .\scripts\lifecycle\startup.ps1
 .\scripts\verify\bootstrap-buckets.ps1
 .\scripts\verify\check.ps1
@@ -248,7 +248,7 @@ cd platform\ceph\local
 bash:
 
 ```bash
-cd platform/ceph/local
+cd platform/ceph/developer
 ./scripts/lifecycle/startup.sh
 ./scripts/verify/bootstrap-buckets.sh
 ./scripts/verify/check.sh
@@ -429,14 +429,14 @@ lose). Then:
 PowerShell:
 
 ```powershell
-cd platform\ceph\local
+cd platform\ceph\developer
 .\scripts\verify\selftest.ps1
 ```
 
 bash:
 
 ```bash
-cd platform/ceph/local
+cd platform/ceph/developer
 ./scripts/verify/selftest.sh
 ```
 
@@ -470,7 +470,7 @@ A complete local validation from a clean state, in dependency order:
 ```text
 1. Build the verifier image            (one-time / after verifier source changes)
 2. mvnw clean verify                   Layer 1  — no Docker
-3. cd platform/ceph/local
+3. cd platform/ceph/developer
 4. scripts/lifecycle/startup                     Layer 2  — boots the cluster
 5. scripts/verify/bootstrap-buckets
 6. scripts/verify/check

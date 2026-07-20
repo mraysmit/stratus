@@ -7,7 +7,7 @@ The repository is organized by stable capability, not implementation sequence. P
 | `applications/` | Stratus-owned long-running services | Placeholder — no application modules yet |
 | `jobs/` | Spark and Flink workloads | Placeholder — no job modules yet |
 | `verification/` | executable component contract suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage contract verifier, the current executable module |
-| `platform/` | open-source product integration and deployment assets | `platform/ceph/local/` is the Ceph developer harness (compose environment and verify scripts) |
+| `platform/` | open-source product integration and deployment assets | `platform/ceph/developer/` is the Ceph developer harness (compose environment and verify scripts) |
 | `environments/` | environment inventory and overlays without secrets | `developer`, `lab`, and `production` |
 | `operations/` | cross-platform operational assets and runbooks | Placeholder — operational acceptance documents currently live in `docs/operations/` |
 | `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` runs unit-tagged repository consistency checks (documentation links, naming conventions, harness contract, script parity) in the default regression |

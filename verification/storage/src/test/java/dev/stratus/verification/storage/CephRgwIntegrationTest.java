@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The verifier's storage behavior proven against the live local Ceph cluster
- * (platform/ceph/local): the full S3 contract, missing-bucket detection, the
+ * (platform/ceph/developer): the full S3 contract, missing-bucket detection, the
  * invalid-credential and cross-identity security negatives, evidence writing,
  * and exit semantics. Requires CEPH_RGW_INTEGRATION=true and the harness
  * environment; nothing here is simulated.
