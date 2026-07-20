@@ -21,7 +21,7 @@ The runtime profiles are:
 | Profile | Deployment | Valid evidence |
 |---|---|---|
 | Disposable developer environment | Docker Desktop or Docker Engine Compose; separate containers run three MONs, two MGRs, three BlueStore OSDs, and two RGWs; a separate proxy terminates local TLS | Ceph/RGW version and health, container-level quorum and failover, replicated-pool degradation/recovery, real S3 compatibility, TLS trust, verifier behavior, repeatable start/stop/reset |
-| Representative lab | Linux hosts with Podman or Docker Engine and cephadm, explicit OSD devices and failure domains, redundant services where required | The production characteristics actually represented by its topology and completed drills |
+| Acceptance | Shared Linux hosts with Podman or Docker Engine and cephadm, explicit OSD devices and failure domains, redundant services where required | The production characteristics actually represented by its topology and completed drills |
 | Production | Approved Linux hosts with cephadm, durable multi-host MON/MGR/OSD/RGW topology, managed TLS, monitoring, backup, and recovery | Production gates only |
 
 The Docker developer environment is intentionally single-host and disposable. It does prove monitor quorum, manager active/standby state, replicated placement across distinct container-level CRUSH hosts, one-OSD degraded client operation/recovery, and one-RGW failover. It does not claim physical-device, Docker-host, rack, or site failure tolerance; production CRUSH failure-domain correctness; production capacity or durability; or production operational readiness.
@@ -73,11 +73,11 @@ Rejected for Increment 1 verification because it does not prove Ceph RGW behavio
 
 ### cephadm inside a separate developer VM
 
-Not required for the developer profile. It remains useful for a representative lab and is the production lifecycle model, but it must not replace the required local Docker environment.
+Not required for the developer profile. It remains useful for the shared acceptance environment and is the production lifecycle model, but it must not replace the required Compose cluster.
 
 ## Consequences
 
-- `platform/ceph/developer/compose.yaml` deploys Ceph, the HTTPS proxy, rclone, and the prebuilt verifier image.
+- `platform/ceph/compose-cluster/compose.yaml` deploys Ceph, the HTTPS proxy, rclone, and the prebuilt verifier image.
 - Compose contains no verifier `build` section and startup invokes no Maven command.
 - Ceph runtime initialization is deployment configuration; it does not compile Ceph or Stratus artifacts.
 - Developer volumes are disposable and may be removed only by the explicit reset operation.

@@ -34,7 +34,7 @@ $invocation = Get-HarnessComposeInvocation
 $tlsEvidence = Join-Path $evidenceDir "storage-untrusted-tls-$timestamp.log"
 $tlsOutput = & $invocation.Runtime @($invocation.BaseArgs) run --rm --no-deps -T verifier-untrusted java -jar /opt/stratus/storage-verifier.jar 2>&1
 $tlsExit = $LASTEXITCODE
-$tlsHeader = "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')) Untrusted TLS negative-test capture: output of a verifier run WITHOUT the lab CA; the PKIX failure below is the expected, asserted result."
+$tlsHeader = "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')) Untrusted TLS negative-test capture: output of a verifier run WITHOUT the Compose CA; the PKIX failure below is the expected, asserted result."
 @($tlsHeader) + $tlsOutput | Tee-Object -FilePath $tlsEvidence
 if ($tlsExit -ne 2) { throw "Expected untrusted TLS verifier exit code 2 but received $tlsExit" }
 if (($tlsOutput -join "`n") -notmatch 'PKIX|SSLHandshake|certification path') {

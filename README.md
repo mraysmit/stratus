@@ -90,14 +90,14 @@ The monorepo is organized by stable capability, not implementation sequence:
 | `jobs/` | Spark and Flink workloads |
 | `verification/` | executable platform contract suites |
 | `platform/` | open-source product integration and deployment assets |
-| `environments/` | developer, lab, and production inventory and overlays without secrets |
+| `environments/` | developer, acceptance, and production inventory and overlays without secrets |
 | `operations/` | monitoring, alerting, backup/restore, security, drills, and runbooks |
 | `testing/` | cross-component end-to-end and non-functional suites |
 | `schemas/` | shared governed event and data contracts |
 | `build-support/` | centralized dependency and Maven build policy |
 | `docs/` | architecture, decisions, implementation, operations, and reference documentation |
 
-The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph developer harness](platform/ceph/developer/).
+The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph Compose cluster](platform/ceph/compose-cluster/).
 
 Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versions are owned by `build-support/stratus-build-parent`. Child module POMs do not pin dependency or plugin versions.
 

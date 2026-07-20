@@ -4,11 +4,11 @@ Ceph is the Stratus object-storage baseline. This directory owns Ceph-specific d
 
 ```text
 ceph/
-├── bootstrap/   # buckets, RGW identities, quotas, and policy automation
-├── developer/   # disposable single-workstation Ceph/RGW Compose environment
-└── lab/         # production Linux-host inventory, service specs, and templates
+├── compose-cluster/   # genuine Ceph cluster orchestrated by Compose
+├── cephadm-cluster/   # reusable multi-host cephadm deployment assets
+└── rgw-bootstrap/     # buckets, RGW identities, quotas, and policy automation
 ```
 
-The `developer` environment deploys three genuine Ceph MONs, two MGRs, three BlueStore OSDs, and two RGW daemons in separate containers on one developer workstation using Docker or Podman. Production lifecycle remains separately managed by cephadm assets in `lab/`.
+The `compose-cluster` implementation deploys three genuine Ceph MONs, two MGRs, three BlueStore OSDs, and two RGW daemons in separate containers using Docker or Podman Compose. It is a real distributed Ceph cluster with container-level CRUSH host boundaries, currently executed through one container engine on one infrastructure host.
 
-`developer/` is the currently implemented environment. `bootstrap/` and `lab/` are reserved placeholders whose content is delivered by the production-track tasks in the Phase 1 implementation plan.
+`compose-cluster/` is currently implemented. `cephadm-cluster/` and `rgw-bootstrap/` are reserved placeholders whose content is delivered by the production-track tasks in the Phase 1 implementation plan. Environment-specific inventory and values remain under `environments/`.

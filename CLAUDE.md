@@ -20,7 +20,7 @@ never a global Maven).
 - NO mocks, NO fakes, NO simulated product endpoints — anywhere, in any
   form. A test against a simulated Ceph (or any other product) is worthless
   as verification. Product behavior is tested against the live product: for
-  Ceph RGW, the developer cluster in `platform/ceph/developer`.
+  Ceph RGW, the Compose cluster in `platform/ceph/compose-cluster`.
 - Tests MUST NOT substitute hand-written test doubles for Stratus-owned
   interfaces; exercise the real production implementation.
 - Real environmental failures (unreachable address, closed port, unwritable
@@ -44,7 +44,7 @@ never a global Maven).
 - Published harness ports bind to loopback by default. Never track `.env`,
   keys, or certificates.
 - Run transcripts belong in the component's own `logs/` directory (e.g.
-  `platform/ceph/developer/logs/`); the repository-root `logs/` is reserved for
+  `platform/ceph/compose-cluster/logs/`); the repository-root `logs/` is reserved for
   Maven build logs.
 
 ## Verification culture

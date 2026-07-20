@@ -23,7 +23,7 @@ elif ! grep -q '^CEPH_DASHBOARD_PASSWORD=' "$HARNESS_DIR/.env"; then
   log "Added generated dashboard credentials to $HARNESS_DIR/.env"
 fi
 # Idempotent: generates on first run, renews when a certificate nears expiry.
-"$(dirname "$0")/../lib/generate-lab-certificates.sh"
+"$(dirname "$0")/../lib/generate-compose-certificates.sh"
 load_environment
 require_free_harness_subnet
 mkdir -p "$HARNESS_DIR/evidence"
