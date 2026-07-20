@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 /**
- * Contract between the Ceph developer harness's compose file, its .env template, its scripts, and its ignore rules. Guards against dead template variables, unguarded port publishing, missing restart/health policies, and trackable key material.
+ * Contract between the Ceph Compose cluster's compose file, its .env template, its scripts, and its ignore rules. Guards against dead template variables, unguarded port publishing, missing restart/health policies, and trackable key material.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
@@ -134,6 +134,25 @@ final class HarnessContractTest {
             .toList();
         assertTrue(violations.isEmpty(), () ->
             "Key material and .env files must never be tracked: " + violations);
+    }
+
+    @Test
+    void certificateGeneratorPreservesPublicAndPrivateFileBoundaries() {
+        List<String> violations = new ArrayList<>();
+        for (String extension : List.of("ps1", "sh")) {
+            String generator = Repo.read(HARNESS.resolve(
+                "scripts/lib/generate-compose-certificates." + extension));
+            if (!generator.contains("chmod 0644 \"$ca_cert\" \"$rgw_cert\"")) {
+                violations.add(extension + ": public certificates must be readable by non-root client containers");
+            }
+            if (!generator.contains("chmod 0600 \"$ca_key\" \"$rgw_key\"")) {
+                violations.add(extension + ": private keys must remain owner-only");
+            }
+            if (!generator.contains("key_matches_certificate")) {
+                violations.add(extension + ": renewal must repair a certificate that does not match its key");
+            }
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
 
     private static Set<String> templateKeys() {

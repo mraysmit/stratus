@@ -1,5 +1,10 @@
 # Stratus Increment 1 - Ceph Object Storage Foundation
 
+- Author: Mark Raysmith
+- Created: 2026-07-06
+- Last updated: 2026-07-20
+- Status: In progress - developer track implemented; production track pending
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 1 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -792,12 +797,15 @@ Do not treat this disposable single-host cluster as the production deployment. I
 Developer prerequisites:
 
 - Docker Desktop with Docker Compose v2 enabled
+- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows
 - sufficient Docker memory and disk for the official Ceph image and three disposable 1 GiB BlueStore volumes
 - generated local CA/server certificate files in ignored paths
 - disposable RGW credentials in the ignored local `.env` file
 - the pinned storage verifier image is available from the approved registry
 
-For Windows workstations, run Docker Compose from PowerShell or WSL, but keep path handling consistent for the certificate and evidence directories. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
+For Windows workstations, use either PowerShell or Git for Windows Bash. Both command surfaces run directly against Docker Desktop; a user Ubuntu WSL distribution does not need to be running. The Bash scripts centralize MSYS path handling so Windows host paths reach `docker.exe` in Windows form while container paths such as `/certs` and `/evidence` remain Linux paths. Do not reconstruct the underlying Compose invocation outside the supplied scripts. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
+
+The complete PowerShell and Git Bash lifecycle was validated on 2026-07-20 with Docker Desktop: cluster startup, bucket bootstrap and smoke checks, all twelve Java S3 contract checks, three security-negative checks, RGW/MON/OSD failure drills and recovery, shutdown, destructive reset, and the harness self-test. This evidence does not qualify Podman; Podman remains a separate runtime compatibility path.
 
 ### Developer Podman setup
 
@@ -822,16 +830,21 @@ platform/ceph/compose-cluster/
   private/                   # ignored generated private keys
   evidence/                  # ignored verifier evidence
   scripts/                   # each script ships as a .ps1/.sh pair
-    bootstrap-buckets.{ps1,sh}
-    check.{ps1,sh}
-    common.{ps1,sh}
-    generate-compose-certificates.{ps1,sh}
-    install-prerequisites.{ps1,sh}
-    reset.{ps1,sh}
-    shutdown.{ps1,sh}
-    startup.{ps1,sh}
-    verify-java.{ps1,sh}
-    verify-security.{ps1,sh}
+    lib/
+      common.{ps1,sh}
+      generate-compose-certificates.{ps1,sh}
+    lifecycle/
+      install-prerequisites.{ps1,sh}
+      reset.{ps1,sh}
+      shutdown.{ps1,sh}
+      startup.{ps1,sh}
+    verify/
+      bootstrap-buckets.{ps1,sh}
+      check.{ps1,sh}
+      failure-drill.{ps1,sh}
+      selftest.{ps1,sh}
+      verify-java.{ps1,sh}
+      verify-security.{ps1,sh}
 ```
 
 The directory should be created once and then reused by developers. `.env` and private key material are local files and must not be committed.
@@ -893,25 +906,24 @@ Parameter rules:
 - The CA mounted at `./certs/stratus-ca.crt` must validate the actual certificate presented by `CEPH_RGW_ENDPOINT`.
 - `RCLONE_CA_CERT` is for the S3 client container only; Java uses the temporary truststore created by the verifier container command.
 - `S3_PATH_STYLE_ACCESS=true` is the default developer setting because internal RGW endpoints often use endpoint overrides instead of virtual-hosted bucket names.
-- If `CEPH_RGW_ENDPOINT` points to a shared lab, the credentials must be scoped so the developer harness cannot mutate unrelated buckets or production data.
 - `S3CLIENT_IMAGE` and `VERIFIER_IMAGE` must be pinned by version or digest. Do not use floating `latest` tags.
 - `VERIFIER_IMAGE` must be built, tested, scanned, and published by the approved build system. Do not mount the repository or run Maven inside the verifier container.
 
 ### Certificate setup for developer clients
 
-Developers need the CA certificate that validates `CEPH_RGW_ENDPOINT`.
+The disposable Compose cluster owns its endpoint and certificate lifecycle. On
+first startup it generates a local CA, an RGW proxy certificate for
+`object-store.stratus.local`, and the matching private key under ignored
+`certs/` and `private/` paths. It renews a leaf certificate near expiry while
+preserving the CA, repairs a mismatched certificate/key pair, makes public
+certificates readable by the unprivileged client containers, and keeps private
+keys restricted. Client and verifier containers receive only
+`certs/stratus-ca.crt`; only `rgw-proxy` mounts the endpoint private key.
 
-Preferred paths:
-
-| Source | Developer action |
-|---|---|
-| platform PKI | copy the approved public CA chain to `certs/stratus-ca.crt` |
-| shared Ceph lab | copy the lab CA public certificate from the lab owner to `certs/stratus-ca.crt` |
-| disposable local lab | generate the lab CA and RGW certificate using the RGW TLS section above, then copy only `certs/stratus-ca.crt` into this harness |
-
-Do not copy RGW private keys into the developer harness. The harness only needs the public CA certificate.
-
-Validate the CA file before startup:
+The generator uses host OpenSSL when available and falls back to the pinned
+Ceph image. The paired `install-prerequisites` script provides explicit host
+installation instructions when OpenSSL itself is required. Validate the
+generated public CA at any time with:
 
 ```bash
 openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
@@ -919,170 +931,41 @@ openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
 
 ### `scripts/lifecycle/startup.sh`
 
-The startup script is idempotent. It creates missing local scaffolding, checks required parameters, validates the CA file, starts the Compose services, and runs a smoke check.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-if [ ! -f ".env" ]; then
-  cp .env.template .env
-  echo "Created .env from .env.template. Fill in CEPH_RGW_ACCESS_KEY and CEPH_RGW_SECRET_KEY, then rerun."
-  exit 1
-fi
-
-set -a
-. ./.env
-set +a
-
-required_vars="CEPH_RGW_ENDPOINT CEPH_RGW_ACCESS_KEY CEPH_RGW_SECRET_KEY S3_PATH_STYLE_ACCESS S3CLIENT_IMAGE VERIFIER_IMAGE"
-for var in $required_vars; do
-  value="${!var:-}"
-  if [ -z "$value" ] || echo "$value" | grep -q "^REPLACE_WITH_"; then
-    echo "Missing or placeholder value for $var in .env"
-    exit 1
-  fi
-done
-
-mkdir -p certs
-if [ ! -f "certs/stratus-ca.crt" ]; then
-  echo "Missing certs/stratus-ca.crt. Copy the public CA certificate for CEPH_RGW_ENDPOINT before startup."
-  exit 1
-fi
-
-openssl x509 -in certs/stratus-ca.crt -noout >/dev/null
-
-runtime="${COMPOSE_IMPLEMENTATION:-docker}"
-case "$runtime" in
-  docker)
-    compose_cmd="docker compose"
-    ;;
-  podman)
-    compose_cmd="podman compose"
-    ;;
-  auto)
-    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-      compose_cmd="docker compose"
-    elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
-      compose_cmd="podman compose"
-    else
-      echo "Neither docker compose nor podman compose is available."
-      exit 1
-    fi
-    ;;
-  *)
-    echo "Unsupported COMPOSE_IMPLEMENTATION=$runtime. Use docker, podman, or auto."
-    exit 1
-    ;;
-esac
-
-$compose_cmd pull
-$compose_cmd up -d --remove-orphans
-$compose_cmd ps
-$compose_cmd exec -T s3client rclone lsd cephrgw:
-```
+The paired startup scripts are idempotent. They create `.env` from the template
+when absent, generate disposable credentials, create or renew the local CA and
+endpoint certificate, reject a conflicting harness subnet, start the complete
+cluster, and wait for every required service health gate. Certificate renewal
+also verifies that the certificate and private key match. On Git Bash the
+shared wrapper handles Windows host paths and preserves Linux container paths.
 
 ### `scripts/verify/check.sh`
 
-The check script is safe to run repeatedly. It verifies the harness is up and that RGW buckets are visible.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-set -a
-. ./.env
-set +a
-
-runtime="${COMPOSE_IMPLEMENTATION:-docker}"
-if [ "$runtime" = "podman" ]; then
-  compose_cmd="podman compose"
-elif [ "$runtime" = "docker" ]; then
-  compose_cmd="docker compose"
-elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  compose_cmd="docker compose"
-else
-  compose_cmd="podman compose"
-fi
-
-$compose_cmd ps
-$compose_cmd exec -T s3client rclone lsd cephrgw:
-$compose_cmd exec -T s3client rclone lsf cephrgw:stratus-landing
-```
+The paired check scripts are safe to run repeatedly. They inspect Compose
+service state and require all five Stratus buckets to be visible through the
+trusted RGW HTTPS endpoint using the prebuilt rclone client.
 
 ### `scripts/verify/verify-java.sh`
 
-The Java verification script is also safe to run repeatedly. It starts the pinned verifier image, which executes the prebuilt storage verifier artifact with the environment and truststore configured by Compose. Artifact construction and publication happen in the build system before this script is run.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-set -a
-. ./.env
-set +a
-
-runtime="${COMPOSE_IMPLEMENTATION:-docker}"
-if [ "$runtime" = "podman" ]; then
-  compose_cmd="podman compose"
-elif [ "$runtime" = "docker" ]; then
-  compose_cmd="docker compose"
-elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  compose_cmd="docker compose"
-else
-  compose_cmd="podman compose"
-fi
-
-$compose_cmd run --rm verifier
-```
+The paired Java verification scripts are safe to run repeatedly. They capture
+the runtime, image identities, Ceph status, and OSD tree; wait until the RGW
+hostname resolves from the one-off verifier container; run the pinned verifier
+image; and persist the twelve-check JSON report plus the timestamped rolling
+log. Artifact construction and publication happen before this script runs.
 
 ### `scripts/lifecycle/shutdown.sh`
 
-The shutdown script is idempotent. It stops the developer harness without deleting `.env`, certificates, or local source files.
+The paired shutdown scripts are idempotent and work even when `.env` is absent.
+They remove this Compose project's containers and network while preserving
+cluster volumes, `.env`, certificates, evidence, and source files. Destructive
+cleanup is a separate explicit `reset -Force` or `reset --force` operation.
+
+The checked-in scripts are the normative implementation; this document does
+not duplicate their source. Git records the Bash scripts as executable, and
+`.gitattributes` enforces LF working-tree endings. If permissions are lost in
+an exported source archive on Linux, restore them with:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-if [ -f ".env" ]; then
-  set -a
-  . ./.env
-  set +a
-fi
-
-runtime="${COMPOSE_IMPLEMENTATION:-docker}"
-if [ "$runtime" = "podman" ]; then
-  compose_cmd="podman compose"
-elif [ "$runtime" = "docker" ]; then
-  compose_cmd="docker compose"
-elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  compose_cmd="docker compose"
-elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
-  compose_cmd="podman compose"
-else
-  echo "No Compose runtime found; nothing to stop."
-  exit 0
-fi
-
-$compose_cmd --profile verification down --remove-orphans
-```
-
-After writing the scripts, mark them executable on Linux or WSL:
-
-```bash
-chmod +x scripts/lifecycle/startup.sh scripts/verify/bootstrap-buckets.sh scripts/verify/check.sh scripts/verify/verify-java.sh scripts/verify/verify-security.sh scripts/lifecycle/shutdown.sh
+find scripts -type f -name '*.sh' -exec chmod +x {} +
 ```
 
 Start the harness:
@@ -1115,11 +998,30 @@ Run the Java security negatives. This uses the same prebuilt image with delibera
 scripts/verify/verify-security.sh
 ```
 
+Run the daemon-level resilience drill after changes to Ceph topology,
+health-checking, proxying, or recovery behavior:
+
+```bash
+scripts/verify/failure-drill.sh
+```
+
 Stop the harness:
 
 ```bash
 scripts/lifecycle/shutdown.sh
 ```
+
+Shutdown preserves the cluster volumes. Use the explicit destructive reset
+only when a fresh cluster is intended:
+
+```bash
+scripts/lifecycle/reset.sh --force
+```
+
+After changing the harness scripts, run `scripts/verify/selftest.sh` with the
+harness stopped and its disposable volumes removed. The self-test verifies
+certificate renewal, rejection of a vacuous security verifier, and teardown
+without `.env`.
 
 The verifier container copies the base JVM truststore to `/tmp/stratus-cacerts`, imports `stratus-ca.crt`, and points Java at that temporary truststore through `JAVA_TOOL_OPTIONS` before executing the prebuilt verifier JAR. Do not add `--no-verify-ssl` or disable Java TLS validation in routine tests; that would bypass a core Increment 1 requirement.
 
@@ -1131,7 +1033,7 @@ For Docker Desktop, expected developer evidence is:
 - Java verification passes with TLS validation enabled
 - no secrets are committed to the repository
 
-For Podman developer workstations, capture the same evidence with the equivalent `podman compose` commands.
+For Podman developer workstations, capture the same evidence with the equivalent `podman compose` commands. Do not describe Podman as qualified until that complete lifecycle has passed and its runtime evidence has been retained.
 
 ### What Compose validates
 
@@ -1461,7 +1363,7 @@ This section is the executable work breakdown for Increment 1. The technical sec
 | `P1-1.3-D2` | `P1-1.3` | Developer | Configure the Compose-cluster RGW HTTPS proxy and apply the developer certificate. Done when trusted clients connect and plaintext/insecure paths are rejected. | Storage owner | `P1-1.3-D1`, `P1-1.2-D2` | `platform/ceph/compose-cluster/ceph/nginx.conf`; Compose TLS mounts | TLS handshake, CA validation, HTTPS S3 list, negative HTTP or untrusted-CA test | D5 | Security owner | Trusted HTTPS passed; untrusted CA was rejected and plaintext RGW was not published; security acceptance remains | Verified |
 | `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and acceptance-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | developer RGW users plus `platform/ceph/compose-cluster/scripts/verify/bootstrap-buckets.*` and `verify-security.*` | Bucket/user inventory plus invalid-credential and cross-identity denial reports | D6, D8, D9 | Security owner | Positive operations, invalid credentials, and cross-identity HTTP 403 passed in the developer environment; canonical evidence indexing and security acceptance remain | Built |
 | `P1-1.2-D3` | `P1-1.2` | Developer | Implement the idempotent Compose Ceph and client/verifier harness. Done when startup, check, verifier, shutdown, reset, and repeated startup succeed without manual repair. | Developer-platform owner | `P1-1.3-D1`, `P1-1.4-D1`, `P1-1.6-S1` | `platform/ceph/compose-cluster/compose.yaml`; `.env.template`; lifecycle scripts | Compose validation, real Ceph daemon health, HTTPS S3 round trip, clean reset/start transcript, no Compose build configuration | D3, D12 | Platform owner | Empty-volume recreation, rclone, and the externally prebuilt Java verifier passed; reset/shutdown also remove profiled verifier containers; formal image publication remains outside this task | Verified |
-| `P1-1.6-D1` | `P1-1.6` | Developer | Run the Java storage contract suite from the published verifier image. Done when all bucket, object, multipart, TLS, and access-boundary tests pass. | Quality engineering owner | `P1-1.2-D3` | `verification/storage/`; `platform/ceph/compose-cluster/evidence/` | Image reference, 100% coverage report, twelve-check live report, invalid-auth/policy/TLS reports, persistent debug log | D10, D12 | Data platform owner | 39 Java tests plus live object, pagination, concurrency, multipart, invalid-auth, cross-identity, and untrusted-TLS checks pass from the developer-built image; immutable registry publication remains deferred under `P1-0.1` | Built |
+| `P1-1.6-D1` | `P1-1.6` | Developer | Run the Java storage contract suite from the published verifier image. Done when all bucket, object, multipart, TLS, and access-boundary tests pass. | Quality engineering owner | `P1-1.2-D3` | `verification/storage/`; `platform/ceph/compose-cluster/evidence/` | Image reference, 100% coverage report, twelve-check live report, invalid-auth/policy/TLS reports, persistent debug log | D10, D12 | Data platform owner | 18 storage-verifier tests and 15 repository guardrail tests pass; live object, pagination, concurrency, multipart, invalid-auth, cross-identity, and untrusted-TLS checks also pass from the developer-built image. Immutable registry publication remains deferred under `P1-0.1` | Built |
 | `P1-1.6-D2` | `P1-1.6` | Developer | Run storage-only concurrency, multipart, small-object, and prefix-listing baselines. Done when declared thresholds pass or an owned decision record accepts a variance. | Performance engineering owner | `P1-1.6-D1` | `verification/storage/`; benchmark result bundle | Raw runs, p50/p95/p99, throughput, errors/retries, object counts, environment manifest | D11 | Platform owner | Functional eight-way concurrency, forced pagination, multipart, throttling retry, and bounded timeout checks pass; quantitative latency/throughput/object-count thresholds and benchmark evidence remain | In progress |
 | `P1-1.5-D1` | `P1-1.5` | Developer | Exercise health observation and the supported local MON, RGW, and OSD failure/recovery paths. Done when degradation, client continuity, and recovery match the documented behavior. | Operations owner | `P1-1.2-D2`, `P1-1.6-D1` | Local drill record and health snapshots | Two-of-three quorum, RGW failover client checks, before/during/after OSD `ceph status`, client read/write, final clean PG state | D13, D14 | Operations owner | Verified two-MON quorum, rclone/Java success with one RGW and one OSD offline, and recovery to `HEALTH_OK`; single-host profile cannot prove physical-host failure | Verified |
 | `P1-1.G-D` | `P1-1` | Developer | Review and accept the developer gate. Done only when D1-D14 have producing accepted tasks and no evidence is missing. | Platform owner | `P1-1.6-D2`, `P1-1.5-D1` | Developer gate record | Gate-to-task matrix, evidence index, open-risk review | D1-D14 | Platform and data-platform owners | Any open blocking defect keeps the gate open | Not started |
@@ -1551,6 +1453,27 @@ No production dataset should be onboarded based only on a single-host or non-sec
 - Confirm load balancer or DNS alias points to healthy RGW nodes.
 - Confirm firewall access to the RGW HTTPS port.
 - Confirm TLS certificate SAN includes the endpoint hostname.
+- For a verifier-only `UnknownHostException`, use the current paired
+  `verify-java` script, which performs a bounded DNS readiness probe from the
+  one-off verifier container. If that probe expires, inspect the
+  `stratus-ceph-local_ceph` network and the `rgw-proxy` network alias instead of
+  adding an ad hoc container hosts entry.
+
+### Git Bash rewrites a container path
+
+- A path such as `/certs/stratus-ca.crt` appearing as
+  `C:/Program Files/Git/certs/stratus-ca.crt` means a raw Compose command
+  bypassed the shared Bash wrapper or the scripts are stale.
+- Run the checked-in lifecycle and verification scripts. Keep the
+  `MSYS_NO_PATHCONV` and `cygpath` handling in `scripts/lib/common.sh`.
+- Keep `.gitattributes` configured with `*.sh text eol=lf`; `/usr/bin/env:
+  'bash\r'` or visible `^M` indicates that CRLF reached a Linux container.
+
+### Docker Desktop works while Ubuntu WSL is stopped
+
+- This is expected. PowerShell and Git for Windows Bash invoke Docker Desktop
+  directly; the user's Ubuntu WSL distribution is not part of the harness
+  prerequisite or lifecycle.
 
 ### TLS validation fails
 

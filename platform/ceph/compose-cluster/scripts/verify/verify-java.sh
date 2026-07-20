@@ -41,6 +41,23 @@ cat >"$environment_evidence" <<EOF
 EOF
 log "Environment: $environment_evidence"
 
+# A newly created one-off container can briefly precede Docker's network DNS
+# registration. Probe from the verifier image so the contract run starts only
+# after the exact container/network boundary it depends on is ready.
+endpoint_host="${CEPH_RGW_ENDPOINT#*://}"
+endpoint_host="${endpoint_host%%/*}"
+endpoint_host="${endpoint_host%%:*}"
+for attempt in {1..10}; do
+  if compose run --rm --no-deps -T --entrypoint /bin/sh verifier \
+      -c 'getent hosts "$1" >/dev/null 2>&1' _ "$endpoint_host"; then
+    break
+  fi
+  if [[ "$attempt" -eq 10 ]]; then
+    fail "Verifier container could not resolve RGW endpoint host: $endpoint_host"
+  fi
+  sleep 1
+done
+
 set +e
 compose run --rm --no-deps -T \
   -e "STRATUS_EVIDENCE_FILE=/evidence/storage-verification-${timestamp}.json" \

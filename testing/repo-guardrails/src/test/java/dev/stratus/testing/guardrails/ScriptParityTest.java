@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
 @Tag("unit")
 final class ScriptParityTest {
 
-    private static final Path LOCAL = Repo.root().resolve(Path.of("platform", "ceph", "local"));
-    private static final Path SCRIPTS = LOCAL.resolve("scripts");
+    private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "compose-cluster"));
+    private static final Path SCRIPTS = HARNESS.resolve("scripts");
     private static final Pattern JAR_PATH = Pattern.compile("/opt/stratus/[A-Za-z0-9._-]+\\.jar");
     private static final Pattern EVIDENCE_PREFIX = Pattern.compile("storage-[a-z][a-z-]*-(?=[$\"'{])");
     private static final List<String> SERVICES = List.of("s3client", "verifier", "verifier-untrusted");
@@ -37,7 +37,9 @@ final class ScriptParityTest {
     @Test
     void everyScriptShipsAsAPair() {
         List<String> violations = new ArrayList<>();
-        for (String base : scriptBaseNames()) {
+        Set<String> baseNames = scriptBaseNames();
+        assertTrue(!baseNames.isEmpty(), "No harness scripts were discovered; check the configured harness path");
+        for (String base : baseNames) {
             for (String extension : List.of(".ps1", ".sh")) {
                 if (!SCRIPTS.resolve(base + extension).toFile().isFile()) {
                     violations.add(base + extension + " is missing; every script ships as a .ps1/.sh pair");
@@ -50,14 +52,22 @@ final class ScriptParityTest {
     @Test
     void bashScriptsFailFast() {
         List<String> violations = new ArrayList<>();
+        String attributes = Repo.read(Repo.root().resolve(".gitattributes"));
+        if (attributes.lines().map(String::trim).noneMatch("*.sh text eol=lf"::equals)) {
+            violations.add(".gitattributes must enforce LF working-tree endings for container-mounted shell scripts");
+        }
         for (Path script : Repo.trackedFiles()) {
-            if (!script.startsWith(LOCAL) || !script.getFileName().toString().endsWith(".sh")) {
+            if (!script.startsWith(HARNESS) || !script.getFileName().toString().endsWith(".sh")) {
                 continue;
             }
             List<String> lines = Repo.read(script).lines().toList();
             if (lines.size() < 2 || !lines.get(0).startsWith("#!") || !lines.get(1).equals("set -euo pipefail")) {
                 violations.add(script + " must start with a shebang followed by 'set -euo pipefail'");
             }
+        }
+        String common = Repo.read(SCRIPTS.resolve(Path.of("lib", "common.sh")));
+        if (!common.contains("MSYS_NO_PATHCONV=1") || !common.contains("cygpath -w")) {
+            violations.add("common.sh must preserve container paths while passing host paths to Docker from Git Bash");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
