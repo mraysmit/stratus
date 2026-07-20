@@ -227,7 +227,7 @@ Expected output: none.
 - `CephRgwIntegrationTest` is the product-compatibility boundary: the full S3
   contract, missing-bucket detection, both security negatives, evidence
   writing, and exit semantics, all against the live local cluster
-  (`platform/ceph/local`). It is not selected by the default local
+  (`platform/ceph/developer`). It is not selected by the default local
   regression command.
 - Mockito, all other mocking frameworks, and simulated S3 endpoints of any
   kind are prohibited. Tests against a simulated Ceph are worthless as

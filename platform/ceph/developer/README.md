@@ -1,6 +1,6 @@
-# Local Docker Ceph/RGW Environment
+# Ceph/RGW Developer Environment
 
-This is the disposable local Ceph developer environment. It deploys a genuine Ceph Tentacle 20.2.2 cluster locally in Docker, exposes RGW through trusted HTTPS, and runs prebuilt S3 client and Stratus verifier images against it.
+This is the disposable Ceph developer environment. It deploys a genuine Ceph Tentacle 20.2.2 cluster on one developer workstation using Docker or Podman, exposes RGW through trusted HTTPS, and runs prebuilt S3 client and Stratus verifier images against it.
 
 It does not use an S3 mock and it does not require an external Ceph endpoint.
 
@@ -80,7 +80,7 @@ Compose never builds the verifier or runs Maven. The build system produces the v
 
 ## What it proves
 
-- the selected Ceph release starts in local Docker
+- the selected Ceph release starts in the developer Compose environment
 - MON, MGR, BlueStore OSD, and RGW are genuine Ceph daemons
 - all three monitors form quorum and one monitor can be lost without losing quorum
 - one manager is active and the second is standby
@@ -94,7 +94,7 @@ Compose never builds the verifier or runs Maven. The build system produces the v
 - Java rejects invalid credentials and cannot list a bucket owned by a separate RGW identity
 - Java rejects the RGW certificate when the lab CA is absent
 - SDK throttling retries, individual HTTP attempts, operation timing, status, and request IDs are covered by protocol tests and debug logs; connection, socket, attempt, and total-call timeouts are bounded
-- the prebuilt Stratus verifier runs against a realistic local Ceph target
+- the prebuilt Stratus verifier runs against a realistic developer Ceph target
 - startup, shutdown, and destructive reset are repeatable
 
 ## What it does not prove
@@ -138,7 +138,7 @@ On Windows, certificate generation uses host OpenSSL when available and otherwis
 For a complete, self-contained guide to every test and validation process for
 this module — the static and JVM tests, this live harness, the live Maven
 contract test, and the harness self-test, each with how to run it, what it does,
-and the expected results — see [ceph_local_validation_and_test_approach.md](ceph_local_validation_and_test_approach.md).
+and the expected results — see [ceph_developer_validation_and_test_approach.md](ceph_developer_validation_and_test_approach.md).
 
 ## Scripts
 
@@ -179,7 +179,7 @@ In the order you meet them:
 
 ## Workflow
 
-From `platform/ceph/local`:
+From `platform/ceph/developer`:
 
 PowerShell:
 
@@ -269,7 +269,7 @@ https://object-store.stratus.local:8444
 
 To open it from the host machine:
 
-1. Start the harness. From this directory (`platform/ceph/local`), run:
+1. Start the harness. From this directory (`platform/ceph/developer`), run:
 
    PowerShell:
 

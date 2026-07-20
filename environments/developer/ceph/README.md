@@ -1,6 +1,6 @@
 # Developer Ceph Overlay
 
-The selected developer profile is the disposable genuine Ceph/RGW environment in `platform/ceph/local/compose.yaml`. It runs locally with Docker Desktop or Docker Engine and does not depend on an external RGW endpoint.
+The selected developer profile is the disposable genuine Ceph/RGW environment in `platform/ceph/developer/compose.yaml`. It runs on a developer workstation with Docker Desktop, Docker Engine, or Podman and does not depend on an external RGW endpoint.
 
 Local credentials, generated certificates, private keys, Ceph volumes, and evidence remain in ignored files or Docker-managed volumes. Do not record secret values here.
 
