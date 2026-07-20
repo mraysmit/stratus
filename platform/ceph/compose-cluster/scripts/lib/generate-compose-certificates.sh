@@ -25,10 +25,10 @@ needs_renewal() {
 }
 if needs_renewal "$ca_key" "$ca_cert"; then
   if [ -f "$ca_cert" ]; then
-    echo "Existing lab CA is expiring; regenerating it. Re-import $ca_cert wherever the old CA was trusted." >&2
+    echo "Existing Compose CA is expiring; regenerating it. Re-import $ca_cert wherever the old CA was trusted." >&2
   fi
   openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 \
-    -subj "/CN=Stratus Disposable Lab CA" -keyout "$ca_key" -out "$ca_cert"
+    -subj "/CN=Stratus Disposable Compose CA" -keyout "$ca_key" -out "$ca_cert"
   rm -f "$rgw_key" "$rgw_cert"
 fi
 if needs_renewal "$rgw_key" "$rgw_cert"; then
@@ -50,4 +50,4 @@ elif command -v podman >/dev/null 2>&1; then
 else
   fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/install-prerequisites.sh, then retry certificate generation."
 fi
-log "Disposable lab certificate is current. Apply $HARNESS_DIR/certs/object-store.stratus.local.crt and its protected key to RGW; clients receive only $HARNESS_DIR/certs/stratus-ca.crt."
+log "Disposable Compose certificate is current. Apply $HARNESS_DIR/certs/object-store.stratus.local.crt and its protected key to RGW; clients receive only $HARNESS_DIR/certs/stratus-ca.crt."

@@ -25,10 +25,10 @@ needs_renewal() {
 }
 if needs_renewal "$ca_key" "$ca_cert"; then
   if [ -f "$ca_cert" ]; then
-    echo "Existing lab CA is expiring; regenerating it. Re-import $ca_cert wherever the old CA was trusted." >&2
+    echo "Existing Compose CA is expiring; regenerating it. Re-import $ca_cert wherever the old CA was trusted." >&2
   fi
   openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 \
-    -subj "/CN=Stratus Disposable Lab CA" -keyout "$ca_key" -out "$ca_cert"
+    -subj "/CN=Stratus Disposable Compose CA" -keyout "$ca_key" -out "$ca_cert"
   rm -f "$rgw_key" "$rgw_cert"
 fi
 if needs_renewal "$rgw_key" "$rgw_cert"; then
@@ -44,10 +44,10 @@ openssl verify -CAfile "$ca_cert" "$rgw_cert"
 if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) {
     $runtime = if (Get-Command docker -ErrorAction SilentlyContinue) { 'docker' }
         elseif (Get-Command podman -ErrorAction SilentlyContinue) { 'podman' }
-        else { throw 'OpenSSL, Docker, or Podman is required to generate the disposable lab certificate.' }
+        else { throw 'OpenSSL, Docker, or Podman is required to generate the disposable Compose certificate.' }
     & $runtime run --rm --volume "${harness}:/work" --workdir /work --entrypoint /bin/bash $cephImage -c $generator
     if ($LASTEXITCODE -ne 0) { throw 'Containerized certificate generation failed' }
-    Write-HarnessLog 'Disposable lab certificate is current (generated via the pinned Ceph image).'
+    Write-HarnessLog 'Disposable Compose certificate is current (generated via the pinned Ceph image).'
     return
 }
 
@@ -69,9 +69,9 @@ function Test-RenewalNeeded([string]$KeyPath, [string]$CertPath) {
 
 if (Test-RenewalNeeded $caKey $caCert) {
     if (Test-Path -LiteralPath $caCert) {
-        Write-Warning "Existing lab CA is expiring; regenerating it. Re-import $caCert wherever the old CA was trusted."
+        Write-Warning "Existing Compose CA is expiring; regenerating it. Re-import $caCert wherever the old CA was trusted."
     }
-    & openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 -subj '/CN=Stratus Disposable Lab CA' -keyout $caKey -out $caCert
+    & openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 -subj '/CN=Stratus Disposable Compose CA' -keyout $caKey -out $caCert
     if ($LASTEXITCODE -ne 0) { throw 'CA generation failed' }
     Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $rgwKey, $rgwCert
 }
@@ -91,4 +91,4 @@ try {
     & icacls $private /inheritance:r /grant:r "${currentUser}:(OI)(CI)F" *> $null
 } catch { }
 
-Write-HarnessLog "Disposable lab certificate is current. Apply $rgwCert and its protected key to RGW; clients receive only $caCert."
+Write-HarnessLog "Disposable Compose certificate is current. Apply $rgwCert and its protected key to RGW; clients receive only $caCert."

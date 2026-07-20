@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     Write-HarnessLog "Added generated dashboard credentials to $envFile"
 }
 # Idempotent: generates on first run, renews when a certificate nears expiry.
-& (Join-Path $PSScriptRoot '../lib/generate-lab-certificates.ps1')
+& (Join-Path $PSScriptRoot '../lib/generate-compose-certificates.ps1')
 Import-HarnessEnvironment
 Assert-HarnessSubnetFree
 New-Item -ItemType Directory -Force -Path (Join-Path $script:HarnessDir 'evidence') | Out-Null

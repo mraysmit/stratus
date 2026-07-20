@@ -45,7 +45,7 @@ cleanup() {
 trap cleanup EXIT
 
 scenario "near-expiry leaf certificate renews while preserving the CA"
-"$lib_dir/generate-lab-certificates.sh" >/dev/null
+"$lib_dir/generate-compose-certificates.sh" >/dev/null
 ca_before="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
 printf 'subjectAltName=DNS:object-store.stratus.local\nextendedKeyUsage=serverAuth\n' >"$HARNESS_DIR/private/rgw-extensions.cnf"
 openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.local" \
@@ -53,7 +53,7 @@ openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.
 openssl_run x509 -req -sha256 -days 3 -in certs/object-store.stratus.local.csr \
   -CA certs/stratus-ca.crt -CAkey private/stratus-lab-ca.key -CAcreateserial \
   -extfile private/rgw-extensions.cnf -out certs/object-store.stratus.local.crt
-"$lib_dir/generate-lab-certificates.sh" >/dev/null
+"$lib_dir/generate-compose-certificates.sh" >/dev/null
 openssl_run x509 -checkend 604800 -noout -in certs/object-store.stratus.local.crt >/dev/null \
   || fail "Leaf certificate was not renewed although it was within the renewal window"
 ca_after="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
