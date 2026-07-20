@@ -1,7 +1,7 @@
 name: stratus-ceph-local
 
 # Local developer harness only. Two patterns here are deliberate local
-# shortcuts and must not be replicated in lab or production deployments:
+# shortcuts and must not be replicated in acceptance or production deployments:
 # credentials injected as plain environment variables (use file-based secrets
 # there), and the full-privilege admin keyring shared with every daemon via
 # the ceph-config volume (distribute per-daemon keyrings there).

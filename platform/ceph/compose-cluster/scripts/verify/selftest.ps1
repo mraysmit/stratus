@@ -41,7 +41,7 @@ $movedEnv = $null
 try {
     Write-Host ''
     Write-HarnessLog '=== SELFTEST: near-expiry leaf certificate renews while preserving the CA ==='
-    & (Join-Path $PSScriptRoot '../lib/generate-lab-certificates.ps1') | Out-Null
+    & (Join-Path $PSScriptRoot '../lib/generate-compose-certificates.ps1') | Out-Null
     $caBefore = Invoke-OpenSsl -Arguments @('x509', '-sha256', '-fingerprint', '-noout', '-in', 'certs/stratus-ca.crt')
     [IO.File]::WriteAllText((Join-Path $script:HarnessDir 'private\rgw-extensions.cnf'),
         "subjectAltName=DNS:object-store.stratus.local`nextendedKeyUsage=serverAuth`n")
@@ -51,7 +51,7 @@ try {
     Invoke-OpenSsl -Arguments @('x509', '-req', '-sha256', '-days', '3', '-in', 'certs/object-store.stratus.local.csr',
         '-CA', 'certs/stratus-ca.crt', '-CAkey', 'private/stratus-lab-ca.key', '-CAcreateserial',
         '-extfile', 'private/rgw-extensions.cnf', '-out', 'certs/object-store.stratus.local.crt')
-    & (Join-Path $PSScriptRoot '../lib/generate-lab-certificates.ps1') | Out-Null
+    & (Join-Path $PSScriptRoot '../lib/generate-compose-certificates.ps1') | Out-Null
     Invoke-OpenSsl -AllowFailure -Arguments @('x509', '-checkend', '604800', '-noout',
         '-in', 'certs/object-store.stratus.local.crt') | Out-Null
     if ($script:OpenSslExitCode -ne 0) {

@@ -33,7 +33,7 @@ tls_output="$(compose run --rm --no-deps -T verifier-untrusted \
 tls_exit=$?
 set -e
 {
-  log "Untrusted TLS negative-test capture: output of a verifier run WITHOUT the lab CA; the PKIX failure below is the expected, asserted result."
+  log "Untrusted TLS negative-test capture: output of a verifier run WITHOUT the Compose CA; the PKIX failure below is the expected, asserted result."
   printf '%s\n' "$tls_output"
 } | tee "${evidence_dir}/storage-untrusted-tls-${timestamp}.log"
 if [ "$tls_exit" -ne 2 ]; then

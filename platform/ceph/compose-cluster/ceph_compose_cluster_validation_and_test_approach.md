@@ -1,11 +1,11 @@
-# Stratus Ceph Developer Environment: Testing and Validation Guide
+# Stratus Ceph Compose Cluster: Testing and Validation Guide
 
 - Author: Mark Raysmith
 - Created: 2026-07-15
 - Last updated: 2026-07-15
 
 This is the complete, self-contained guide to every test and validation process
-that applies to the Ceph/RGW developer module in `platform/ceph/developer`. It
+that applies to the Ceph/RGW Compose cluster in `platform/ceph/compose-cluster`. It
 assumes no prior knowledge of this module. If you have never run anything here,
 start at [Who this is for](#who-this-is-for) and read straight through; if you
 just want commands, jump to [Run everything, in order](#run-everything-in-order).
@@ -101,7 +101,7 @@ and they can disagree (for example, a working image built from stale source).
 - The harness subnet `172.28.0.0/24` must be free. Startup fails early and names
   the offending network if something else already holds it.
 
-**For Layer 3 additionally:** the JVM running Maven must trust the lab CA, and
+**For Layer 3 additionally:** the JVM running Maven must trust the Compose CA, and
 the live environment variables from
 [maven_test_commands.md](../../../docs/reference/maven_test_commands.md) must be
 set. See [Layer 3](#layer-3-live-maven-contract-test-docker).
@@ -229,14 +229,14 @@ buckets, checks cluster health, and runs the **prebuilt verifier image** against
 the live endpoint for both the positive S3 contract and the three security
 negatives.
 
-Run every command from the `platform/ceph/developer` directory.
+Run every command from the `platform/ceph/compose-cluster` directory.
 
 ### The sequence
 
 PowerShell:
 
 ```powershell
-cd platform\ceph\developer
+cd platform\ceph\compose-cluster
 .\scripts\lifecycle\startup.ps1
 .\scripts\verify\bootstrap-buckets.ps1
 .\scripts\verify\check.ps1
@@ -248,7 +248,7 @@ cd platform\ceph\developer
 bash:
 
 ```bash
-cd platform/ceph/developer
+cd platform/ceph/compose-cluster
 ./scripts/lifecycle/startup.sh
 ./scripts/verify/bootstrap-buckets.sh
 ./scripts/verify/check.sh
@@ -270,7 +270,7 @@ lines are included), use the one-liner from the [README](README.md#workflow).
   `.env` is ACL-restricted to the current user; on Linux/macOS it is `chmod
   600`.
 - It runs the certificate generator, which is idempotent: it creates the
-  disposable lab CA and RGW server certificate on first run and renews them when
+  disposable Compose CA and RGW server certificate on first run and renews them when
   within seven days of expiry. Leaf renewal preserves the existing CA.
 - It fails early, naming the offender, if a foreign Docker network already holds
   the `172.28.0.0/24` harness subnet.
@@ -333,7 +333,7 @@ output are supposed to be there.
 |---|---|---|---|
 | 1 | `AUTH_FAILURE` (deliberately invalid secret) | RGW rejects the bad credentials | `storage-invalid-credentials-<ts>.json` |
 | 2 | `ACCESS_DENIED` | The verifier is denied listing a bucket owned by a separate identity | `storage-cross-identity-denial-<ts>.json` |
-| 3 | `verifier-untrusted` service (no lab CA) | The JVM rejects the RGW certificate (fails closed on TLS) | `storage-untrusted-tls-<ts>.log` |
+| 3 | `verifier-untrusted` service (no Compose CA) | The JVM rejects the RGW certificate (fails closed on TLS) | `storage-untrusted-tls-<ts>.log` |
 
 The script asserts on evidence **content**, not just exit codes. For tests 1 and
 2 it requires the report to contain `"name":"...","passed":true` (meaning the
@@ -369,7 +369,7 @@ bucket policy, object semantics, multipart, or timeout behavior.
 
 ### Requirements
 
-The cluster from Layer 2 must be up, the JVM running Maven must trust the lab CA,
+The cluster from Layer 2 must be up, the JVM running Maven must trust the Compose CA,
 and these variables must be set (see
 [maven_test_commands.md](../../../docs/reference/maven_test_commands.md)):
 
@@ -429,14 +429,14 @@ lose). Then:
 PowerShell:
 
 ```powershell
-cd platform\ceph\developer
+cd platform\ceph\compose-cluster
 .\scripts\verify\selftest.ps1
 ```
 
 bash:
 
 ```bash
-cd platform/ceph/developer
+cd platform/ceph/compose-cluster
 ./scripts/verify/selftest.sh
 ```
 
@@ -470,7 +470,7 @@ A complete local validation from a clean state, in dependency order:
 ```text
 1. Build the verifier image            (one-time / after verifier source changes)
 2. mvnw clean verify                   Layer 1  — no Docker
-3. cd platform/ceph/developer
+3. cd platform/ceph/compose-cluster
 4. scripts/lifecycle/startup                     Layer 2  — boots the cluster
 5. scripts/verify/bootstrap-buckets
 6. scripts/verify/check

@@ -1,6 +1,6 @@
-# Ceph/RGW Developer Environment
+# Ceph/RGW Compose Cluster
 
-This is the disposable Ceph developer environment. It deploys a genuine Ceph Tentacle 20.2.2 cluster on one developer workstation using Docker or Podman, exposes RGW through trusted HTTPS, and runs prebuilt S3 client and Stratus verifier images against it.
+This is the disposable Ceph Compose cluster. It deploys a genuine Ceph Tentacle 20.2.2 cluster using Docker or Podman Compose, exposes RGW through trusted HTTPS, and runs prebuilt S3 client and Stratus verifier images against it. The current profile uses one container engine on one infrastructure host while preserving genuine Ceph daemon, quorum, replication, gateway, degradation, and recovery behavior.
 
 It does not use an S3 mock and it does not require an external Ceph endpoint.
 
@@ -74,7 +74,7 @@ of it, or exercise it as a client:
 | `rgw-proxy` | An nginx reverse proxy that provides the HTTPS endpoint `https://object-store.stratus.local:8443`: it holds the TLS certificate, decrypts incoming requests, and forwards them to whichever RGW is available. It also fronts the Ceph Dashboard on port `8444`, forwarding to whichever manager is active |
 | `s3client` | A container with rclone, a command-line S3 client, used by the scripts to run bucket and object operations against the cluster |
 | `verifier` | The prebuilt Stratus Java verifier: runs the automated S3 contract checks against the cluster and writes the evidence reports |
-| `verifier-untrusted` | The same verifier image but deliberately missing the lab CA certificate — its only job is to prove that TLS connections are rejected when the server's certificate cannot be verified |
+| `verifier-untrusted` | The same verifier image but deliberately missing the Compose CA certificate — its only job is to prove that TLS connections are rejected when the server's certificate cannot be verified |
 
 Compose never builds the verifier or runs Maven. The build system produces the verifier image before it is deployed here.
 
@@ -92,7 +92,7 @@ Compose never builds the verifier or runs Maven. The build system produces the v
 - missing-object behavior, zero-byte and 1 MiB objects, overwrite, Unicode/special-character keys, PUT, GET, HEAD, forced pagination, multipart upload, and confirmed DELETE work through RGW
 - one shared Java client completes eight concurrent PUT/GET/HEAD sequences
 - Java rejects invalid credentials and cannot list a bucket owned by a separate RGW identity
-- Java rejects the RGW certificate when the lab CA is absent
+- Java rejects the RGW certificate when the Compose CA is absent
 - SDK throttling retries, individual HTTP attempts, operation timing, status, and request IDs are covered by protocol tests and debug logs; connection, socket, attempt, and total-call timeouts are bounded
 - the prebuilt Stratus verifier runs against a realistic developer Ceph target
 - startup, shutdown, and destructive reset are repeatable
@@ -107,7 +107,7 @@ The environment is a multi-container cluster on one Docker host. It proves daemo
 - external load-balancer or Docker-host failover
 - production durability, capacity, performance, PKI, backup, restore, or operations
 
-Those are handled by the separate representative-lab and production cephadm tasks.
+Those are handled by the separate acceptance and production cephadm tasks.
 
 ## Prerequisites
 
@@ -138,7 +138,7 @@ On Windows, certificate generation uses host OpenSSL when available and otherwis
 For a complete, self-contained guide to every test and validation process for
 this module — the static and JVM tests, this live harness, the live Maven
 contract test, and the harness self-test, each with how to run it, what it does,
-and the expected results — see [ceph_developer_validation_and_test_approach.md](ceph_developer_validation_and_test_approach.md).
+and the expected results — see [ceph_compose_cluster_validation_and_test_approach.md](ceph_compose_cluster_validation_and_test_approach.md).
 
 ## Scripts
 
@@ -174,12 +174,12 @@ In the order you meet them:
 | `lifecycle/reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
 | `verify/failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
 | `verify/selftest` | Verifies the harness scripts' own runtime behavior (see "Harness self-test") | After changing the scripts |
-| `lib/generate-lab-certificates` | Creates or renews the lab CA and server certificate | Called by startup; rarely run directly |
+| `lib/generate-compose-certificates` | Creates or renews the disposable Compose CA and server certificate | Called by startup; rarely run directly |
 | `lib/common` | Shared helpers sourced by the other scripts | Never directly |
 
 ## Workflow
 
-From `platform/ceph/developer`:
+From `platform/ceph/compose-cluster`:
 
 PowerShell:
 
@@ -269,7 +269,7 @@ https://object-store.stratus.local:8444
 
 To open it from the host machine:
 
-1. Start the harness. From this directory (`platform/ceph/developer`), run:
+1. Start the harness. From this directory (`platform/ceph/compose-cluster`), run:
 
    PowerShell:
 
@@ -313,7 +313,7 @@ To open it from the host machine:
    `CEPH_DASHBOARD_USER` and `CEPH_DASHBOARD_PASSWORD`. The password is a
    per-machine disposable secret generated by startup, like the S3 keys.
 
-The certificate is issued by the harness's own disposable lab CA, so the
+The certificate is issued by the harness's own disposable Compose CA, so the
 browser will warn that it is untrusted. For this local-only environment it is
 fine to click through the warning. To remove it instead, import
 `certs/stratus-ca.crt` into the browser or OS trust store — but only ever

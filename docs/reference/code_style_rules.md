@@ -103,7 +103,7 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Tests MUST NOT verify call choreography against framework-generated mocks.
 - Tests MUST NOT substitute hand-written test doubles for Stratus-owned interfaces; behavior MUST be exercised through the real production implementation.
 - Tests MUST NOT simulate a product's protocol endpoint. In-process or scripted stand-ins for Ceph, Iceberg, Spark, Airflow, Trino, Kafka, Flink, Atlas, Ranger, Keycloak, or any other deployed product are prohibited: a test against a simulated product is worthless as verification.
-- Behavior that depends on a product MUST be tested against the live product — for Ceph RGW, the developer Docker cluster in `platform/ceph/developer`.
+- Behavior that depends on a product MUST be tested against the live product — for Ceph RGW, the Compose cluster in `platform/ceph/compose-cluster`.
 - Real environmental failures (an unreachable address, a closed port, an unwritable path) are not simulations and MAY be used to test failure handling.
 
 ### 7.3 Coverage and test layers
