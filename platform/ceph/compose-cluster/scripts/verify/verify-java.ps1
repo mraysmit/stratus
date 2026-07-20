@@ -47,6 +47,23 @@ try { $cephVersion = (Invoke-HarnessCompose exec -T mon1 ceph version) -join ' '
 } | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath $environmentEvidence
 Write-HarnessLog "Environment: $environmentEvidence"
 
+# Probe from the verifier image because a newly created one-off container can
+# briefly precede Docker's network DNS registration.
+$endpointHost = ([Uri]$env:CEPH_RGW_ENDPOINT).DnsSafeHost
+$dnsReady = $false
+foreach ($attempt in 1..10) {
+    & $invocation.Runtime @($invocation.BaseArgs) run --rm --no-deps -T `
+        --entrypoint /bin/sh verifier -c 'getent hosts "$1" >/dev/null 2>&1' _ $endpointHost
+    if ($LASTEXITCODE -eq 0) {
+        $dnsReady = $true
+        break
+    }
+    Start-Sleep -Seconds 1
+}
+if (-not $dnsReady) {
+    throw "Verifier container could not resolve RGW endpoint host: $endpointHost"
+}
+
 & $invocation.Runtime @($invocation.BaseArgs) run --rm --no-deps -T `
     -e "STRATUS_EVIDENCE_FILE=/evidence/storage-verification-$timestamp.json" `
     verifier java -jar /opt/stratus/storage-verifier.jar
