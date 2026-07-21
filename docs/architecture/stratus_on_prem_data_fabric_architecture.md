@@ -1,5 +1,10 @@
 # On-Prem Data Fabric Architecture
 
+- Author: Mark Raysmith
+- Created: 2026-03-20
+- Last updated: 2026-07-21
+- Status: Active — governing architecture baseline for Phases 1-3
+
 ## 1. Executive Summary
 
 This document defines a pragmatic on-prem data fabric architecture built around **Ceph RGW object storage**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus optional **Firebolt Core** serving layer.
@@ -648,6 +653,8 @@ Firebolt should sit **northbound of Iceberg** and serve curated data products. I
 - when the operating model is already too heavy
 - when the platform has not yet proven a stable curated layer and a real low-latency concurrency requirement
 
+> **TODO:** Evaluate **ClickHouse** as an alternative to Firebolt Core for this optional acceleration and serving layer. ClickHouse is open source, on-prem deployable, and serves low-latency, high-concurrency analytics; the evaluation must compare Iceberg read support, governance fit, and operating cost before Phase 3 commits to a serving engine.
+
 ---
 
 ## 5. Data Quality Subsystem
@@ -941,6 +948,7 @@ Reference:
 - implements the Iceberg REST Catalog open API specification natively — no vendor lock-in at the catalog layer
 - Apache-incubated open source project with strong Iceberg ecosystem alignment
 - designed as a multi-engine catalog; Spark, Flink, and Trino all connect via the standard REST Catalog interface
+- enables zero-copy data sharing: every engine reads and writes the single physical copy of each Iceberg table in Ceph RGW through the catalog, with credential vending, so datasets are shared across engines and teams without exports, replicas, or per-engine copies. Iceberg's safe multi-engine table access is what makes this possible; Polaris provides the shared control point
 - supports fine-grained access control at the catalog and namespace level
 - on-prem deployable without commercial licensing requirements
 - strategically cleaner than embedding catalog behavior in engine-local configurations
