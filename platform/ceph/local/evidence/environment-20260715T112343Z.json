@@ -1,0 +1,396 @@
+{
+  "description": "Stratus verification environment snapshot: the runtime, images, and Ceph cluster state that produced the storage-verification evidence with the same timestamp",
+  "timestamp": "20260715T112343Z",
+  "rgwEndpoint": "https://object-store.stratus.local:8443",
+  "composeRuntime": "docker",
+  "runtimeVersion": "Docker version 29.6.1, build 8900f1d",
+  "platform": "linux/amd64",
+  "cephImage": "quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644",
+  "cephImageResolved": "quay.io/ceph/ceph@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644",
+  "verifierImage": "stratus/storage-verifier:dev",
+  "verifierImageResolved": "stratus/storage-verifier@sha256:a4fa435efa5212ec7096a2236e2112c5b2cfd9a702d195217a8b0a08f3759658",
+  "cephVersion": "ceph version 20.2.2 (0fcffee29411e3a38036764817b6e1afc59741cc) tentacle (stable - RelWithDebInfo)",
+  "cephStatus": {
+    "fsid": "ee17fb8c-75c4-4205-a20c-6d9dde2bf124",
+    "health": {
+      "status": "HEALTH_OK",
+      "checks": {},
+      "mutes": []
+    },
+    "election_epoch": 24,
+    "quorum": [
+      0,
+      1,
+      2
+    ],
+    "quorum_names": [
+      "mon1",
+      "mon2",
+      "mon3"
+    ],
+    "quorum_age": 38,
+    "monmap": {
+      "epoch": 1,
+      "min_mon_release_name": "tentacle",
+      "num_mons": 3
+    },
+    "osdmap": {
+      "epoch": 260,
+      "num_osds": 3,
+      "num_up_osds": 3,
+      "osd_up_since": 1784114591,
+      "num_in_osds": 3,
+      "osd_in_since": 1784108149,
+      "num_remapped_pgs": 0
+    },
+    "pgmap": {
+      "pgs_by_state": [
+        {
+          "state_name": "active+clean",
+          "count": 225
+        }
+      ],
+      "num_pgs": 225,
+      "num_pools": 8,
+      "num_objects": 329,
+      "data_bytes": 31968029,
+      "bytes_used": 166981632,
+      "bytes_avail": 3054243840,
+      "bytes_total": 3221225472,
+      "read_bytes_sec": 140602,
+      "write_bytes_sec": 0,
+      "read_op_per_sec": 149,
+      "write_op_per_sec": 68
+    },
+    "fsmap": {
+      "epoch": 1,
+      "btime": "2026-07-15T09:35:39:094318+0000",
+      "by_rank": [],
+      "up:standby": 0
+    },
+    "mgrmap": {
+      "available": true,
+      "num_standbys": 1,
+      "modules": [
+        "iostat",
+        "nfs"
+      ],
+      "services": {}
+    },
+    "servicemap": {
+      "epoch": 14,
+      "modified": "2026-07-15T19:23:33.948298+08:00",
+      "services": {
+        "mgr": {
+          "daemons": {
+            "summary": "",
+            "mgr1": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            },
+            "mgr2": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            }
+          }
+        },
+        "mon": {
+          "daemons": {
+            "summary": "",
+            "mon1": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            },
+            "mon2": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            },
+            "mon3": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            }
+          }
+        },
+        "osd": {
+          "daemons": {
+            "summary": "",
+            "0": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            },
+            "1": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            },
+            "2": {
+              "start_epoch": 0,
+              "start_stamp": "0.000000",
+              "gid": 0,
+              "addr": "(unrecognized address family 0)/0",
+              "metadata": {},
+              "task_status": {}
+            }
+          }
+        },
+        "rgw": {
+          "daemons": {
+            "summary": "",
+            "54535": {
+              "start_epoch": 12,
+              "start_stamp": "2026-07-15T18:49:16.159669+08:00",
+              "gid": 54535,
+              "addr": "172.28.0.41:0/897975334",
+              "metadata": {
+                "arch": "x86_64",
+                "ceph_release": "tentacle",
+                "ceph_version": "ceph version 20.2.2 (0fcffee29411e3a38036764817b6e1afc59741cc) tentacle (stable - RelWithDebInfo)",
+                "ceph_version_short": "20.2.2",
+                "cpu": "12th Gen Intel(R) Core(TM) i7-1255U",
+                "distro": "centos",
+                "distro_description": "CentOS Stream 9",
+                "distro_version": "9",
+                "frontend_config#0": "beast endpoint=0.0.0.0:8080",
+                "frontend_type#0": "beast",
+                "hostname": "rgw1",
+                "id": "rgw1",
+                "kernel_description": "#1 SMP PREEMPT_DYNAMIC Wed Jun 17 23:14:00 UTC 2026",
+                "kernel_version": "6.18.35.2-microsoft-standard-WSL2",
+                "mem_swap_kb": "4194304",
+                "mem_total_kb": "16286324",
+                "num_handles": "1",
+                "os": "Linux",
+                "pid": "1",
+                "realm_id": "",
+                "realm_name": "",
+                "zone_id": "00127e6a-6f9f-41ee-b5ae-423c1ddcf363",
+                "zone_name": "default",
+                "zonegroup_id": "d777a0d0-247b-418b-b61e-09482c376b0e",
+                "zonegroup_name": "default"
+              },
+              "task_status": {}
+            },
+            "54549": {
+              "start_epoch": 12,
+              "start_stamp": "2026-07-15T18:49:16.201783+08:00",
+              "gid": 54549,
+              "addr": "172.28.0.42:0/3437395742",
+              "metadata": {
+                "arch": "x86_64",
+                "ceph_release": "tentacle",
+                "ceph_version": "ceph version 20.2.2 (0fcffee29411e3a38036764817b6e1afc59741cc) tentacle (stable - RelWithDebInfo)",
+                "ceph_version_short": "20.2.2",
+                "cpu": "12th Gen Intel(R) Core(TM) i7-1255U",
+                "distro": "centos",
+                "distro_description": "CentOS Stream 9",
+                "distro_version": "9",
+                "frontend_config#0": "beast endpoint=0.0.0.0:8080",
+                "frontend_type#0": "beast",
+                "hostname": "rgw2",
+                "id": "rgw2",
+                "kernel_description": "#1 SMP PREEMPT_DYNAMIC Wed Jun 17 23:14:00 UTC 2026",
+                "kernel_version": "6.18.35.2-microsoft-standard-WSL2",
+                "mem_swap_kb": "4194304",
+                "mem_total_kb": "16286324",
+                "num_handles": "1",
+                "os": "Linux",
+                "pid": "1",
+                "realm_id": "",
+                "realm_name": "",
+                "zone_id": "00127e6a-6f9f-41ee-b5ae-423c1ddcf363",
+                "zone_name": "default",
+                "zonegroup_id": "d777a0d0-247b-418b-b61e-09482c376b0e",
+                "zonegroup_name": "default"
+              },
+              "task_status": {}
+            },
+            "64568": {
+              "start_epoch": 14,
+              "start_stamp": "2026-07-15T19:23:32.480411+08:00",
+              "gid": 64568,
+              "addr": "172.28.0.42:0/3855543870",
+              "metadata": {
+                "arch": "x86_64",
+                "ceph_release": "tentacle",
+                "ceph_version": "ceph version 20.2.2 (0fcffee29411e3a38036764817b6e1afc59741cc) tentacle (stable - RelWithDebInfo)",
+                "ceph_version_short": "20.2.2",
+                "cpu": "12th Gen Intel(R) Core(TM) i7-1255U",
+                "distro": "centos",
+                "distro_description": "CentOS Stream 9",
+                "distro_version": "9",
+                "frontend_config#0": "beast endpoint=0.0.0.0:8080",
+                "frontend_type#0": "beast",
+                "hostname": "rgw2",
+                "id": "rgw2",
+                "kernel_description": "#1 SMP PREEMPT_DYNAMIC Wed Jun 17 23:14:00 UTC 2026",
+                "kernel_version": "6.18.35.2-microsoft-standard-WSL2",
+                "mem_swap_kb": "4194304",
+                "mem_total_kb": "16286324",
+                "num_handles": "1",
+                "os": "Linux",
+                "pid": "1",
+                "realm_id": "",
+                "realm_name": "",
+                "zone_id": "00127e6a-6f9f-41ee-b5ae-423c1ddcf363",
+                "zone_name": "default",
+                "zonegroup_id": "d777a0d0-247b-418b-b61e-09482c376b0e",
+                "zonegroup_name": "default"
+              },
+              "task_status": {}
+            },
+            "64575": {
+              "start_epoch": 14,
+              "start_stamp": "2026-07-15T19:23:32.505936+08:00",
+              "gid": 64575,
+              "addr": "172.28.0.41:0/2186163848",
+              "metadata": {
+                "arch": "x86_64",
+                "ceph_release": "tentacle",
+                "ceph_version": "ceph version 20.2.2 (0fcffee29411e3a38036764817b6e1afc59741cc) tentacle (stable - RelWithDebInfo)",
+                "ceph_version_short": "20.2.2",
+                "cpu": "12th Gen Intel(R) Core(TM) i7-1255U",
+                "distro": "centos",
+                "distro_description": "CentOS Stream 9",
+                "distro_version": "9",
+                "frontend_config#0": "beast endpoint=0.0.0.0:8080",
+                "frontend_type#0": "beast",
+                "hostname": "rgw1",
+                "id": "rgw1",
+                "kernel_description": "#1 SMP PREEMPT_DYNAMIC Wed Jun 17 23:14:00 UTC 2026",
+                "kernel_version": "6.18.35.2-microsoft-standard-WSL2",
+                "mem_swap_kb": "4194304",
+                "mem_total_kb": "16286324",
+                "num_handles": "1",
+                "os": "Linux",
+                "pid": "1",
+                "realm_id": "",
+                "realm_name": "",
+                "zone_id": "00127e6a-6f9f-41ee-b5ae-423c1ddcf363",
+                "zone_name": "default",
+                "zonegroup_id": "d777a0d0-247b-418b-b61e-09482c376b0e",
+                "zonegroup_name": "default"
+              },
+              "task_status": {}
+            }
+          }
+        }
+      }
+    },
+    "progress_events": {}
+  },
+  "osdTree": {
+    "nodes": [
+      {
+        "id": -1,
+        "name": "default",
+        "type": "root",
+        "type_id": 11,
+        "children": [
+          -4,
+          -2,
+          -3
+        ]
+      },
+      {
+        "id": -3,
+        "name": "osd1",
+        "type": "host",
+        "type_id": 1,
+        "pool_weights": {},
+        "children": [
+          0
+        ]
+      },
+      {
+        "id": 0,
+        "device_class": "hdd",
+        "name": "osd.0",
+        "type": "osd",
+        "type_id": 0,
+        "crush_weight": 0.0009918212890625,
+        "depth": 2,
+        "pool_weights": {},
+        "exists": 1,
+        "status": "up",
+        "reweight": 1,
+        "primary_affinity": 1
+      },
+      {
+        "id": -2,
+        "name": "osd2",
+        "type": "host",
+        "type_id": 1,
+        "pool_weights": {},
+        "children": [
+          1
+        ]
+      },
+      {
+        "id": 1,
+        "device_class": "hdd",
+        "name": "osd.1",
+        "type": "osd",
+        "type_id": 0,
+        "crush_weight": 0.0009918212890625,
+        "depth": 2,
+        "pool_weights": {},
+        "exists": 1,
+        "status": "up",
+        "reweight": 1,
+        "primary_affinity": 1
+      },
+      {
+        "id": -4,
+        "name": "osd3",
+        "type": "host",
+        "type_id": 1,
+        "pool_weights": {},
+        "children": [
+          2
+        ]
+      },
+      {
+        "id": 2,
+        "device_class": "hdd",
+        "name": "osd.2",
+        "type": "osd",
+        "type_id": 0,
+        "crush_weight": 0.0009918212890625,
+        "depth": 2,
+        "pool_weights": {},
+        "exists": 1,
+        "status": "up",
+        "reweight": 1,
+        "primary_affinity": 1
+      }
+    ],
+    "stray": []
+  }
+}

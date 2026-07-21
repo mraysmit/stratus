@@ -1,0 +1,1 @@
+{"description":"Stratus negative security evidence (cross-identity denial): success=true means Ceph RGW denied the verifier access to a bucket owned by a separate identity","timestamp":"2026-07-15T11:45:40.501022763Z","success":true,"checks":[{"name":"cross-identity-access-denied","passed":true,"detail":"Ceph RGW denied listing a bucket owned by a separate identity"}]}
