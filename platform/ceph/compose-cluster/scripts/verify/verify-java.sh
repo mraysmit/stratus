@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
 source "$(dirname "$0")/../lib/common.sh"
+
+# Runs the real Java storage verifier against the live cluster and records
+# the evidence pair the README contract requires: the verification result and
+# an environment snapshot proving which runtime, images, and cluster state
+# produced it. A failed run renames its evidence *-FAILED so a later passing
+# run can never be mistaken for it.
+
 load_environment
 mkdir -p "$HARNESS_DIR/evidence"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
