@@ -11,6 +11,7 @@ if [[ ! -f "$HARNESS_DIR/.env" ]]; then
     -e "s|^CEPH_DASHBOARD_PASSWORD=.*|CEPH_DASHBOARD_PASSWORD=$(rand_hex 20)|" \
     "$HARNESS_DIR/.env.template" >"$HARNESS_DIR/.env"
   chmod 600 "$HARNESS_DIR/.env"
+  harden_windows_acl "$HARNESS_DIR/.env"
   log "Generated $HARNESS_DIR/.env with per-machine disposable credentials"
 elif ! grep -q '^CEPH_DASHBOARD_PASSWORD=' "$HARNESS_DIR/.env"; then
   # Backfill for .env files generated before the dashboard existed.
