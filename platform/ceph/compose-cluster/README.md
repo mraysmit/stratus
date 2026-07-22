@@ -170,6 +170,15 @@ container-side paths such as `/certs` and `/evidence`. Run the supplied scripts
 instead of reconstructing their `docker compose` calls. The repository
 `.gitattributes` keeps every `.sh` file at LF endings for Linux containers.
 
+On Windows 11 the recommended terminal is **Git Bash**, ideally hosted in a
+Windows Terminal profile (Windows Terminal usually auto-detects Git Bash and
+adds one). PowerShell or cmd work as an outer shell that launches
+`bash scripts/lifecycle/startup.sh`, but they cannot execute `.sh` scripts
+natively, and PowerShell ports of the scripts must not reappear (ADR-P1-002).
+Running the harness from WSL bash is not the validated path: the path handling
+in `scripts/lib/common.sh` is MSYS-specific (`cygpath` does not exist in WSL)
+and Docker Desktop volume-mount paths behave differently there.
+
 ## Configuration
 
 The first startup creates the ignored `.env` file from `.env.template`, replacing the credential placeholders with generated per-machine disposable secrets. The endpoint is:
