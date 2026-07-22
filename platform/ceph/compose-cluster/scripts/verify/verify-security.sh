@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
 source "$(dirname "$0")/../lib/common.sh"
+
+# Three negative tests against the live cluster: invalid credentials, a
+# cross-identity access attempt, and an untrusted TLS trust store. The
+# failures are real product behavior, not simulations, and each must fail
+# for the asserted reason. A verifier exit code alone is never trusted —
+# the recorded evidence is grepped for the specific denial, so a vacuous
+# verifier that exits cleanly without proving anything is rejected
+# (selftest.sh exercises exactly that regression).
+
 load_environment
 
 evidence_dir="${HARNESS_DIR}/evidence"
@@ -27,6 +38,9 @@ grep -qs '"name":"cross-identity-access-denied","passed":true' "$policy_evidence
   || fail "Verifier exited successfully but the evidence does not show the cross-identity denial: $policy_evidence"
 
 log "=== NEGATIVE TEST 3/3: untrusted TLS — PKIX certificate errors below are EXPECTED ==="
+# The verifier reserves exit code 2 for transport-layer failure. Requiring 2
+# (not just non-zero) plus the PKIX pattern proves the run died in the TLS
+# handshake and not on credentials, buckets, or a crash.
 set +e
 tls_output="$(compose run --rm --no-deps -T verifier-untrusted \
   java -jar /opt/stratus/storage-verifier.jar 2>&1)"

@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
+
+# Installs the host OpenSSL CLI used for certificate generation. Optional:
+# the certificate script falls back to running openssl inside the pinned Ceph
+# image when the host has none, so this exists to make local generation fast
+# and to give air-gapped hosts a documented path.
 
 if command -v openssl >/dev/null 2>&1; then
   printf 'OpenSSL is already installed: %s\n' "$(openssl version)"
