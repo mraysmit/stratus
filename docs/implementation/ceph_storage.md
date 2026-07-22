@@ -797,13 +797,13 @@ Do not treat this disposable single-host cluster as the production deployment. I
 Developer prerequisites:
 
 - Docker Desktop with Docker Compose v2 enabled
-- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows
+- Bash on Linux, macOS, WSL, or Git for Windows
 - sufficient Docker memory and disk for the official Ceph image and three disposable 1 GiB BlueStore volumes
 - generated local CA/server certificate files in ignored paths
 - disposable RGW credentials in the ignored local `.env` file
 - the pinned storage verifier image is available from the approved registry
 
-For Windows workstations, use either PowerShell or Git for Windows Bash. Both command surfaces run directly against Docker Desktop; a user Ubuntu WSL distribution does not need to be running. The Bash scripts centralize MSYS path handling so Windows host paths reach `docker.exe` in Windows form while container paths such as `/certs` and `/evidence` remain Linux paths. Do not reconstruct the underlying Compose invocation outside the supplied scripts. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
+For Windows workstations, run the scripts from Git for Windows Bash (harness scripts ship as a single bash implementation per ADR-P1-002; PowerShell users invoke them as `bash scripts/lifecycle/startup.sh`). Git Bash runs directly against Docker Desktop; a user Ubuntu WSL distribution does not need to be running. The Bash scripts centralize MSYS path handling so Windows host paths reach `docker.exe` in Windows form while container paths such as `/certs` and `/evidence` remain Linux paths. Do not reconstruct the underlying Compose invocation outside the supplied scripts. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
 
 The complete PowerShell and Git Bash lifecycle was validated on 2026-07-20 with Docker Desktop: cluster startup, bucket bootstrap and smoke checks, all twelve Java S3 contract checks, three security-negative checks, RGW/MON/OSD failure drills and recovery, shutdown, destructive reset, and the harness self-test. This evidence does not qualify Podman; Podman remains a separate runtime compatibility path.
 
@@ -829,22 +829,22 @@ platform/ceph/compose-cluster/
   certs/                     # ignored generated public certificates
   private/                   # ignored generated private keys
   evidence/                  # ignored verifier evidence
-  scripts/                   # each script ships as a .ps1/.sh pair
+  scripts/                   # bash-only harness scripts (ADR-P1-002)
     lib/
-      common.{ps1,sh}
-      generate-compose-certificates.{ps1,sh}
+      common.sh
+      generate-compose-certificates.sh
     lifecycle/
-      install-prerequisites.{ps1,sh}
-      reset.{ps1,sh}
-      shutdown.{ps1,sh}
-      startup.{ps1,sh}
+      install-prerequisites.sh
+      reset.sh
+      shutdown.sh
+      startup.sh
     verify/
-      bootstrap-buckets.{ps1,sh}
-      check.{ps1,sh}
-      failure-drill.{ps1,sh}
-      selftest.{ps1,sh}
-      verify-java.{ps1,sh}
-      verify-security.{ps1,sh}
+      bootstrap-buckets.sh
+      check.sh
+      failure-drill.sh
+      selftest.sh
+      verify-java.sh
+      verify-security.sh
 ```
 
 The directory should be created once and then reused by developers. `.env` and private key material are local files and must not be committed.
@@ -921,7 +921,7 @@ keys restricted. Client and verifier containers receive only
 `certs/stratus-ca.crt`; only `rgw-proxy` mounts the endpoint private key.
 
 The generator uses host OpenSSL when available and falls back to the pinned
-Ceph image. The paired `install-prerequisites` script provides explicit host
+Ceph image. The `install-prerequisites` script provides explicit host
 installation instructions when OpenSSL itself is required. Validate the
 generated public CA at any time with:
 
@@ -931,33 +931,33 @@ openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
 
 ### `scripts/lifecycle/startup.sh`
 
-The paired startup scripts are idempotent. They create `.env` from the template
-when absent, generate disposable credentials, create or renew the local CA and
-endpoint certificate, reject a conflicting harness subnet, start the complete
-cluster, and wait for every required service health gate. Certificate renewal
+The startup script is idempotent. It creates `.env` from the template
+when absent, generates disposable credentials, creates or renews the local CA and
+endpoint certificate, rejects a conflicting harness subnet, starts the complete
+cluster, and waits for every required service health gate. Certificate renewal
 also verifies that the certificate and private key match. On Git Bash the
 shared wrapper handles Windows host paths and preserves Linux container paths.
 
 ### `scripts/verify/check.sh`
 
-The paired check scripts are safe to run repeatedly. They inspect Compose
-service state and require all five Stratus buckets to be visible through the
+The check script is safe to run repeatedly. It inspects Compose
+service state and requires all five Stratus buckets to be visible through the
 trusted RGW HTTPS endpoint using the prebuilt rclone client.
 
 ### `scripts/verify/verify-java.sh`
 
-The paired Java verification scripts are safe to run repeatedly. They capture
-the runtime, image identities, Ceph status, and OSD tree; wait until the RGW
-hostname resolves from the one-off verifier container; run the pinned verifier
-image; and persist the twelve-check JSON report plus the timestamped rolling
+The Java verification script is safe to run repeatedly. It captures
+the runtime, image identities, Ceph status, and OSD tree; waits until the RGW
+hostname resolves from the one-off verifier container; runs the pinned verifier
+image; and persists the twelve-check JSON report plus the timestamped rolling
 log. Artifact construction and publication happen before this script runs.
 
 ### `scripts/lifecycle/shutdown.sh`
 
-The paired shutdown scripts are idempotent and work even when `.env` is absent.
-They remove this Compose project's containers and network while preserving
+The shutdown script is idempotent and works even when `.env` is absent.
+It removes this Compose project's containers and network while preserving
 cluster volumes, `.env`, certificates, evidence, and source files. Destructive
-cleanup is a separate explicit `reset -Force` or `reset --force` operation.
+cleanup is a separate explicit `reset --force` operation.
 
 The checked-in scripts are the normative implementation; this document does
 not duplicate their source. Git records the Bash scripts as executable, and
@@ -1453,7 +1453,7 @@ No production dataset should be onboarded based only on a single-host or non-sec
 - Confirm load balancer or DNS alias points to healthy RGW nodes.
 - Confirm firewall access to the RGW HTTPS port.
 - Confirm TLS certificate SAN includes the endpoint hostname.
-- For a verifier-only `UnknownHostException`, use the current paired
+- For a verifier-only `UnknownHostException`, use the current
   `verify-java` script, which performs a bounded DNS readiness probe from the
   one-off verifier container. If that probe expires, inspect the
   `stratus-ceph-local_ceph` network and the `rgw-proxy` network alias instead of

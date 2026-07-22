@@ -40,9 +40,9 @@ developer changing the verifier, a reviewer confirming a change is sound, or a
 new contributor who has just cloned the repository. Everything here runs on a
 single workstation. You do not need access to any shared Ceph cluster.
 
-Commands are given for **PowerShell** (Windows, the primary environment) and
-**bash** (Linux/macOS/WSL/Git for Windows). Run the one that matches your shell; they are
-behavior-equivalent twins and a guardrail test enforces that they stay in sync.
+Harness commands are given in **bash** (Linux/macOS/WSL/Git for Windows); the
+harness scripts ship as a single bash implementation (ADR-P1-002). Windows
+users run them from Git Bash, e.g. `bash scripts/lifecycle/startup.sh`.
 
 ## The four validation layers at a glance
 
@@ -110,8 +110,8 @@ and they can disagree (for example, a working image built from stale source).
 - Docker Desktop / Docker Engine with Compose v2 (or Podman with `podman
   compose`; the scripts auto-detect, and `COMPOSE_IMPLEMENTATION=docker|podman`
   forces a choice).
-- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows. Git Bash is
-  supported directly against Docker Desktop and does not require a running WSL
+- Bash on Linux, macOS, WSL, or Git for Windows. Git Bash is supported
+  directly against Docker Desktop and does not require a running WSL
   distribution.
 - Enough Docker memory and disk for the official Ceph image and three 1 GiB
   disposable BlueStore volumes.
@@ -211,7 +211,7 @@ checks in
 | `DocumentationLinkTest` | Every relative Markdown link in a tracked doc resolves, and every `#anchor` matches a heading in its target. This is what keeps *this document's* links honest. |
 | `NamingConventionTest` | Implementation docs use capability names (no `incrementN_*.md`), retired names never reappear, and every documented Maven module selector actually exists in the reactor |
 | `HarnessContractTest` | The compose/`.env.template`/script/ignore contract: no dead template variables, the RGW port binds to loopback by default, one-shot vs long-running vs on-demand services declare correct restart/health/hardening policies, secrets are git-ignored, and no key material is tracked |
-| `ScriptParityTest` | Every script ships as a `.ps1`/`.sh` pair, both fail fast, and twins reference the same runtime artifacts (jar path, evidence prefixes, compose services) |
+| `ScriptParityTest` | The single-bash-implementation convention (ADR-P1-002): no `.ps1` script may reappear under the harness script tree, every bash script keeps its shebang and `set -euo pipefail` fail-fast preamble, and `common.sh` keeps its Git Bash path handling |
 
 ### Expected result
 
@@ -235,8 +235,8 @@ A green guardrail run reports `Tests run: 15, Failures: 0, Errors: 0`.
 ### When it fails
 
 The assertion message names the exact problem — a broken doc link with source
-and target, a compose service missing a restart policy, a script twin that
-drifted, a coverage gap. Fix the underlying inconsistency; these tests are the
+and target, a compose service missing a restart policy, a script missing its
+fail-fast preamble, a coverage gap. Fix the underlying inconsistency; these tests are the
 repository's memory of decisions already made, not obstacles to route around.
 
 ## Layer 2: live harness validation (Docker)
@@ -251,20 +251,6 @@ Run every command from the `platform/ceph/compose-cluster` directory.
 
 ### The sequence
 
-PowerShell:
-
-```powershell
-cd platform\ceph\compose-cluster
-.\scripts\lifecycle\startup.ps1
-.\scripts\verify\bootstrap-buckets.ps1
-.\scripts\verify\check.ps1
-.\scripts\verify\verify-java.ps1
-.\scripts\verify\verify-security.ps1
-.\scripts\lifecycle\shutdown.ps1
-```
-
-bash:
-
 ```bash
 cd platform/ceph/compose-cluster
 ./scripts/lifecycle/startup.sh
@@ -275,12 +261,12 @@ cd platform/ceph/compose-cluster
 ./scripts/lifecycle/shutdown.sh
 ```
 
-To capture the whole run as a transcript (note `*>&1`, so PowerShell status
-lines are included), use the one-liner from the [README](README.md#workflow).
+To capture the whole run as a transcript (note `2>&1`, so stderr lines are
+included), use the one-liner from the [README](README.md#workflow).
 
 ### Step by step
 
-**`startup`** — [startup.ps1](scripts/lifecycle/startup.ps1) / [startup.sh](scripts/lifecycle/startup.sh)
+**`startup`** — [startup.sh](scripts/lifecycle/startup.sh)
 
 - On first run it creates the git-ignored `.env` from
   [.env.template](.env.template), replacing the credential placeholders with
@@ -317,8 +303,7 @@ steady-state cluster health target is `HEALTH_OK`, all three OSDs `up`/`in`, all
 placement groups `active+clean` (inspect directly with the commands in the
 [README](README.md#direct-inspection)).
 
-**`verify-java`** — [verify-java.ps1](scripts/verify/verify-java.ps1) /
-[verify-java.sh](scripts/verify/verify-java.sh) — runs the prebuilt verifier image once
+**`verify-java`** — [verify-java.sh](scripts/verify/verify-java.sh) — runs the prebuilt verifier image once
 in `CONTRACT` mode against the live endpoint. It first writes an
 `environment-<timestamp>.json` snapshot (compose runtime and platform, resolved
 Ceph and verifier image digests, `ceph version`, `ceph status`, OSD tree), then
@@ -340,8 +325,7 @@ per check (`name` / `passed` / `detail`):
 evidence to `storage-verification-<timestamp>-FAILED.json`, and stops with a
 non-zero status.
 
-**`verify-security`** — [verify-security.ps1](scripts/verify/verify-security.ps1) /
-[verify-security.sh](scripts/verify/verify-security.sh) — runs three *negative* tests
+**`verify-security`** — [verify-security.sh](scripts/verify/verify-security.sh) — runs three *negative* tests
 where **failure of the operation is the expected, asserted outcome**. Each run
 is bracketed with an `EXPECTED`-failure banner so the transcript self-documents;
 authentication errors, access-denied errors, and PKIX certificate errors in this
@@ -444,15 +428,6 @@ Ensure the harness is fully stopped and its volumes are gone first (run
 `shutdown`, and `reset --force` if you have preserved volumes you are willing to
 lose). Then:
 
-PowerShell:
-
-```powershell
-cd platform\ceph\compose-cluster
-.\scripts\verify\selftest.ps1
-```
-
-bash:
-
 ```bash
 cd platform/ceph/compose-cluster
 ./scripts/verify/selftest.sh
@@ -506,7 +481,7 @@ live Ceph contract, and step 10 when it affects resilience or failover behavior
 (the drill stops a real RGW, monitor, and OSD in turn and requires recovery to
 `HEALTH_OK`). Run step 13 when you change harness scripts. Steps 12–13 are
 destructive to the cluster; `reset` prompts for confirmation unless you pass
-`-Force` (PowerShell) / `--force` (bash).
+`--force`.
 
 ### `shutdown` vs `reset`
 
@@ -550,7 +525,7 @@ section](README.md#evidence) has the full rationale.
 | `Neither Docker Compose nor Podman is available` | No container runtime on PATH | Install Docker/Podman, or set `COMPOSE_IMPLEMENTATION` |
 | `verify-security` fails saying a denial was not shown | A security negative did not deny as required (real regression) — or a genuinely broken cluster | Read the named evidence file; do not treat this as flaky |
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
-| `clean verify` fails in `ScriptParityTest` | A `.ps1`/`.sh` twin drifted or one lacks its fail-fast preamble | Re-sync the twins per the assertion message |
+| `clean verify` fails in `ScriptParityTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
 | `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
 | Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/common.sh` |

@@ -156,7 +156,8 @@ workstation. Podman compatibility remains a separate runtime qualification.
 ## Prerequisites
 
 - Docker Desktop or Docker Engine with Compose v2
-- PowerShell 7+, or Bash on Linux, macOS, WSL, or Git for Windows
+- Bash on Linux, macOS, WSL, or Git for Windows (the scripts are bash-only;
+  PowerShell users run them as `bash scripts/lifecycle/startup.sh`)
 - enough Docker memory and disk for the official Ceph image and three 1 GiB disposable BlueStore volumes
 - a prebuilt verifier image identified by `VERIFIER_IMAGE`
 
@@ -206,8 +207,8 @@ and the expected results — see [ceph_compose_cluster_validation_and_test_appro
 
 Scripts live in two directories with a strict split:
 
-- **`scripts/`** — host-side scripts that you run, each shipped as a
-  `.ps1`/`.sh` pair with identical behavior.
+- **`scripts/`** — host-side scripts that you run, each shipped as a single
+  bash implementation (see ADR-P1-002); Windows users run them from Git Bash.
 - **`ceph/`** — container-side scripts run by Compose *inside* the containers
   (`bootstrap.sh` creates the cluster identity, `configure.sh` creates users
   and pools policy and the dashboard, `daemon.sh` is the entrypoint every
@@ -224,7 +225,7 @@ The host-side scripts are grouped by role:
 
 In the order you meet them:
 
-| Script pair | What it does | When to run it |
+| Script | What it does | When to run it |
 |---|---|---|
 | `lifecycle/install-prerequisites` | Installs OpenSSL if the host lacks it | Once per machine, only if needed |
 | `lifecycle/startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health | First, every session |
@@ -241,20 +242,8 @@ In the order you meet them:
 
 ## Workflow
 
-From `platform/ceph/compose-cluster`:
-
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\startup.ps1
-.\scripts\verify\bootstrap-buckets.ps1
-.\scripts\verify\check.ps1
-.\scripts\verify\verify-java.ps1
-.\scripts\verify\verify-security.ps1
-.\scripts\lifecycle\shutdown.ps1
-```
-
-Bash (Linux, macOS, WSL, or Git for Windows):
+From `platform/ceph/compose-cluster`, in bash (Linux, macOS, WSL, or Git for
+Windows):
 
 ```bash
 ./scripts/lifecycle/startup.sh
@@ -267,25 +256,17 @@ Bash (Linux, macOS, WSL, or Git for Windows):
 
 `shutdown` removes containers and the project network but preserves Ceph volumes so the environment can restart.
 
-Capture run transcripts into the ignored harness-local `logs/` directory (the repository-root `logs/` is reserved for Maven build logs). Use `*>&1` so PowerShell status lines are included:
+Capture run transcripts into the ignored harness-local `logs/` directory (the repository-root `logs/` is reserved for Maven build logs). Use `2>&1` so stderr lines are included:
 
-```powershell
-$timestamp = Get-Date -Format yyyyMMdd-HHmmss
-& { .\scripts\lifecycle\startup.ps1 && .\scripts\verify\bootstrap-buckets.ps1 && .\scripts\verify\check.ps1 && .\scripts\verify\verify-java.ps1 && .\scripts\verify\verify-security.ps1 && .\scripts\lifecycle\shutdown.ps1 } *>&1 |
-    Tee-Object -FilePath "logs\ceph-local-verification-$timestamp.txt"
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+{ ./scripts/lifecycle/startup.sh && ./scripts/verify/bootstrap-buckets.sh && ./scripts/verify/check.sh && ./scripts/verify/verify-java.sh && ./scripts/verify/verify-security.sh && ./scripts/lifecycle/shutdown.sh; } 2>&1 |
+    tee "logs/ceph-local-verification-$timestamp.txt"
 ```
 
 ## Destructive reset
 
 Reset removes only this Compose project's disposable Ceph configuration and data volumes. It preserves `.env`, generated certificates, pulled images, and evidence. It prompts for confirmation unless forced.
-
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\reset.ps1 -Force
-```
-
-Bash:
 
 ```bash
 ./scripts/lifecycle/reset.sh --force
@@ -295,7 +276,7 @@ The next startup creates a new Ceph cluster, the verifier identity, and the sepa
 
 ## Failure drills
 
-`scripts/verify/failure-drill.{ps1,sh}` breaks the real cluster on purpose and
+`scripts/verify/failure-drill.sh` breaks the real cluster on purpose and
 proves it behaves as claimed — nothing is simulated. With the harness running
 and healthy, the drill executes three scenarios in sequence, each bracketed by
 `EXPECTED-DEGRADATION` banners so transcripts self-document:
@@ -318,7 +299,7 @@ production resilience.
 
 ## Harness self-test
 
-`scripts/verify/selftest.{ps1,sh}` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
+`scripts/verify/selftest.sh` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
 
 ## Management console
 
@@ -337,14 +318,6 @@ To open it from the host machine:
 
 1. Start the harness. From this directory (`platform/ceph/compose-cluster`), run:
 
-   PowerShell:
-
-   ```powershell
-   .\scripts\lifecycle\startup.ps1
-   ```
-
-   Bash:
-
    ```bash
    ./scripts/lifecycle/startup.sh
    ```
@@ -362,14 +335,6 @@ To open it from the host machine:
    ```
 
 3. Read the sign-in credentials from the generated `.env`:
-
-   PowerShell:
-
-   ```powershell
-   Select-String -Path .env -Pattern '^CEPH_DASHBOARD_'
-   ```
-
-   Bash:
 
    ```bash
    grep '^CEPH_DASHBOARD_' .env
@@ -405,7 +370,7 @@ the verifier, and the transcripts.
 The authoritative management and inspection interface is the `ceph` command
 line, run inside a monitor container:
 
-```powershell
+```bash
 docker compose --env-file .env -f compose.yaml ps
 docker compose --env-file .env -f compose.yaml exec -T mon1 ceph status
 docker compose --env-file .env -f compose.yaml exec -T mon1 ceph quorum_status

@@ -37,8 +37,9 @@ never a global Maven).
 
 ## Repository conventions (enforced by testing/repo-guardrails)
 
-- Every harness script ships as a `.ps1`/`.sh` pair with identical behavior,
+- Harness scripts are bash-only (`.sh`, no PowerShell twins; ADR-P1-002),
   grouped under `scripts/lifecycle/`, `scripts/verify/`, `scripts/lib/`.
+  On Windows, invoke them from Git Bash (`bash scripts/lifecycle/startup.sh`).
 - No increment-numbered document names; retired names must not reappear
   (see `testing/repo-guardrails/src/test/resources/retired-names.txt`).
 - Published harness ports bind to loopback by default. Never track `.env`,

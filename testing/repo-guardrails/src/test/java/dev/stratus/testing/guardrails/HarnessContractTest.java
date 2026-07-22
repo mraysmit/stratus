@@ -139,18 +139,15 @@ final class HarnessContractTest {
     @Test
     void certificateGeneratorPreservesPublicAndPrivateFileBoundaries() {
         List<String> violations = new ArrayList<>();
-        for (String extension : List.of("ps1", "sh")) {
-            String generator = Repo.read(HARNESS.resolve(
-                "scripts/lib/generate-compose-certificates." + extension));
-            if (!generator.contains("chmod 0644 \"$ca_cert\" \"$rgw_cert\"")) {
-                violations.add(extension + ": public certificates must be readable by non-root client containers");
-            }
-            if (!generator.contains("chmod 0600 \"$ca_key\" \"$rgw_key\"")) {
-                violations.add(extension + ": private keys must remain owner-only");
-            }
-            if (!generator.contains("key_matches_certificate")) {
-                violations.add(extension + ": renewal must repair a certificate that does not match its key");
-            }
+        String generator = Repo.read(HARNESS.resolve("scripts/lib/generate-compose-certificates.sh"));
+        if (!generator.contains("chmod 0644 \"$ca_cert\" \"$rgw_cert\"")) {
+            violations.add("public certificates must be readable by non-root client containers");
+        }
+        if (!generator.contains("chmod 0600 \"$ca_key\" \"$rgw_key\"")) {
+            violations.add("private keys must remain owner-only");
+        }
+        if (!generator.contains("key_matches_certificate")) {
+            violations.add("renewal must repair a certificate that does not match its key");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
