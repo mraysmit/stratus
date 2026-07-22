@@ -1,3 +1,0 @@
-Using a temporary truststore at /tmp/tmp.pW2UKQh20M
-Adding certificate with alias Stratus Disposable Lab CA to the JVM truststore
-{"description":"Stratus negative security evidence (cross-identity denial): success=true means Ceph RGW denied the verifier access to a bucket owned by a separate identity","timestamp":"2026-07-15T11:24:12.092265909Z","success":true,"checks":[{"name":"cross-identity-access-denied","passed":true,"detail":"Ceph RGW denied listing a bucket owned by a separate identity"}]}
