@@ -69,6 +69,22 @@ compose_teardown() {
   fi
 }
 
+# chmod cannot strip inherited NTFS ACLs, so under Git Bash on Windows the
+# secret files additionally get an owner-only icacls grant. Best-effort: ACL
+# hardening must never abort the harness on an exotic filesystem.
+harden_windows_acl() {
+  local target grant account
+  [[ -n "${MSYSTEM:-}" ]] && command -v icacls.exe >/dev/null 2>&1 || return 0
+  account="${USERDOMAIN:-}${USERDOMAIN:+\\}${USERNAME:-$(whoami)}"
+  for target in "$@"; do
+    [[ -e "$target" ]] || continue
+    grant="${account}:F"
+    [[ -d "$target" ]] && grant="${account}:(OI)(CI)F"
+    MSYS_NO_PATHCONV=1 icacls.exe "$(cygpath -w "$target")" \
+      /inheritance:r /grant:r "$grant" >/dev/null 2>&1 || true
+  done
+}
+
 # The harness pins its network to 172.28.0.0/24. A foreign network on that
 # subnet (for example a cluster left running under an old project name) makes
 # 'compose up' fail with a cryptic pool-overlap error; fail early and name it.

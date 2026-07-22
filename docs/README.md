@@ -9,7 +9,7 @@ The repository's top-level directory structure is documented in [Repository Layo
 | Directory | Contents |
 |---|---|
 | [`architecture/`](architecture/) | The system architecture and enduring design constraints. [stratus_on_prem_data_fabric_architecture.md](architecture/stratus_on_prem_data_fabric_architecture.md) is the full architecture specification and records the component selection decisions. |
-| [`decisions/`](decisions/) | Accepted architecture decision records, named `ADR-NNN-short-title.md`. Currently [ADR-P1-001](decisions/ADR-P1-001-ceph-baseline.md), which selects Ceph RGW as the Phase 1 storage baseline. |
+| [`decisions/`](decisions/) | Accepted architecture decision records, named `ADR-NNN-short-title.md`. Currently [ADR-P1-001](decisions/ADR-P1-001-ceph-baseline.md), which selects Ceph RGW as the Phase 1 storage baseline, and [ADR-P1-002](decisions/ADR-P1-002-single-bash-harness-scripts.md), which adopts a single bash implementation for the harness scripts. |
 | [`implementation/`](implementation/) | Phase implementation plans and per-increment implementation documents (see below). Each increment document carries its own implementation task track, verification steps, and acceptance gates. |
 | [`operations/`](operations/) | Operational acceptance documents. [stratus_phase1_operational_readiness.md](operations/stratus_phase1_operational_readiness.md) is the Phase 1 production-readiness checklist and acceptance gate. |
 | [`reference/`](reference/) | Stable repository and platform references that outlive any single phase or increment. |

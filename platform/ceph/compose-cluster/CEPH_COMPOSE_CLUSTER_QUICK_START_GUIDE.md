@@ -25,13 +25,13 @@ guide](ceph_compose_cluster_validation_and_test_approach.md).
 Install or confirm:
 
 - Docker Desktop or Docker Engine with Compose v2
-- PowerShell 7+ on Windows, or Bash on Linux, macOS, WSL, or Git for Windows
+- Bash on Linux, macOS, WSL, or Git for Windows
 - a JDK suitable for the repository build
 - `curl` when using the optional command-line Dashboard connectivity check
 - enough free Docker disk for the Ceph and client images
 - enough free Docker storage for three disposable 1 GiB OSD volumes
 
-Docker Desktop users may use PowerShell or Git Bash directly. Ubuntu WSL does
+Docker Desktop users may use Git Bash directly. Ubuntu WSL does
 not need to be running. Podman is supported by the scripts but is a separate
 runtime qualification; this quick start follows the validated Docker path.
 
@@ -95,13 +95,7 @@ Run all remaining commands from this directory.
 
 ## 4. Start Ceph
 
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\startup.ps1
-```
-
-Bash:
+The harness scripts are bash-only; Windows users run them from Git Bash.
 
 ```bash
 ./scripts/lifecycle/startup.sh
@@ -128,15 +122,6 @@ cluster.
 
 ## 5. Create and Check the Buckets
 
-PowerShell:
-
-```powershell
-.\scripts\verify\bootstrap-buckets.ps1
-.\scripts\verify\check.ps1
-```
-
-Bash:
-
 ```bash
 ./scripts/verify/bootstrap-buckets.sh
 ./scripts/verify/check.sh
@@ -155,15 +140,6 @@ Success prints `READY` during bootstrap and `PASS` for each required Stratus
 bucket during the check.
 
 ## 6. Run the Contract and Security Verification
-
-PowerShell:
-
-```powershell
-.\scripts\verify\verify-java.ps1
-.\scripts\verify\verify-security.ps1
-```
-
-Bash:
 
 ```bash
 ./scripts/verify/verify-java.sh
@@ -205,28 +181,12 @@ keys or private certificate material into tickets or test reports.
 Normal shutdown removes containers and the Compose network but preserves Ceph
 data volumes for the next session.
 
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\shutdown.ps1
-```
-
-Bash:
-
 ```bash
 ./scripts/lifecycle/shutdown.sh
 ```
 
 Use reset only when you intentionally want to delete the disposable cluster
 data and create a fresh cluster on the next startup.
-
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\reset.ps1 -Force
-```
-
-Bash:
 
 ```bash
 ./scripts/lifecycle/reset.sh --force
@@ -235,21 +195,6 @@ Bash:
 Reset preserves `.env`, certificates, pulled images, and existing evidence.
 
 ## 9. Complete Copy-Ready Sequence
-
-PowerShell, starting at the repository root:
-
-```powershell
-$ErrorActionPreference = 'Stop'
-.\mvnw.cmd -pl :stratus-storage-verifier -am package
-docker build -f verification\storage\image\Dockerfile -t stratus/storage-verifier:dev .
-Set-Location platform\ceph\compose-cluster
-.\scripts\lifecycle\startup.ps1
-.\scripts\verify\bootstrap-buckets.ps1
-.\scripts\verify\check.ps1
-.\scripts\verify\verify-java.ps1
-.\scripts\verify\verify-security.ps1
-.\scripts\lifecycle\shutdown.ps1
-```
 
 Bash, starting at the repository root:
 
@@ -271,20 +216,12 @@ cd platform/ceph/compose-cluster
 Run the real RGW, monitor, and OSD outage/recovery drill while the cluster is
 running:
 
-```powershell
-.\scripts\verify\failure-drill.ps1
-```
-
 ```bash
 ./scripts/verify/failure-drill.sh
 ```
 
 After changing harness scripts, stop and reset the cluster, then run the
 destructive harness self-test:
-
-```powershell
-.\scripts\verify\selftest.ps1
-```
 
 ```bash
 ./scripts/verify/selftest.sh
@@ -299,14 +236,6 @@ on port `8444`. It is separate from the S3 endpoint on port `8443`.
 ### Step 1: Start the cluster
 
 From `platform/ceph/compose-cluster`:
-
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\startup.ps1
-```
-
-Bash:
 
 ```bash
 ./scripts/lifecycle/startup.sh
@@ -447,15 +376,6 @@ documentation](https://learning.postman.com/latest-v-12/docs/use/send-requests/a
 ### Step 1: Prepare the running endpoint
 
 Start the cluster and create the buckets before opening Postman:
-
-PowerShell:
-
-```powershell
-.\scripts\lifecycle\startup.ps1
-.\scripts\verify\bootstrap-buckets.ps1
-```
-
-Bash:
 
 ```bash
 ./scripts/lifecycle/startup.sh
