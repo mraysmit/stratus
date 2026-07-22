@@ -61,4 +61,5 @@ elif command -v podman >/dev/null 2>&1; then
 else
   fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/install-prerequisites.sh, then retry certificate generation."
 fi
+harden_windows_acl "$HARNESS_DIR/private"
 log "Disposable Compose certificate is current. Apply $HARNESS_DIR/certs/object-store.stratus.local.crt and its protected key to RGW; clients receive only $HARNESS_DIR/certs/stratus-ca.crt."
