@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
 source "$(dirname "$0")/common.sh"
 
 # Same pinned image compose uses; only needed when host OpenSSL is unavailable.
