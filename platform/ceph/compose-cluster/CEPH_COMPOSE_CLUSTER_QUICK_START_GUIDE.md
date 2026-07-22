@@ -35,6 +35,13 @@ Docker Desktop users may use Git Bash directly. Ubuntu WSL does
 not need to be running. Podman is supported by the scripts but is a separate
 runtime qualification; this quick start follows the validated Docker path.
 
+On Windows 11, run the harness from **Git Bash** — that is the terminal the
+harness is validated on, and the shared script library depends on Git Bash
+(MSYS) path handling. Hosting Git Bash in a Windows Terminal profile gives the
+best day-to-day experience. PowerShell can act as an outer shell
+(`bash scripts/lifecycle/startup.sh`) but cannot run the `.sh` scripts
+natively; WSL bash is not the validated environment for these scripts.
+
 The following local resources must be available:
 
 | Resource | Used for |
