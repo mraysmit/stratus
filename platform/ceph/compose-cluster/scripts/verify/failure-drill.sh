@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
 source "$(dirname "$0")/../lib/common.sh"
 
 # Failure drills against the live cluster: stop real daemons one class at a

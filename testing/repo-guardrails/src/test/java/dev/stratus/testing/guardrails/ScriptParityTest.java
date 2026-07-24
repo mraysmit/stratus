@@ -7,43 +7,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The harness ships every script as a PowerShell/bash pair. These checks catch the drift that actually happens: a missing twin, a missing fail-fast preamble, or twins referencing different runtime artifacts.
+ * Harness scripts ship as a single bash implementation (ADR-P1-002). These checks catch the regressions that matter: a PowerShell twin reappearing, or a bash script losing its fail-fast preamble or Git Bash path handling.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-07-15
- * @version 1.0.0
+ * @version 2.0.0
  */
 @Tag("unit")
 final class ScriptParityTest {
 
     private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "compose-cluster"));
     private static final Path SCRIPTS = HARNESS.resolve("scripts");
-    private static final Pattern JAR_PATH = Pattern.compile("/opt/stratus/[A-Za-z0-9._-]+\\.jar");
-    private static final Pattern EVIDENCE_PREFIX = Pattern.compile("storage-[a-z][a-z-]*-(?=[$\"'{])");
-    private static final List<String> SERVICES = List.of("s3client", "verifier", "verifier-untrusted");
 
     @Test
-    void everyScriptShipsAsAPair() {
+    void harnessScriptsAreBashOnly() {
         List<String> violations = new ArrayList<>();
-        Set<String> baseNames = scriptBaseNames();
-        assertTrue(!baseNames.isEmpty(), "No harness scripts were discovered; check the configured harness path");
-        for (String base : baseNames) {
-            for (String extension : List.of(".ps1", ".sh")) {
-                if (!SCRIPTS.resolve(base + extension).toFile().isFile()) {
-                    violations.add(base + extension + " is missing; every script ships as a .ps1/.sh pair");
-                }
+        List<Path> scripts = scriptFiles();
+        assertTrue(!scripts.isEmpty(), "No harness scripts were discovered; check the configured harness path");
+        for (Path script : Repo.trackedFiles()) {
+            if (script.startsWith(SCRIPTS) && script.getFileName().toString().endsWith(".ps1")) {
+                violations.add(script + " reintroduces a PowerShell twin; harness scripts are bash-only per ADR-P1-002");
             }
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
@@ -72,91 +62,10 @@ final class ScriptParityTest {
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
 
-    @Test
-    void powershellScriptsFailFast() {
-        List<String> violations = new ArrayList<>();
-        for (Path script : scriptFiles()) {
-            if (!script.getFileName().toString().endsWith(".ps1")) {
-                continue;
-            }
-            List<String> statements = Repo.read(script).lines()
-                .map(String::trim)
-                .filter(line -> !line.isEmpty() && !line.startsWith("#"))
-                .toList();
-            int first = statements.isEmpty() || !statements.get(0).startsWith("param(") ? 0 : 1;
-            if (statements.size() <= first
-                || !statements.get(first).equals("$ErrorActionPreference = 'Stop'")) {
-                violations.add(script + " must set $ErrorActionPreference = 'Stop' before any other statement");
-            }
-        }
-        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
-    }
-
-    @Test
-    void twinsReferenceTheSameRuntimeArtifacts() {
-        List<String> violations = new ArrayList<>();
-        for (String base : scriptBaseNames()) {
-            Path shell = SCRIPTS.resolve(base + ".sh");
-            Path powershell = SCRIPTS.resolve(base + ".ps1");
-            if (!shell.toFile().isFile() || !powershell.toFile().isFile()) {
-                continue; // pairing is asserted separately
-            }
-            compareTokens(base, "jar path", tokens(shell, JAR_PATH), tokens(powershell, JAR_PATH), violations);
-            compareTokens(base, "evidence prefix",
-                tokens(shell, EVIDENCE_PREFIX), tokens(powershell, EVIDENCE_PREFIX), violations);
-            compareTokens(base, "compose service",
-                serviceReferences(shell), serviceReferences(powershell), violations);
-        }
-        assertTrue(violations.isEmpty(), () ->
-            "Script twins reference different runtime artifacts:\n" + String.join("\n", violations));
-    }
-
-    /** Slash-normalized paths relative to scripts/, without extension, so twins pair within their subdirectory. */
-    private static Set<String> scriptBaseNames() {
-        Set<String> baseNames = new TreeSet<>();
-        for (Path script : scriptFiles()) {
-            String relative = SCRIPTS.relativize(script).toString().replace('\\', '/');
-            baseNames.add(relative.substring(0, relative.lastIndexOf('.')));
-        }
-        return baseNames;
-    }
-
     private static List<Path> scriptFiles() {
         return Repo.trackedFiles().stream()
             .filter(file -> file.startsWith(SCRIPTS))
-            .filter(file -> {
-                String name = file.getFileName().toString();
-                return name.endsWith(".sh") || name.endsWith(".ps1");
-            })
+            .filter(file -> file.getFileName().toString().endsWith(".sh"))
             .toList();
-    }
-
-    private static Set<String> tokens(Path script, Pattern pattern) {
-        Set<String> tokens = new TreeSet<>();
-        Matcher matcher = pattern.matcher(Repo.read(script));
-        while (matcher.find()) {
-            tokens.add(matcher.group());
-        }
-        return tokens;
-    }
-
-    private static Set<String> serviceReferences(Path script) {
-        String content = Repo.read(script);
-        Set<String> referenced = new HashSet<>();
-        for (String service : SERVICES) {
-            if (Pattern.compile("(?<![A-Za-z0-9_-])" + Pattern.quote(service) + "(?![A-Za-z0-9_-])")
-                .matcher(content).find()) {
-                referenced.add(service);
-            }
-        }
-        return referenced;
-    }
-
-    private static void compareTokens(
-        String base, String kind, Set<String> shell, Set<String> powershell, List<String> violations) {
-        if (!shell.equals(powershell)) {
-            violations.add(base + ": " + kind + " differs between twins — .sh uses " + shell
-                + " but .ps1 uses " + powershell);
-        }
     }
 }

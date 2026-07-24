@@ -2,12 +2,12 @@
 
 - Author: Mark Raysmith
 - Created: 2026-03-20
-- Last updated: 2026-07-21
+- Last updated: 2026-07-22
 - Status: Active — governing architecture baseline for Phases 1-3
 
 ## 1. Executive Summary
 
-This document defines a pragmatic on-prem data fabric architecture built around **Ceph RGW object storage**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus optional **Firebolt Core** serving layer.
+This document defines a pragmatic on-prem data fabric architecture built around **Ceph RGW object storage**, **Apache Iceberg**, **Apache Spark**, **Apache Flink**, a **central REST-oriented Iceberg catalog**, **Apache Atlas**, **Apache Ranger**, **Apache Airflow**, **Trino**, and an optional **Kafka-backed event backbone** plus an optional serving layer (**Firebolt Core** or **ClickHouse**).
 
 The design goal is not to assemble a random list of fashionable tools. The goal is to create a governed, scalable, batch-and-streaming-capable platform that supports:
 
@@ -30,7 +30,7 @@ The recommended architectural position is:
 - **Ranger** is the policy enforcement layer for classification-driven access control
 - **Airflow** is the orchestration and control-plane scheduler
 - **Trino** is the default shared interactive SQL query plane over governed Iceberg datasets
-- **Firebolt Core** is an optional acceleration layer for interactive analytics over Iceberg-backed data
+- **Firebolt Core** or **ClickHouse** is an optional acceleration layer for interactive analytics over Iceberg-backed data; the engine choice is a Phase 3 evaluation decision
 
 The most important decision in this design is to make **Apache Iceberg the foundational abstraction**. Without that, the platform degenerates into a file swamp. Apache Iceberg is explicitly designed as a high-performance table format for large analytic datasets and supports safe multi-engine access from engines including Spark and Flink. The catalog choice is also a first-order design decision, not a later implementation detail. This architecture standardizes on a centrally managed REST-oriented catalog to reduce cross-engine ambiguity. See the Iceberg documentation and multi-engine support references:
 
@@ -63,7 +63,7 @@ A data fabric without cataloguing, ownership, lineage, classification, and enfor
 - Apache Airflow overview: https://airflow.apache.org/
 
 ### 2.6 Query serving is structured in two layers
-The default shared query plane should be **Trino over Iceberg** for open interactive SQL access. If deployed, **Firebolt Core** should sit northbound of curated Iceberg datasets as an optional acceleration and serving layer, not as the foundational storage or governance layer.
+The default shared query plane should be **Trino over Iceberg** for open interactive SQL access. If deployed, the acceleration engine (**Firebolt Core** or **ClickHouse**) should sit northbound of curated Iceberg datasets as an optional acceleration and serving layer, not as the foundational storage or governance layer.
 
 ### 2.7 Platform behavior must be verified by contracts
 Every platform layer should expose a small set of explicit contracts that can be verified automatically: storage buckets and policies, catalog namespaces, table schemas, Spark job outcomes, Airflow DAG behavior, quality gate decisions, query results, lineage publication, and access control. The platform is not considered healthy because services are running; it is healthy when those contracts pass against the live stack.
@@ -219,7 +219,7 @@ Apache Ozone remains a documented superseded alternative. It is reconsidered onl
                          │                                 │
                          ▼               ▼                 ▼
           ┌─────────────────────┐  ┌──────────────┐  ┌──────────────────────┐
-          │   Firebolt Core     │  │    Trino     │  │ Spark SQL / Notebook │
+          │ Firebolt/ClickHouse │  │    Trino     │  │ Spark SQL / Notebook │
           │ low-latency serving │  │ shared query │  │ engineering access   │
           └─────────────────────┘  └──────────────┘  └──────────────────────┘
                          │                 │                 │
@@ -256,7 +256,7 @@ Apache Ozone remains a documented superseded alternative. It is reconsidered onl
   │  metadata control plane         │      │  CDC + event ingestion for Flink     │
   │  consulted by all engines       │◄────►│  Atlas entity change notifications   │
   │  Spark / Flink / Trino /        │      │  (Phase 2: replaces embedded         │
-  │  Maintenance / Firebolt         │      │   Atlas notifier)                    │
+  │  Maintenance / Serving engine   │      │   Atlas notifier)                    │
   └─────────────────────────────────┘      └──────────────────────────────────────┘
             ▲        ▲        ▲
             │        │        │
@@ -596,7 +596,7 @@ Trino is the default open interactive SQL and shared query plane over governed I
 - analyst and BI access to curated datasets
 - shared SQL access across domains
 - ad hoc query and federated read patterns where appropriate
-- open query access when Firebolt is not deployed
+- open query access when no acceleration engine is deployed
 
 ### Design position
 Spark SQL and notebooks remain engineering tools. They should not be treated as the default enterprise interactive query plane.
@@ -624,13 +624,18 @@ Increment 5 should prove that Trino can answer the same business questions as Sp
 
 ---
 
-### 4.10 Firebolt Core
+### 4.10 Query Acceleration Layer — Firebolt Core or ClickHouse
 
 ### Role
-Firebolt Core is an optional high-performance serving engine for interactive SQL over external data and Iceberg datasets.
+The optional query acceleration layer is a high-performance serving engine for interactive SQL over curated Iceberg datasets. Two candidate engines are carried in this architecture:
 
-Reference:
+- **Firebolt Core** — high-performance serving engine for interactive SQL over external data and Iceberg datasets
+- **ClickHouse** — open-source columnar OLAP database with low-latency, high-concurrency analytics and Iceberg table integration
+
+References:
 - Firebolt Iceberg and external data: https://docs.firebolt.io/performance-and-observability/iceberg-and-external-data
+- ClickHouse documentation: https://clickhouse.com/docs
+- ClickHouse Iceberg integration: https://clickhouse.com/docs/en/engines/table-engines/integrations/iceberg
 
 ### Best-fit responsibilities
 - low-latency BI queries
@@ -640,7 +645,7 @@ Reference:
 - query acceleration over Iceberg-backed data
 
 ### Design position
-Firebolt should sit **northbound of Iceberg** and serve curated data products. It should not become the foundational metadata or ingestion layer.
+Whichever engine is selected, the acceleration layer sits **northbound of Iceberg** and serves curated data products. It must not become the foundational metadata or ingestion layer.
 
 ### When it fits well
 - demanding dashboard latency requirements
@@ -653,7 +658,7 @@ Firebolt should sit **northbound of Iceberg** and serve curated data products. I
 - when the operating model is already too heavy
 - when the platform has not yet proven a stable curated layer and a real low-latency concurrency requirement
 
-> **TODO:** Evaluate **ClickHouse** as an alternative to Firebolt Core for this optional acceleration and serving layer. ClickHouse is open source, on-prem deployable, and serves low-latency, high-concurrency analytics; the evaluation must compare Iceberg read support, governance fit, and operating cost before Phase 3 commits to a serving engine.
+> **TODO:** The engine choice between **Firebolt Core** and **ClickHouse** is deliberately open. The Phase 3 acceleration evaluation (Increment 17) must compare the two on Iceberg read support, governance fit, and operating cost before the platform commits to a serving engine.
 
 ---
 
@@ -846,7 +851,7 @@ Consumption-ready data products.
 ### Typical consumers
 - BI dashboards
 - data APIs
-- serving/query engines such as Firebolt
+- serving/query engines such as Firebolt Core or ClickHouse
 - data science and analytics consumers
 
 ### Rule
@@ -897,7 +902,7 @@ Contains:
 - Flink
 - Kafka, Kafka Connect, and Debezium when required by the streaming use case
 - Trino
-- Firebolt serving access
+- acceleration-layer serving access (Firebolt Core or ClickHouse) when deployed
 
 ### 7.2 Metadata and Governance Plane
 Contains:
@@ -1111,7 +1116,7 @@ If control-plane state is not backed up, the platform is not recoverable even if
 4. Spark transforms bronze to silver
 5. Spark or SQL jobs materialise gold tables
 6. Atlas metadata and lineage are updated
-7. Firebolt optionally serves curated gold datasets
+7. the acceleration engine (Firebolt Core or ClickHouse) optionally serves curated gold datasets
 
 ### 11.2 Streaming flow
 This flow applies when a streaming backbone such as Kafka is deployed (typically Phase 2+).
@@ -1122,7 +1127,7 @@ This flow applies when a streaming backbone such as Kafka is deployed (typically
 4. Flink writes bronze or silver Iceberg tables continuously via the Polaris catalog
 5. downstream Spark or Flink jobs materialise higher-order views
 6. Atlas metadata and lineage are synchronised
-7. Firebolt or BI consumers query curated outputs via Trino or directly
+7. the acceleration engine or BI consumers query curated outputs via Trino or directly
 
 ---
 
@@ -1138,7 +1143,7 @@ A realistic on-prem deployment would separate infrastructure by concern.
 ### 12.2 Compute tier
 - Spark cluster for batch compute
 - Flink cluster for stateful stream processing
-- Firebolt Core nodes if deployed
+- Firebolt Core or ClickHouse nodes if the acceleration layer is deployed
 
 ### 12.3 Control tier
 - Airflow API server, DAG processor, scheduler, triggerer, local executor, and metadata DB (PostgreSQL)
@@ -1570,10 +1575,10 @@ An increment document may show a build-system command such as `mvn verify` only 
 
 **Mitigation:** keep Airflow focused on orchestration and control-plane workflows.
 
-### 15.5 Risk: Firebolt adopted too early
+### 15.5 Risk: acceleration layer adopted too early
 **Cause:** performance tooling added before storage, catalog, and governance foundations are stable.
 
-**Mitigation:** keep Firebolt optional and phase it after core platform maturity.
+**Mitigation:** keep the acceleration layer (Firebolt Core or ClickHouse) optional and phase it after core platform maturity.
 
 ### 15.6 Risk: too much platform, not enough product value
 **Cause:** architecture overbuild without domain-aligned data products.
@@ -1625,7 +1630,7 @@ Primary outcome:
 
 ### Phase 3 – Query Acceleration and Data Products
 Deliver:
-- Firebolt Core serving layer if justified
+- acceleration serving layer (Firebolt Core or ClickHouse) if justified
 - curated business marts
 - semantic serving views
 - domain-owned data products
@@ -1658,7 +1663,7 @@ The recommended architecture is:
 - **Apache Spark** for heavy batch compute and historical transforms
 - **Apache Flink** for streaming and real-time computation
 - **Trino** as the default open interactive SQL query plane
-- **Firebolt Core** as an optional serving/query acceleration layer over curated Iceberg datasets
+- **Firebolt Core** or **ClickHouse** as an optional serving/query acceleration layer over curated Iceberg datasets
 
 **Streaming and CDC layer** (Phase 2+)
 - **Apache Kafka** as the durable event backbone
@@ -1722,6 +1727,8 @@ Get them wrong and you will just have an expensive collection of tools.
 - Trino documentation: https://trino.io/docs/current/
 - Trino Iceberg connector: https://trino.io/docs/current/connector/iceberg.html
 - Firebolt external data and Iceberg: https://docs.firebolt.io/performance-and-observability/iceberg-and-external-data
+- ClickHouse documentation: https://clickhouse.com/docs
+- ClickHouse Iceberg integration: https://clickhouse.com/docs/en/engines/table-engines/integrations/iceberg
 - FreeIPA: https://www.freeipa.org/
 - Keycloak: https://www.keycloak.org/
 - Keycloak supported configurations: https://www.keycloak.org/server/supported-configurations
