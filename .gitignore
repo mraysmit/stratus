@@ -89,3 +89,15 @@ Desktop.ini
 
 ### IDE history/backups ###
 /.history/
+
+### Secrets and key material — never track ###
+.env
+.env.*
+!.env.template
+*.key
+*.csr
+*.srl
+*.pem
+*.p12
+*.jks
+platform/ceph/local/private/

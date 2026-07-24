@@ -1,9 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
+
+# Installs the host OpenSSL CLI used for certificate generation. Optional:
+# the certificate script falls back to running openssl inside the pinned Ceph
+# image when the host has none, so this exists to make local generation fast
+# and to give air-gapped hosts a documented path.
 
 if command -v openssl >/dev/null 2>&1; then
   printf 'OpenSSL is already installed: %s\n' "$(openssl version)"
   exit 0
+fi
+
+# Git Bash ships its own openssl, so this branch is rare on Windows; when it
+# does trigger, install via winget rather than a Linux package manager.
+if [[ -n "${MSYSTEM:-}" ]]; then
+  if command -v winget.exe >/dev/null 2>&1; then
+    MSYS_NO_PATHCONV=1 winget.exe install --id ShiningLight.OpenSSL.Light --accept-source-agreements --accept-package-agreements
+    printf 'OpenSSL installed via winget. Start a new shell so PATH updates apply, then run openssl version.\n'
+    exit 0
+  fi
+  printf 'winget is unavailable. Install OpenSSL from https://slproweb.com/products/Win32OpenSSL.html or reinstall Git for Windows (which bundles openssl).\n' >&2
+  exit 1
 fi
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then

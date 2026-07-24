@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Author: Mark Raysmith <raysmith.subs@gmail.com>
+# Date: 2026-07-22
 
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_DIR="$(cd "$HARNESS_DIR/../../.." && pwd)"
@@ -67,6 +69,22 @@ compose_teardown() {
   else
     "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
   fi
+}
+
+# chmod cannot strip inherited NTFS ACLs, so under Git Bash on Windows the
+# secret files additionally get an owner-only icacls grant. Best-effort: ACL
+# hardening must never abort the harness on an exotic filesystem.
+harden_windows_acl() {
+  local target grant account
+  [[ -n "${MSYSTEM:-}" ]] && command -v icacls.exe >/dev/null 2>&1 || return 0
+  account="${USERDOMAIN:-}${USERDOMAIN:+\\}${USERNAME:-$(whoami)}"
+  for target in "$@"; do
+    [[ -e "$target" ]] || continue
+    grant="${account}:F"
+    [[ -d "$target" ]] && grant="${account}:(OI)(CI)F"
+    MSYS_NO_PATHCONV=1 icacls.exe "$(cygpath -w "$target")" \
+      /inheritance:r /grant:r "$grant" >/dev/null 2>&1 || true
+  done
 }
 
 # The harness pins its network to 172.28.0.0/24. A foreign network on that
