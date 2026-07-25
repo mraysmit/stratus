@@ -2,7 +2,7 @@
 
 - Author: Mark Raysmith
 - Created: 2026-07-20
-- Last updated: 2026-07-20
+- Last updated: 2026-07-25
 - Status: Active
 
 Use this guide to start and verify the Stratus Ceph developer environment for
@@ -151,6 +151,8 @@ bucket during the check.
 ```bash
 ./scripts/verify/verify-java.sh
 ./scripts/verify/verify-security.sh
+./scripts/verify/verify-dashboard.sh
+./scripts/verify/verify-dataset.sh
 ```
 
 `verify-java` runs twelve live S3 checks, including bucket discovery, object
@@ -167,6 +169,21 @@ access, and a TLS connection without the local CA. Error output during these
 three scenarios is expected; the script succeeds only when all three attempts
 are rejected for the intended reason.
 
+`verify-dashboard` exercises the Ceph Dashboard REST API on port `8444` — the
+management interface, distinct from the S3 API on `8443` — using the generated
+credentials from `.env`. It signs in through `POST /api/auth`, confirms an
+unauthenticated request is rejected with HTTP `401`, asserts `HEALTH_OK` and
+the three-monitor, three-OSD inventory through `GET /api/health/minimal`,
+reads the cluster version, and logs the session out again. Its JSON result
+must contain `"success": true`.
+
+`verify-dataset` generates a 24-file dataset inside the `s3client` container,
+uploads it under `stratus-landing/verification/`, re-downloads every object
+with a byte-for-byte comparison, copies the whole dataset back into a second
+local tree that must hash-match the original, then purges the remote prefix
+and asserts nothing remains. Its JSON result must also contain
+`"success": true`.
+
 ## 7. Find the Results and Logs
 
 The scripts write ignored, persistent artifacts under `evidence/`:
@@ -179,6 +196,8 @@ The scripts write ignored, persistent artifacts under `evidence/`:
 | `storage-invalid-credentials-<timestamp>.json` | invalid credentials were rejected |
 | `storage-cross-identity-denial-<timestamp>.json` | cross-identity access was denied |
 | `storage-untrusted-tls-<timestamp>.log` | untrusted certificate was rejected |
+| `dashboard-verification-<timestamp>.json` | six-check Ceph Dashboard REST API result |
+| `dataset-verification-<timestamp>.json` | dataset upload, read-back, and cleanup result |
 
 Do not commit `.env`, private keys, or generated evidence. Do not put RGW secret
 keys or private certificate material into tickets or test reports.
@@ -215,6 +234,8 @@ cd platform/ceph/compose-cluster
 ./scripts/verify/check.sh
 ./scripts/verify/verify-java.sh
 ./scripts/verify/verify-security.sh
+./scripts/verify/verify-dashboard.sh
+./scripts/verify/verify-dataset.sh
 ./scripts/lifecycle/shutdown.sh
 ```
 
@@ -566,6 +587,7 @@ this local Ceph profile.
 | Script reports `bash\r` or `^M` | Restore LF endings; keep the repository `.gitattributes` rule for `*.sh` |
 | Security verification prints authentication, access-denied, or PKIX errors | These are expected inside the three negative scenarios; judge the final script result and evidence file |
 | Self-test refuses to run | Shut down and destructively reset the disposable cluster first |
+| `verify-dashboard` reports an authentication failure | Read the current `CEPH_DASHBOARD_USER`/`CEPH_DASHBOARD_PASSWORD` from `.env` and require `mgr1` and `mgr2` to be healthy; the credentials are applied by `ceph-configure` during startup |
 | Dashboard name does not resolve | Add the workstation hosts-file entry from [Step 2](#step-2-make-the-dashboard-hostname-resolve-on-the-workstation); do not modify a container hosts file |
 | Dashboard port is unreachable | Start the cluster and require `rgw-proxy` plus both manager services to be healthy, then rerun the port check |
 | Browser reports an untrusted certificate | Import `certs/stratus-ca.crt` or explicitly accept the disposable local warning; never disable TLS in the verifier |

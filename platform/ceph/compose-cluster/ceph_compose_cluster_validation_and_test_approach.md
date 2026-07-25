@@ -53,7 +53,7 @@ need.
 | # | Layer | What it checks | Docker? | Live cluster? | Roughly how long |
 |---|---|---|---|---|---|
 | 1 | Static and JVM tests | Verifier Java logic, plus repository consistency guardrails | No | No | Seconds to ~1 min |
-| 2 | Live harness validation | A real Ceph cluster boots and the prebuilt verifier passes every S3 contract and security-negative check against it | Yes | Yes (this module starts it) | Several minutes |
+| 2 | Live harness validation | A real Ceph cluster boots and passes every S3 contract, security-negative, management REST API, and dataset round-trip check | Yes | Yes (this module starts it) | Several minutes |
 | 3 | Live Maven contract test | The verifier's own JVM test suite, run from Maven against the live endpoint | Yes | Yes | Minutes |
 | 4 | Harness self-test | The harness *scripts themselves* (cert renewal, teardown, refusal to accept a fake verifier) | Yes | No (must be stopped) | ~1 min |
 
@@ -245,7 +245,9 @@ This boots a genuine Ceph Tentacle 20.2.2 cluster in Docker (three monitors, two
 managers, three BlueStore OSDs, two RGW daemons behind a TLS proxy), creates the
 buckets, checks cluster health, and runs the **prebuilt verifier image** against
 the live endpoint for both the positive S3 contract and the three security
-negatives.
+negatives. It then verifies the Ceph Dashboard REST API on port `8444` and
+proves a generated dataset round-trips through the object store byte-for-byte
+identical.
 
 Run every command from the `platform/ceph/compose-cluster` directory.
 
@@ -258,6 +260,8 @@ cd platform/ceph/compose-cluster
 ./scripts/verify/check.sh
 ./scripts/verify/verify-java.sh
 ./scripts/verify/verify-security.sh
+./scripts/verify/verify-dashboard.sh
+./scripts/verify/verify-dataset.sh
 ./scripts/lifecycle/shutdown.sh
 ```
 
@@ -347,6 +351,42 @@ match `PKIX`, `SSLHandshake`, or `certification path`.
 `NEGATIVE TESTS COMPLETE` banner. If a negative test's *denial* does not occur —
 for example RGW accepts bad credentials, or Java trusts an untrusted cert — the
 script fails loudly; that is a real security regression, not a flaky test.
+
+**`verify-dashboard`** — [verify-dashboard.sh](scripts/verify/verify-dashboard.sh) —
+verifies the Ceph Dashboard REST API published on port `8444`, the management
+interface distinct from the S3 API on `8443`. The checks run with curl and jq
+inside `mon1`, so they cross the same nginx TLS proxy a browser or API client
+uses, and the dashboard credentials plus the CA travel over stdin — never on a
+command line or into the evidence. Six checks, one result per check:
+
+`dashboard-authentication` (`POST /api/auth` answers 201 with a session token)
+→ `unauthenticated-request-rejected` (`GET /api/summary` without a token
+answers 401 — real product behavior, not a simulation) → `cluster-health`
+(`GET /api/health/minimal` reports `HEALTH_OK`) → `daemon-inventory` (three
+monitors in the map, three OSDs up and in) → `reported-version` (the summary
+identifies a Ceph version) → `session-logout` (`POST /api/auth/logout` revokes
+the session the test created).
+
+**Expected result:** the script prints the evidence JSON, which must contain
+`"success": true` with every check `"passed": true`, and ends with a
+`PASS dashboard-rest-api` line naming `dashboard-verification-<ts>.json`. The
+host asserts on the evidence content, not just the exit code.
+
+**`verify-dataset`** — [verify-dataset.sh](scripts/verify/verify-dataset.sh) —
+proves a dataset written to the object store reads back byte-for-byte
+identical. Inside the `s3client` container it generates 24 seeded files
+(1 KiB–64 KiB across nested directories), uploads them to
+`stratus-landing/verification/dataset-<ts>/`, and then proves read-back two
+independent ways: `rclone check --download` re-downloads every object and
+byte-compares it against the source, and a full copy back into a second local
+tree must hash-match the original. Object count and total bytes are asserted
+between source and remote, the remote prefix is purged, and the purge is
+confirmed empty, so the run cleans up its probe objects.
+
+**Expected result:** the evidence JSON in `dataset-verification-<ts>.json`
+contains `"success": true` for the five checks (`dataset-created`,
+`dataset-uploaded`, `dataset-download-verified`, `dataset-readback-verified`,
+`dataset-cleanup`) and the script ends with a `PASS dataset-round-trip` line.
 
 **`shutdown`** — removes the containers and the project network but **preserves**
 the Ceph data volumes, so the next `startup` restarts the same cluster. It works
@@ -469,19 +509,21 @@ A complete local validation from a clean state, in dependency order:
 6. scripts/verify/check
 7. scripts/verify/verify-java
 8. scripts/verify/verify-security
-9. (optional) mvnw clean verify -Pall-tests   Layer 3 — needs env + CA trust, cluster up
-10. (optional) scripts/verify/failure-drill   Layer 3 — real daemon outages and recovery
-11. scripts/lifecycle/shutdown
-12. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
-13. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
+9. scripts/verify/verify-dashboard
+10. scripts/verify/verify-dataset
+11. (optional) mvnw clean verify -Pall-tests   Layer 3 — needs env + CA trust, cluster up
+12. (optional) scripts/verify/failure-drill   Layer 3 — real daemon outages and recovery
+13. scripts/lifecycle/shutdown
+14. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
+15. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
 ```
 
-Steps 2 and 4–8 are the normal validation. Add step 9 when the change touches the
-live Ceph contract, and step 10 when it affects resilience or failover behavior
-(the drill stops a real RGW, monitor, and OSD in turn and requires recovery to
-`HEALTH_OK`). Run step 13 when you change harness scripts. Steps 12–13 are
-destructive to the cluster; `reset` prompts for confirmation unless you pass
-`--force`.
+Steps 2 and 4–10 are the normal validation. Add step 11 when the change touches
+the live Ceph contract, and step 12 when it affects resilience or failover
+behavior (the drill stops a real RGW, monitor, and OSD in turn and requires
+recovery to `HEALTH_OK`). Run step 15 when you change harness scripts. Steps
+14–15 are destructive to the cluster; `reset` prompts for confirmation unless
+you pass `--force`.
 
 ### `shutdown` vs `reset`
 
@@ -508,6 +550,8 @@ inverted meaning for the negatives, where `"success":true` means the denial
 | `storage-invalid-credentials-<ts>.json` | `verify-security` | RGW rejected invalid credentials |
 | `storage-cross-identity-denial-<ts>.json` | `verify-security` | RGW denied cross-identity bucket access |
 | `storage-untrusted-tls-<ts>.log` | `verify-security` | Captured output showing the JVM rejected the untrusted certificate (this is a log, not JSON) |
+| `dashboard-verification-<ts>.json` | `verify-dashboard` | Every Ceph Dashboard REST API check passed, including the 401 for unauthenticated requests |
+| `dataset-verification-<ts>.json` | `verify-dataset` | The generated dataset uploaded, read back byte-for-byte identical, and was purged |
 
 Evidence must never contain RGW secret keys, CA private keys, or the TLS server
 private key. Note that transcripts legitimately contain the JVM line `Picked up

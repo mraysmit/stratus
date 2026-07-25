@@ -242,6 +242,8 @@ In the order you meet them:
 | `verify/check` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
 | `verify/verify-java` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
 | `verify/verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
+| `verify/verify-dashboard` | Verifies the Ceph Dashboard REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
+| `verify/verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
 | `lifecycle/shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
 | `lifecycle/reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
 | `verify/failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
@@ -260,6 +262,8 @@ Windows):
 ./scripts/verify/check.sh
 ./scripts/verify/verify-java.sh
 ./scripts/verify/verify-security.sh
+./scripts/verify/verify-dashboard.sh
+./scripts/verify/verify-dataset.sh
 ./scripts/lifecycle/shutdown.sh
 ```
 
@@ -269,7 +273,7 @@ Capture run transcripts into the ignored harness-local `logs/` directory (the re
 
 ```bash
 timestamp=$(date +%Y%m%d-%H%M%S)
-{ ./scripts/lifecycle/startup.sh && ./scripts/verify/bootstrap-buckets.sh && ./scripts/verify/check.sh && ./scripts/verify/verify-java.sh && ./scripts/verify/verify-security.sh && ./scripts/lifecycle/shutdown.sh; } 2>&1 |
+{ ./scripts/lifecycle/startup.sh && ./scripts/verify/bootstrap-buckets.sh && ./scripts/verify/check.sh && ./scripts/verify/verify-java.sh && ./scripts/verify/verify-security.sh && ./scripts/verify/verify-dashboard.sh && ./scripts/verify/verify-dataset.sh && ./scripts/lifecycle/shutdown.sh; } 2>&1 |
     tee "logs/ceph-local-verification-$timestamp.txt"
 ```
 
