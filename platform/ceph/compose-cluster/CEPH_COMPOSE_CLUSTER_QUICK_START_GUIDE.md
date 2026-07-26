@@ -178,11 +178,11 @@ reads the cluster version, and logs the session out again. Its JSON result
 must contain `"success": true`.
 
 `verify-dataset` generates a 24-file dataset inside the `s3client` container,
-uploads it under `stratus-landing/verification/`, re-downloads every object
-with a byte-for-byte comparison, copies the whole dataset back into a second
-local tree that must hash-match the original, then purges the remote prefix
-and asserts nothing remains. Its JSON result must also contain
-`"success": true`.
+uploads it to `stratus-landing/` under the prefix `verification/dataset-<ts>/`, 
+re-downloads every object with a byte-for-byte comparison, copies the whole
+dataset back into a second local tree that must hash-match the original, then
+purges the remote prefix and asserts nothing remains. Its JSON result must also
+contain `"success": true`.
 
 ## 7. Find the Results and Logs
 
@@ -595,6 +595,7 @@ this local Ceph profile.
 | Postman returns `InvalidAccessKeyId` or `SignatureDoesNotMatch` | Use the current RGW values from `.env`, collection-level `AWS Signature`, service `s3`, scope `default`, request-header authorization, and path-style URLs |
 | Postman reports a self-signed certificate error | Add `certs/stratus-ca.crt` under Postman CA certificates and keep SSL verification enabled |
 | Postman receives `403 AccessDenied` for `stratus-denied` | Expected: that bucket belongs to the separate denial-test identity; use a normal Stratus bucket |
+| `verify-dataset` reports `success:false` in evidence | Open `dataset-verification-<timestamp>.json` to see which check failed; run `docker compose logs s3client` to diagnose rclone upload, download, or hash-comparison failures |
 
 For deeper diagnosis, use the full [troubleshooting
 table](ceph_compose_cluster_validation_and_test_approach.md#troubleshooting).
