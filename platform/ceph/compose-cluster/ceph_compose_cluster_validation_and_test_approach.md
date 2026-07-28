@@ -2,7 +2,7 @@
 
 - Author: Mark Raysmith
 - Created: 2026-07-15
-- Last updated: 2026-07-20
+- Last updated: 2026-07-28
 - Status: Active
 
 This is the complete, self-contained guide to every test and validation process
@@ -14,6 +14,13 @@ just want commands, jump to [Run everything, in order](#run-everything-in-order)
 For what the environment *is* (its services, what it proves and does not prove,
 and its configuration), read the module [README.md](README.md) first. This
 document is about how you *test and validate* it.
+
+The environment also provides a browser-based Ceph admin console, officially
+named **Ceph Dashboard**, at `https://object-store.stratus.local:8444`. The
+`verify-dashboard` step validates its REST API, authentication, health, and
+daemon inventory. For workstation hostname, certificate, and browser sign-in
+setup, use the [admin console procedure in the quick-start
+guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#appendix-a-optional-access-to-the-ceph-admin-console-dashboard).
 
 For the shortest first-run path, use the [Ceph Compose Cluster Quick Start
 Guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md).
@@ -353,11 +360,12 @@ for example RGW accepts bad credentials, or Java trusts an untrusted cert — th
 script fails loudly; that is a real security regression, not a flaky test.
 
 **`verify-dashboard`** — [verify-dashboard.sh](scripts/verify/verify-dashboard.sh) —
-verifies the Ceph Dashboard REST API published on port `8444`, the management
-interface distinct from the S3 API on `8443`. The checks run with curl and jq
-inside `mon1`, so they cross the same nginx TLS proxy a browser or API client
-uses, and the dashboard credentials plus the CA travel over stdin — never on a
-command line or into the evidence. Six checks, one result per check:
+verifies the REST API for the Ceph admin console (Ceph Dashboard), published on
+port `8444`. This management interface is distinct from the S3 API on `8443`.
+The checks run with curl and jq inside `mon1`, so they cross the same nginx TLS
+proxy a browser or API client uses, and the dashboard credentials plus the CA
+travel over stdin — never on a command line or into the evidence. Six checks,
+one result per check:
 
 `dashboard-authentication` (`POST /api/auth` answers 201 with a session token)
 → `unauthenticated-request-rejected` (`GET /api/summary` without a token

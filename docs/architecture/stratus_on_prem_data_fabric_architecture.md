@@ -3,7 +3,6 @@
 - Author: Mark Raysmith
 - Created: 2026-03-20
 - Last updated: 2026-07-22
-- Status: Active — governing architecture baseline for Phases 1-3
 
 ## 1. Executive Summary
 

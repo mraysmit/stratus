@@ -2,8 +2,7 @@
 
 - Author: Mark Raysmith
 - Created: 2026-07-14
-- Last updated: 2026-07-20
-- Status: Implemented and validated
+- Last updated: 2026-07-28
 
 This directory gives a developer a complete local object-storage service for
 building and testing Stratus. Run the startup script and it creates a Ceph
@@ -58,8 +57,8 @@ parts:
   time; the second is a hot standby that takes over automatically if the
   active one fails. Managers are not in the data path — objects flow even if
   both were briefly down — but health reporting would degrade. The active
-  manager also serves the Ceph Dashboard web UI (see "Management console"
-  below).
+  manager also serves the Ceph admin console, officially named Ceph Dashboard
+  (see "Ceph admin console" below).
 - **OSDs (Object Storage Daemons, `osd`)** store the actual data; each OSD
   owns one disk-shaped chunk of storage. It writes through BlueStore, Ceph's
   storage engine, which manages that raw space directly instead of going
@@ -97,7 +96,7 @@ of it, or exercise it as a client:
 | `mgr1`-`mgr2` | The active and standby managers (see above) |
 | `osd1`-`osd3` | The three data-storing OSDs (see above), each with its own Docker volume |
 | `rgw1`-`rgw2` | The two S3 gateways (see above) |
-| `rgw-proxy` | An nginx reverse proxy that provides the HTTPS endpoint `https://object-store.stratus.local:8443`: it holds the TLS certificate, decrypts incoming requests, and forwards them to whichever RGW is available. It also fronts the Ceph Dashboard on port `8444`, forwarding to whichever manager is active |
+| `rgw-proxy` | An nginx reverse proxy that provides the HTTPS endpoint `https://object-store.stratus.local:8443`: it holds the TLS certificate, decrypts incoming requests, and forwards them to whichever RGW is available. It also fronts the Ceph admin console (Ceph Dashboard) on port `8444`, forwarding to whichever manager is active |
 | `s3client` | A container with rclone, a command-line S3 client, used by the scripts to run bucket and object operations against the cluster |
 | `verifier` | The prebuilt Stratus Java verifier: runs the automated S3 contract checks against the cluster and writes the evidence reports |
 | `verifier-untrusted` | The same verifier image but deliberately missing the Compose CA certificate — its only job is to prove that TLS connections are rejected when the server's certificate cannot be verified |
@@ -187,7 +186,7 @@ The first startup creates the ignored `.env` file from `.env.template`, replacin
 https://object-store.stratus.local:8443
 ```
 
-The published port binds to `127.0.0.1` by default; set `CEPH_RGW_BIND_ADDRESS` only when remote access is deliberate. The Ceph Dashboard publishes separately on port `8444` — see "Management console" below.
+The published port binds to `127.0.0.1` by default; set `CEPH_RGW_BIND_ADDRESS` only when remote access is deliberate. The Ceph admin console (Ceph Dashboard) publishes separately on port `8444` — see "Ceph admin console" below.
 
 Change `VERIFIER_IMAGE` to the immutable image reference produced by the build system. Do not add a Compose `build` section.
 
@@ -202,15 +201,16 @@ network; an unresolved name after the bounded wait is treated as a real startup
 failure.
 
 To inspect buckets and objects manually from Postman or another S3-compatible
-desktop client, follow [Access Ceph RGW with Postman or Another S3
-Client](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#12-access-ceph-rgw-with-postman-or-another-s3-client).
+desktop client, follow [Optional: Access Ceph RGW with Postman or Another S3
+Client](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#appendix-b-optional-access-ceph-rgw-with-postman-or-another-s3-client).
 
 ## Testing and validation
 
 For a complete, self-contained guide to every test and validation process for
 this module — the static and JVM tests, this live harness, the live Maven
 contract test, and the harness self-test, each with how to run it, what it does,
-and the expected results — see [ceph_compose_cluster_validation_and_test_approach.md](ceph_compose_cluster_validation_and_test_approach.md).
+and the expected results — see the [Ceph Compose Cluster Testing and Validation
+Guide](ceph_compose_cluster_validation_and_test_approach.md).
 
 ## Scripts
 
@@ -242,7 +242,7 @@ In the order you meet them:
 | `verify/check` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
 | `verify/verify-java` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
 | `verify/verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
-| `verify/verify-dashboard` | Verifies the Ceph Dashboard REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
+| `verify/verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
 | `verify/verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
 | `lifecycle/shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
 | `lifecycle/reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
@@ -314,14 +314,15 @@ production resilience.
 
 `scripts/verify/selftest.sh` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
 
-## Management console
+## Ceph admin console (Dashboard)
 
 For a complete first-time procedure, including the Windows and Linux/macOS
 hosts-file commands, connectivity test, CA trust, and credential lookup, see
-[Access the Ceph Administration UI](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#11-access-the-ceph-administration-ui).
+[Optional: Access the Ceph Admin Console
+(Dashboard)](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#appendix-a-optional-access-to-the-ceph-admin-console-dashboard).
 
-The active manager serves the Ceph Dashboard, Ceph's built-in web UI, through
-the same TLS proxy as the S3 endpoint:
+The active manager serves the Ceph admin console, officially named **Ceph
+Dashboard**, through the same TLS proxy as the S3 endpoint:
 
 ```text
 https://object-store.stratus.local:8444
