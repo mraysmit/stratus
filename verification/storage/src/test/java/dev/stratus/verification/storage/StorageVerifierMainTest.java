@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * exit codes, evidence-write failure, and behavior when the real client
  * cannot reach any endpoint. Successful contract runs, negative security
  * modes, and evidence content are proven exclusively against the live local
- * Ceph cluster by CephRgwIntegrationTest — no simulated S3 endpoint is
- * permitted anywhere in this module.
+ * Ceph service by the Ceph-owned {@code platform/ceph/tests} module; no
+ * simulated S3 endpoint is permitted anywhere in this module.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *

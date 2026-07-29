@@ -346,7 +346,7 @@ certificate renewal preserves the CA, forced rotation creates a distinct
 replacement chain in an isolated staging directory, `verify-security` rejects
 a verifier that exits 0 without denial evidence, and shutdown/reset work when
 `.env` is missing. It complements the static checks in
-`testing/repo-guardrails`. The self-test refuses to run while harness
+`platform/ceph/tests`. The self-test refuses to run while harness
 containers or preserved cluster volumes exist, because its final scenario
 exercises destructive reset.
 

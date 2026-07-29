@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Offline tests for the verifier's pure logic: failure descriptions, logging
  * configuration, log rotation, and the real client's behavior when the
  * network endpoint does not exist. Storage behavior is proven exclusively
- * against the live local Ceph cluster by CephRgwIntegrationTest — no
- * simulated S3 endpoint is permitted anywhere in this module.
+ * against live Ceph implementations by the Ceph-owned
+ * {@code platform/ceph/tests} module; no simulated S3 endpoint is permitted.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
