@@ -1,7 +1,7 @@
 // Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
 // SPDX-License-Identifier: Apache-2.0
 
-package dev.stratus.testing.guardrails;
+package dev.stratus.platform.ceph;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
  * @version 2.0.0
  */
 @Tag("unit")
-final class ScriptParityTest {
+final class ComposeClusterScriptTest {
 
     private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "compose-cluster"));
     private static final Path SCRIPTS = HARNESS.resolve("scripts");

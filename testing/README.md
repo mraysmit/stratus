@@ -4,4 +4,10 @@ End-to-end, performance, resilience, security, and upgrade suites that span more
 
 ## Modules
 
-- `repo-guardrails/` — `stratus-repo-guardrails`, unit-tagged static consistency checks that run in the default `mvnw clean verify` regression: documentation link and anchor integrity, naming conventions (capability-named implementation documents, retired-name deny list, documented Maven module selectors), the Ceph developer-harness contract (`.env.template` ↔ `compose.yaml` variable contract, loopback port binding, service restart/healthcheck/hardening policy, secret ignore rules), and the bash-only harness-script convention (fail-fast preambles, no PowerShell twins; ADR-P1-002).
+- `repo-guardrails/` — `stratus-repo-guardrails`, technology-neutral static
+  consistency checks that run in the default `mvnw clean verify` regression:
+  documentation link and anchor integrity, capability-named implementation
+  documents, the retired-name deny list, and valid documented Maven selectors.
+
+Technology-owned tests do not belong here. Ceph contract and implementation
+tests are under [`platform/ceph/tests`](../platform/ceph/tests/).

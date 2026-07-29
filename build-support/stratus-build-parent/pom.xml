@@ -62,7 +62,8 @@
                     <artifactId>maven-jar-plugin</artifactId>
                     <version>${maven.jar.version}</version>
                     <configuration>
-                        <!-- Test-only modules (e.g. stratus-repo-guardrails) produce no jar. -->
+                        <!-- Test-only modules (for example repository guardrails
+                             and Ceph contracts) produce no jar. -->
                         <skipIfEmpty>true</skipIfEmpty>
                     </configuration>
                 </plugin>

@@ -8,7 +8,8 @@
 ## Context
 
 Every Ceph Compose harness script has shipped as a PowerShell/bash pair with
-identical behavior, enforced by `ScriptParityTest` in `stratus-repo-guardrails`.
+identical behavior, previously enforced by `ScriptParityTest` in
+`stratus-repo-guardrails`.
 As the harness grew (credential generation, certificate lifecycle, dashboard
 provisioning, failure drills), each behavior change had to be implemented twice.
 The guardrail catches missing twins and mismatched runtime artifacts, but it
@@ -31,7 +32,8 @@ removed and must not reappear.
 ## Consequences
 
 - One implementation per script; a behavior change is written and reviewed once.
-- `ScriptParityTest` no longer asserts pairing or twin parity. It now asserts
+- `ComposeClusterScriptTest` under `platform/ceph/tests` no longer asserts
+  pairing or twin parity. It now asserts
   the single-implementation convention: bash fail-fast preambles are retained,
   and no `.ps1` script may reappear under the harness script tree.
 - Documentation and runbooks present bash invocations only.
