@@ -49,6 +49,9 @@ CEPH_RGW_ENDPOINT=https://object-store.stratus.local
 CEPH_RGW_ACCESS_KEY=<scoped verification access key>
 CEPH_RGW_SECRET_KEY=<matching verification secret>
 CEPH_RGW_PROBE_BUCKET=stratus-landing
+CEPH_DENIED_ACCESS_KEY=<isolated identity access key>
+CEPH_DENIED_SECRET_KEY=<isolated identity secret key>
+CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
 ```
 
@@ -87,8 +90,8 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
 ### Targeted live Ceph diagnosis
 
 ```powershell
-.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-storage-verifier 2>&1 |
-    Tee-Object -FilePath "logs\storage-verifier-ceph-$timestamp.txt"
+.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 |
+    Tee-Object -FilePath "logs\ceph-contract-$timestamp.txt"
 ```
 
 ### Resume after a known reactor failure
@@ -143,8 +146,8 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 ./mvnw test -Punit-tests -pl :stratus-storage-verifier 2>&1 \
   | tee "logs/storage-verifier-unit-${timestamp}.txt"
 
-./mvnw test -Pceph-integration-tests -pl :stratus-storage-verifier 2>&1 \
-  | tee "logs/storage-verifier-ceph-${timestamp}.txt"
+./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 \
+  | tee "logs/ceph-contract-${timestamp}.txt"
 
 ./mvnw test -Puntagged-tests 2>&1 \
   | tee "logs/untagged-audit-${timestamp}.txt"
@@ -177,7 +180,7 @@ Do not use a targeted module command as final regression evidence. The complete 
 ### Confirm effective default selection
 
 ```powershell
-.\mvnw.cmd help:effective-pom -pl :stratus-storage-verifier 2>&1 |
+.\mvnw.cmd help:effective-pom -pl :stratus-ceph-tests 2>&1 |
     Select-String -Pattern 'test.groups|test.excludedGroups|coverage.skip'
 ```
 
@@ -192,7 +195,7 @@ coverage.skip=false
 ### Confirm `all-tests` removes filters
 
 ```powershell
-.\mvnw.cmd help:effective-pom -pl :stratus-storage-verifier -Pall-tests 2>&1 |
+.\mvnw.cmd help:effective-pom -pl :stratus-ceph-tests -Pall-tests 2>&1 |
     Select-String -Pattern 'test.groups|test.excludedGroups|ceph.integration.required'
 ```
 
@@ -222,18 +225,20 @@ Expected output: none.
 
 ## Current Module Notes
 
-- `stratus-storage-verifier` owns offline unit tests (pure logic and real
-  environmental failures only) and the live Ceph RGW suite.
-- `CephRgwIntegrationTest` is the product-compatibility boundary: the full S3
-  contract, missing-bucket detection, both security negatives, evidence
-  writing, and exit semantics, all against the live local cluster
-  (`platform/ceph/compose-cluster`). It is not selected by the default local
-  regression command.
+- `stratus-storage-verifier` owns the executable verifier and its offline unit
+  tests: pure logic and real environmental failures only.
+- `stratus-ceph-tests` under `platform/ceph/tests` owns
+  `CephRgwContractTest`, the implementation-neutral product-compatibility
+  boundary. It runs the full S3 contract, missing-bucket detection, both
+  security negatives, consistency, pagination, multipart cleanup, evidence
+  writing, and exit semantics against whichever live Ceph RGW implementation
+  the environment supplies. It is not selected by the default local regression.
 - Mockito, all other mocking frameworks, and simulated S3 endpoints of any
   kind are prohibited. Tests against a simulated Ceph are worthless as
   verification (code_style_rules.md 7.2).
 - JaCoCo reports are generated under `verification/storage/target/site/jacoco/`.
-- Surefire reports are generated under `verification/storage/target/surefire-reports/`.
+- Surefire reports are generated under each module's `target/surefire-reports/`,
+  including `platform/ceph/tests/target/surefire-reports/`.
 
 ## Completion Checklist
 

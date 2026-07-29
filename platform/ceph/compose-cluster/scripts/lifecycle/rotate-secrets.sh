@@ -158,7 +158,7 @@ set_rgw_key() {
         ;;
       remove)
         radosgw-admin key rm --uid "$uid" --key-type s3 \
-          --access-key "$access_key"
+          --access-key "$access_key" >/dev/null
         ;;
       *) exit 64 ;;
     esac

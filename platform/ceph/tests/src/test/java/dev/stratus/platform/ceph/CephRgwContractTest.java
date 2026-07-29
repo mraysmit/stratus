@@ -1,7 +1,7 @@
 // Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
 // SPDX-License-Identifier: Apache-2.0
 
-package dev.stratus.verification.storage;
+package dev.stratus.platform.ceph;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -34,12 +34,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.stratus.verification.storage.S3ObjectStorageClient;
+import dev.stratus.verification.storage.StorageVerifier;
+import dev.stratus.verification.storage.StorageVerifierConfig;
+import dev.stratus.verification.storage.StorageVerifierMain;
+
 /**
- * The verifier's storage behavior proven against the live local Ceph cluster
- * (platform/ceph/compose-cluster): the full S3 contract, missing-bucket detection, the
- * invalid-credential and cross-identity security negatives, evidence writing,
- * and exit semantics. Requires CEPH_RGW_INTEGRATION=true and the harness
- * environment; nothing here is simulated.
+ * The Stratus storage contract proven against any live Ceph RGW service
+ * implementation supplied through the environment. The test has no dependency
+ * on Compose, cephadm, or another deployment mechanism.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
@@ -48,13 +51,24 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * @version 1.0.0
  */
 @Tag("ceph-integration")
-class CephRgwIntegrationTest {
+class CephRgwContractTest {
 
     @BeforeEach
     void requireLiveCluster() {
         if (Boolean.getBoolean("ceph.integration.required")) {
             assertTrue(Boolean.parseBoolean(System.getenv("CEPH_RGW_INTEGRATION")),
                     "CEPH_RGW_INTEGRATION=true is required by the selected Maven profile");
+            for (String name : Set.of(
+                    "CEPH_RGW_ENDPOINT",
+                    "CEPH_RGW_ACCESS_KEY",
+                    "CEPH_RGW_SECRET_KEY",
+                    "CEPH_RGW_PROBE_BUCKET",
+                    "CEPH_DENIED_ACCESS_KEY",
+                    "CEPH_DENIED_SECRET_KEY",
+                    "CEPH_RGW_DENIED_BUCKET")) {
+                assertTrue(System.getenv(name) != null && !System.getenv(name).isBlank(),
+                        name + " is required by the selected Maven profile");
+            }
         }
         assumeTrue(Boolean.parseBoolean(System.getenv("CEPH_RGW_INTEGRATION")),
                 "Set CEPH_RGW_INTEGRATION=true to run against a live Ceph RGW endpoint");

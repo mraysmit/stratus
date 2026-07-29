@@ -35,7 +35,7 @@ never a global Maven).
   `git diff --check` and tested INFO/DEBUG logging behavior; storage-affecting
   changes must additionally pass the live suite.
 
-## Repository conventions (enforced by testing/repo-guardrails)
+## Repository conventions
 
 - Harness scripts are bash-only (`.sh`, no PowerShell twins; ADR-P1-002),
   grouped under `scripts/lifecycle/`, `scripts/verify/`, `scripts/lib/`.
@@ -43,7 +43,9 @@ never a global Maven).
 - No increment-numbered document names; retired names must not reappear
   (see `testing/repo-guardrails/src/test/resources/retired-names.txt`).
 - Published harness ports bind to loopback by default. Never track `.env`,
-  keys, or certificates.
+  keys, or certificates. Ceph-specific conventions are enforced by
+  `platform/ceph/tests`; technology-neutral conventions remain in
+  `testing/repo-guardrails`.
 - Run transcripts belong in the component's own `logs/` directory (e.g.
   `platform/ceph/compose-cluster/logs/`); the repository-root `logs/` is reserved for
   Maven build logs.
@@ -53,5 +55,6 @@ never a global Maven).
 Changes to the Ceph local harness are verified against a live local cluster
 (startup → bootstrap-buckets → check → verify-java → verify-security →
 shutdown), with transcripts and evidence recorded. Run the
-`stratus-repo-guardrails` module after any change to docs, scripts, compose,
-or `.env.template`.
+`stratus-ceph-tests` after any Ceph script, Compose, or `.env.template` change,
+and `stratus-repo-guardrails` after documentation or repository-wide naming
+changes.

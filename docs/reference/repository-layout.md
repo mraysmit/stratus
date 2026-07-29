@@ -7,10 +7,10 @@ The repository is organized by stable capability, not implementation sequence. P
 | `applications/` | Stratus-owned long-running services | Placeholder — no application modules yet |
 | `jobs/` | Spark and Flink workloads | Placeholder — no job modules yet |
 | `verification/` | executable component contract suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage contract verifier, the current executable module |
-| `platform/` | open-source product integration and deployment assets | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster and verification harness |
+| `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster; `platform/ceph/tests/` runs one shared Ceph RGW contract against any implementation and owns implementation-specific guardrails |
 | `environments/` | environment inventory and overlays without secrets | `developer`, `acceptance`, and `production` |
 | `operations/` | cross-platform operational assets and runbooks | Placeholder — operational acceptance documents currently live in `docs/operations/` |
-| `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` runs unit-tagged repository consistency checks (documentation links, naming conventions, harness contract, script parity) in the default regression |
+| `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` contains only technology-neutral documentation and naming consistency checks |
 | `schemas/` | shared governed contracts | Placeholder — no schemas yet |
 | `build-support/` | dependency and build policy | `stratus-bom` owns dependency versions; `stratus-build-parent` owns build-plugin versions. Child module POMs pin neither |
 | `docs/` | architecture, decisions, implementation, operations, and reference documentation | See the [documentation guide](../README.md) |

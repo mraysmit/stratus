@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -111,11 +112,21 @@ final class NamingConventionTest {
 
     private static Set<String> reactorArtifactIds() {
         Set<String> artifactIds = new HashSet<>();
-        for (Path file : Repo.trackedFiles()) {
-            if (!file.getFileName().toString().equals("pom.xml")) {
-                continue;
+        Path rootPom = Repo.root().resolve("pom.xml");
+        artifactIds.add(projectArtifactId(rootPom));
+        try {
+            var factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            var document = factory.newDocumentBuilder()
+                .parse(new ByteArrayInputStream(Repo.read(rootPom).getBytes(StandardCharsets.UTF_8)));
+            NodeList modules = document.getElementsByTagName("module");
+            for (int i = 0; i < modules.getLength(); i++) {
+                Path modulePom = Repo.root().resolve(modules.item(i).getTextContent().trim()).resolve("pom.xml");
+                assertTrue(Files.isRegularFile(modulePom), () -> "Reactor module has no pom.xml: " + modulePom);
+                artifactIds.add(projectArtifactId(modulePom));
             }
-            artifactIds.add(projectArtifactId(file));
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot parse reactor modules from " + rootPom, e);
         }
         return artifactIds;
     }

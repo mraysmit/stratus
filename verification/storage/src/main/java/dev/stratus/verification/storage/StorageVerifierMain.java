@@ -36,8 +36,16 @@ public final class StorageVerifierMain {
         exit.accept(run(environment.get(), clientFactory, output, error));
     }
 
-    static int run(Map<String, String> environment, Function<StorageVerifierConfig, ObjectStorageClient> clientFactory,
-                   PrintStream output, PrintStream error) {
+    /**
+     * Runs the verifier with explicit process boundaries so technology-owned
+     * contract modules can exercise the packaged behavior without replacing
+     * the real storage client.
+     */
+    public static int run(
+            Map<String, String> environment,
+            Function<StorageVerifierConfig, ObjectStorageClient> clientFactory,
+            PrintStream output,
+            PrintStream error) {
         try {
             StorageVerifier.configureLogging(environment.getOrDefault("STRATUS_LOG_LEVEL", "INFO"));
             StorageVerifier.configurePersistentLogging(

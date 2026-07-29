@@ -1,7 +1,7 @@
 // Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
 // SPDX-License-Identifier: Apache-2.0
 
-package dev.stratus.testing.guardrails;
+package dev.stratus.platform.ceph;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,7 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 /**
- * Contract between the Ceph Compose cluster's compose file, its .env template, its scripts, and its ignore rules. Guards against dead template variables, unguarded port publishing, missing restart/health policies, and trackable key material.
+ * Implementation-specific contract between the Ceph Compose cluster's compose
+ * file, environment template, scripts, and ignore rules.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
@@ -27,7 +28,7 @@ import org.yaml.snakeyaml.Yaml;
  * @version 1.0.0
  */
 @Tag("unit")
-final class HarnessContractTest {
+final class ComposeClusterContractTest {
 
     private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "compose-cluster"));
     private static final Pattern COMPOSE_VARIABLE = Pattern.compile("\\$\\{([A-Z0-9_]+)(:-|:\\?)?");
@@ -171,6 +172,9 @@ final class HarnessContractTest {
         if (!rotation.contains("old_primary_access=\"$CEPH_RGW_ACCESS_KEY\"")
             || !rotation.contains("export CEPH_RGW_ACCESS_KEY=\"$new_primary_access\"")) {
             violations.add("cutover must retain old values for revocation and export new values for Compose");
+        }
+        if (!rotation.contains("--access-key \"$access_key\" >/dev/null")) {
+            violations.add("RGW key removal output must be suppressed because it includes remaining secret keys");
         }
         if (!rotation.contains("assert_removed_key_rejected")
             || !rotation.contains("assert_old_dashboard_password_rejected")

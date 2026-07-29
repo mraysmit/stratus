@@ -8,17 +8,27 @@
         <groupId>dev.stratus</groupId>
         <artifactId>stratus-build-parent</artifactId>
         <version>1.0-SNAPSHOT</version>
-        <relativePath>../../build-support/stratus-build-parent/pom.xml</relativePath>
+        <relativePath>../../../build-support/stratus-build-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>stratus-repo-guardrails</artifactId>
-    <name>Stratus Repository Guardrails</name>
-    <description>Technology-neutral repository consistency checks for documentation and naming</description>
+    <artifactId>stratus-ceph-tests</artifactId>
+    <name>Stratus Ceph Tests</name>
+    <description>Reusable Ceph RGW contracts and Ceph implementation guardrails</description>
 
     <dependencies>
         <dependency>
+            <groupId>dev.stratus</groupId>
+            <artifactId>stratus-storage-verifier</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -87,10 +87,10 @@ things that must not be mixed up:
 
 1. **The verifier as a Java program under test.** Its source lives in
    [`verification/storage/`](../../../verification/storage/) as the Maven module
-   `stratus-storage-verifier`. Its *unit and protocol tests* (Layer 1) run on
-   your host JVM with no Docker and no Ceph. Its *live contract test*
-   (`CephRgwIntegrationTest`, Layer 3) runs on your host JVM against the live
-   endpoint.
+   `stratus-storage-verifier`. Its unit tests (Layer 1) run on your host JVM
+   with no Docker and no Ceph. The implementation-neutral live contract is
+   owned separately by `platform/ceph/tests` as `CephRgwContractTest`
+   (Layer 3) and runs on your host JVM against the supplied live endpoint.
 
 2. **The verifier as a prebuilt container image.** The build system packages
    that same Java program into an immutable image referenced by the
@@ -165,8 +165,8 @@ system; never present a `:dev` run as release evidence.
 
 ## Layer 1: static and JVM tests (no Docker)
 
-This is the everyday regression gate. It runs the whole reactor's `unit` and
-`protocol` tagged tests, packages artifacts, produces the JaCoCo coverage
+This is the everyday regression gate. It runs the whole reactor's `unit`
+tagged tests, packages artifacts, produces the JaCoCo coverage
 report, and enforces 100% line and branch coverage. It deliberately excludes the
 `ceph-integration` tag, so it needs neither Docker nor a live cluster.
 
@@ -194,31 +194,34 @@ not filter the live Maven stream, which can hide context or delay failures.
 
 ### What it runs
 
-Two module groups matter for this doc.
+Three module groups matter for this doc.
 
 **The verifier module (`stratus-storage-verifier`)** — its test files are in
 [`verification/storage/src/test/java/dev/stratus/verification/storage/`](../../../verification/storage/src/test/java/dev/stratus/verification/storage/):
 
 | Test | Tag | What it proves |
 |---|---|---|
-| `StorageVerifierTest` | unit | The contract-check logic: round-trip, zero-byte, overwrite, special-character keys, 1 MiB PUT, HEAD/list, forced pagination, eight-way concurrency, multipart, and cleanup, using an in-memory storage stub |
+| `StorageVerifierTest` | unit | Failure reporting against a real closed port plus INFO/DEBUG and rolling-file logging behavior |
 | `StorageVerifierMainTest` | unit | The entrypoint: mode selection (contract vs the two negatives), exit codes, writing pure-JSON evidence to `STRATUS_EVIDENCE_FILE`, the unwritable-evidence failure, and single-line ISO-8601 log records |
 | `StorageVerifierConfigTest` | unit | Environment-variable parsing and validation |
 | `VerificationReportTest` | unit | JSON serialization and string escaping of the report |
-| `S3ObjectStorageClientTest` | protocol | The real AWS SDK client against a real in-process HTTP endpoint (no mocking framework — Mockito is prohibited here) |
-| `CephRgwIntegrationTest` | ceph-integration | The live boundary — **not** run by this layer; see [Layer 3](#layer-3-live-maven-contract-test-docker) |
 
-**The repository guardrails (`stratus-repo-guardrails`)** — static consistency
-checks in
-[`testing/repo-guardrails/`](../../../testing/repo-guardrails/), all tagged
-`unit` so they run inside `clean verify`:
+**The Ceph tests (`stratus-ceph-tests`)** — Ceph-owned tests in
+[`platform/ceph/tests/`](../tests/):
+
+| Test | What it enforces |
+|---|---|
+| `CephRgwContractTest` | The reusable live Ceph RGW boundary, tagged `ceph-integration` and therefore not run by this layer; see [Layer 3](#layer-3-live-maven-contract-test-docker) |
+| `ComposeClusterContractTest` | The Compose implementation's `.env.template`/compose/script/ignore contract: no dead template variables, loopback port binding, correct service policies, secret ignore rules, and safe secret rotation |
+| `ComposeClusterScriptTest` | The Compose implementation's single-bash convention: no `.ps1` twins, fail-fast preambles, and Git Bash path handling |
+
+**The repository guardrails (`stratus-repo-guardrails`)** — technology-neutral
+checks in [`testing/repo-guardrails/`](../../../testing/repo-guardrails/):
 
 | Test | What it enforces |
 |---|---|
 | `DocumentationLinkTest` | Every relative Markdown link in a tracked doc resolves, and every `#anchor` matches a heading in its target. This is what keeps *this document's* links honest. |
 | `NamingConventionTest` | Implementation docs use capability names (no `incrementN_*.md`), retired names never reappear, and every documented Maven module selector actually exists in the reactor |
-| `HarnessContractTest` | The compose/`.env.template`/script/ignore contract: no dead template variables, the RGW port binds to loopback by default, one-shot vs long-running vs on-demand services declare correct restart/health/hardening policies, secrets are git-ignored, and no key material is tracked |
-| `ScriptParityTest` | The single-bash-implementation convention (ADR-P1-002): no `.ps1` script may reappear under the harness script tree, every bash script keeps its shebang and `set -euo pipefail` fail-fast preamble, and `common.sh` keeps its Git Bash path handling |
 
 ### Expected result
 
@@ -232,12 +235,13 @@ that — a run is only acceptable when **all** of the following hold (from the
 - The untagged-tests audit executes zero tests (every test carries an approved
   tag).
 
-To run only the guardrails while iterating on scripts or docs:
+To run the Ceph implementation guardrails while iterating on harness assets:
 
-PowerShell: `.\mvnw.cmd test -Punit-tests -pl :stratus-repo-guardrails`
-bash: `./mvnw test -Punit-tests -pl :stratus-repo-guardrails`
+PowerShell: `.\mvnw.cmd test -Punit-tests -pl :stratus-ceph-tests -am`
+bash: `./mvnw test -Punit-tests -pl :stratus-ceph-tests -am`
 
-A green guardrail run reports `Tests run: 15, Failures: 0, Errors: 0`.
+A green Ceph guardrail run reports the Compose-specific tests with zero
+failures and errors.
 
 ### When it fails
 
@@ -410,12 +414,12 @@ reason. Subsequent restarts against preserved volumes are much faster.
 
 ## Layer 3: live Maven contract test (Docker)
 
-Separate from the container-level scripts above, the verifier module has its own
-live JVM test, `CephRgwIntegrationTest` — the product-compatibility boundary. It
-runs from Maven on your host against the live endpoint, exercised through the
-`-Pall-tests` profile (which runs every tag *and* re-enforces the coverage
-gate). This is the test to run when you change signing, path-style routing,
-bucket policy, object semantics, multipart, or timeout behavior.
+Separate from the container-level scripts above, the Ceph-owned test module has
+the deployment-neutral live JVM test `CephRgwContractTest` — the
+product-compatibility boundary. It runs from Maven on your host against any
+Ceph RGW endpoint supplied through the environment. The Compose cluster is one
+provider of that environment; cephadm and future implementations run the same
+test without copying or changing it.
 
 ### Requirements
 
@@ -429,6 +433,9 @@ CEPH_RGW_ENDPOINT=https://object-store.stratus.local
 CEPH_RGW_ACCESS_KEY=<the verifier access key from your .env>
 CEPH_RGW_SECRET_KEY=<the matching secret>
 CEPH_RGW_PROBE_BUCKET=stratus-landing
+CEPH_DENIED_ACCESS_KEY=<the isolated identity access key from your .env>
+CEPH_DENIED_SECRET_KEY=<the matching isolated identity secret>
+CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
 ```
 
@@ -452,8 +459,8 @@ bash:
 
 To run only the live test while diagnosing a failure:
 
-PowerShell: `.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-storage-verifier`
-bash: `./mvnw test -Pceph-integration-tests -pl :stratus-storage-verifier`
+PowerShell: `.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-ceph-tests -am`
+bash: `./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am`
 
 ### Expected result
 
@@ -577,7 +584,7 @@ section](README.md#evidence) has the full rationale.
 | `Neither Docker Compose nor Podman is available` | No container runtime on PATH | Install Docker/Podman, or set `COMPOSE_IMPLEMENTATION` |
 | `verify-security` fails saying a denial was not shown | A security negative did not deny as required (real regression) — or a genuinely broken cluster | Read the named evidence file; do not treat this as flaky |
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
-| `clean verify` fails in `ScriptParityTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
+| `clean verify` fails in `ComposeClusterScriptTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
 | `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
 | Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/common.sh` |
