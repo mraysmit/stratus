@@ -116,7 +116,7 @@ final class HarnessContractTest {
     void ignoreRulesCoverSecrets() {
         String gitignore = Repo.read(HARNESS.resolve(".gitignore"));
         List<String> missing = new ArrayList<>();
-        for (String required : List.of(".env", "certs/", "private/", "*.key")) {
+        for (String required : List.of(".env", "certs/", "private/", ".rotation/", "*.key")) {
             if (gitignore.lines().map(String::trim).noneMatch(required::equals)) {
                 missing.add(required);
             }
@@ -148,6 +148,41 @@ final class HarnessContractTest {
         }
         if (!generator.contains("key_matches_certificate")) {
             violations.add("renewal must repair a certificate that does not match its key");
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
+    @Test
+    void secretRotationUsesOverlapCutoverAndRevocationWithoutDestroyingData() {
+        String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/rotate-secrets.sh"));
+        List<String> violations = new ArrayList<>();
+        int create = rotation.indexOf("set_rgw_key create");
+        int cutover = rotation.indexOf("log \"CUTOVER PASS:");
+        int revoke = rotation.indexOf("set_rgw_key remove", cutover);
+        if (create < 0 || cutover < 0 || revoke < 0 || !(create < cutover && cutover < revoke)) {
+            violations.add("new RGW keys must be created and verified before old keys are revoked");
+        }
+        if (!rotation.contains("ceph dashboard ac-user-set-password \"$1\" -i \"$password_file\"")) {
+            violations.add("the Dashboard password must be supplied through a protected input file");
+        }
+        if (!rotation.contains("STRATUS_FORCE_CA_ROTATION=true")) {
+            violations.add("rotation must stage a replacement CA and endpoint certificate");
+        }
+        if (!rotation.contains("old_primary_access=\"$CEPH_RGW_ACCESS_KEY\"")
+            || !rotation.contains("export CEPH_RGW_ACCESS_KEY=\"$new_primary_access\"")) {
+            violations.add("cutover must retain old values for revocation and export new values for Compose");
+        }
+        if (!rotation.contains("assert_removed_key_rejected")
+            || !rotation.contains("assert_old_dashboard_password_rejected")
+            || !rotation.contains("assert_old_ca_rejected")) {
+            violations.add("rotation must prove every old authentication path is rejected");
+        }
+        if (!rotation.contains("Rotation failed before revocation; attempting rollback")
+            || !rotation.contains("Rotation failed after revocation began")) {
+            violations.add("rotation must distinguish safe rollback from the post-revocation boundary");
+        }
+        if (rotation.contains("down --volumes") || rotation.contains("reset.sh")) {
+            violations.add("secret rotation must never destroy Ceph volumes or reset the cluster");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }

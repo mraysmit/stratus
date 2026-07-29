@@ -238,6 +238,7 @@ In the order you meet them:
 |---|---|---|
 | `lifecycle/install-prerequisites` | Installs OpenSSL if the host lacks it | Once per machine, only if needed |
 | `lifecycle/startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health | First, every session |
+| `lifecycle/rotate-secrets` | Rotates both RGW key pairs, the Dashboard password, the disposable CA, and the endpoint certificate without deleting Ceph data | When local credentials or certificate keys may be exposed |
 | `verify/bootstrap-buckets` | Creates the five Stratus buckets and the denied-owner bucket through the S3 API | After startup, once per cluster |
 | `verify/check` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
 | `verify/verify-java` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
@@ -277,6 +278,34 @@ timestamp=$(date +%Y%m%d-%H%M%S)
     tee "logs/ceph-local-verification-$timestamp.txt"
 ```
 
+## In-place secret rotation
+
+Rotation does not require a reset and does not delete buckets, objects, or
+Ceph volumes. With the cluster running and healthy, first run the non-mutating
+preflight:
+
+```bash
+./scripts/lifecycle/rotate-secrets.sh --preflight
+```
+
+Then start the confirmed rotation:
+
+```bash
+./scripts/lifecycle/rotate-secrets.sh
+```
+
+The script creates replacement RGW keys alongside the old keys, stages a new
+Dashboard password and TLS chain, recreates only the TLS proxy and persistent
+S3 client, and runs live checks before revoking the old RGW keys. It also proves
+that the old keys, Dashboard password, and CA no longer authenticate. A failure
+before revocation rolls back; after revocation begins, exposed credentials are
+never restored.
+
+The resulting credentials are in the ignored `.env` file. Because the
+disposable CA is replaced, remove the old `Stratus Disposable Compose CA` trust
+entry and import `certs/stratus-ca.crt` again in browsers, Postman, and other
+host-side clients. Use `--force` only for non-interactive local automation.
+
 ## Destructive reset
 
 Reset removes only this Compose project's disposable Ceph configuration and data volumes. It preserves `.env`, generated certificates, pulled images, and evidence. It prompts for confirmation unless forced.
@@ -312,7 +341,14 @@ production resilience.
 
 ## Harness self-test
 
-`scripts/verify/selftest.sh` verifies the harness scripts' own runtime behavior: certificate renewal preserves the CA, `verify-security` rejects a verifier that exits 0 without denial evidence, and shutdown/reset work when `.env` is missing. It complements the static checks in `testing/repo-guardrails`. The self-test refuses to run while harness containers or preserved cluster volumes exist, because its final scenario exercises destructive reset.
+`scripts/verify/selftest.sh` verifies the harness scripts' own runtime behavior:
+certificate renewal preserves the CA, forced rotation creates a distinct
+replacement chain in an isolated staging directory, `verify-security` rejects
+a verifier that exits 0 without denial evidence, and shutdown/reset work when
+`.env` is missing. It complements the static checks in
+`testing/repo-guardrails`. The self-test refuses to run while harness
+containers or preserved cluster volumes exist, because its final scenario
+exercises destructive reset.
 
 ## Ceph admin console (Dashboard)
 

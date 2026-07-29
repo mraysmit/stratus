@@ -324,6 +324,27 @@ data and create a fresh cluster on the next startup.
 
 Reset preserves `.env`, certificates, pulled images, and existing evidence.
 
+### Rotate credentials without deleting data
+
+If the local RGW credentials, Dashboard password, CA key, or endpoint key may
+have been exposed, rotate them in place while the cluster is running:
+
+```bash
+./scripts/lifecycle/rotate-secrets.sh --preflight
+./scripts/lifecycle/rotate-secrets.sh
+```
+
+The preflight changes nothing. The confirmed rotation preserves all buckets,
+objects, and Ceph volumes: it overlaps new and old RGW keys during validation,
+switches the local clients and TLS proxy, verifies the new paths, and only then
+revokes the old keys. Failures before revocation are rolled back.
+
+Rotation replaces the disposable CA as well as the server certificate. Remove
+the old `Stratus Disposable Compose CA` entry from host trust stores and import
+the new `certs/stratus-ca.crt`. Read the new ignored `.env` values into any
+host-side S3 or Dashboard clients; previously saved credentials will no longer
+work.
+
 ## 9. Complete Copy-Ready Sequence
 
 **Purpose:** Provide one uninterrupted command sequence for readers who already

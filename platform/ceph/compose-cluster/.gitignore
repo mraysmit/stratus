@@ -4,6 +4,7 @@ private/
 evidence/*
 !evidence/.gitkeep
 logs/
+.rotation/
 # Backstop for key material generated outside the expected directories.
 *.key
 *.csr

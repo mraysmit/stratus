@@ -9,18 +9,32 @@ ceph_image='quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a
 
 # Certificates are regenerated when absent or expiring within seven days. Leaf
 # renewal preserves the existing CA; only an expiring CA forces re-trusting.
+# rotate-secrets.sh uses a harness-relative staging root and forces a new CA so
+# it can validate the replacement chain before changing the live proxy files.
+certificate_root="${STRATUS_CERTIFICATE_ROOT:-.}"
+force_ca_rotation="${STRATUS_FORCE_CA_ROTATION:-false}"
+case "$certificate_root" in
+  /*|*..*) fail "STRATUS_CERTIFICATE_ROOT must be a harness-relative path without '..'" ;;
+esac
+[[ "$force_ca_rotation" == true || "$force_ca_rotation" == false ]] \
+  || fail "STRATUS_FORCE_CA_ROTATION must be true or false"
+
 read -r -d '' generator <<'EOF' || true
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 umask 077
-mkdir -p certs private
+root="${STRATUS_CERTIFICATE_ROOT:-.}"
+force_ca_rotation="${STRATUS_FORCE_CA_ROTATION:-false}"
+cert_dir="$root/certs"
+private_dir="$root/private"
+mkdir -p "$cert_dir" "$private_dir"
 renew_window_seconds=604800
-ca_key=private/stratus-lab-ca.key
-ca_cert=certs/stratus-ca.crt
-rgw_key=private/object-store.stratus.local.key
-rgw_csr=certs/object-store.stratus.local.csr
-rgw_cert=certs/object-store.stratus.local.crt
-extensions=private/rgw-extensions.cnf
+ca_key="$private_dir/stratus-lab-ca.key"
+ca_cert="$cert_dir/stratus-ca.crt"
+rgw_key="$private_dir/object-store.stratus.local.key"
+rgw_csr="$cert_dir/object-store.stratus.local.csr"
+rgw_cert="$cert_dir/object-store.stratus.local.crt"
+extensions="$private_dir/rgw-extensions.cnf"
 needs_renewal() {
   { [ -f "$1" ] && [ -f "$2" ]; } || return 0
   openssl x509 -checkend "$renew_window_seconds" -noout -in "$2" >/dev/null 2>&1 && return 1
@@ -32,7 +46,7 @@ key_matches_certificate() {
   key_public="$(openssl pkey -in "$1" -pubout 2>/dev/null)" || return 1
   [ "$cert_public" = "$key_public" ]
 }
-if needs_renewal "$ca_key" "$ca_cert" || ! key_matches_certificate "$ca_key" "$ca_cert"; then
+if [ "$force_ca_rotation" = true ] || needs_renewal "$ca_key" "$ca_cert" || ! key_matches_certificate "$ca_key" "$ca_cert"; then
   if [ -f "$ca_cert" ]; then
     echo "Existing Compose CA is expiring or does not match its key; regenerating it. Re-import $ca_cert wherever the old CA was trusted." >&2
   fi
@@ -55,13 +69,22 @@ openssl verify -CAfile "$ca_cert" "$rgw_cert"
 EOF
 
 if command -v openssl >/dev/null 2>&1; then
-  (cd "$HARNESS_DIR" && bash -c "$generator")
+  (cd "$HARNESS_DIR" && \
+    STRATUS_CERTIFICATE_ROOT="$certificate_root" \
+    STRATUS_FORCE_CA_ROTATION="$force_ca_rotation" \
+    bash -c "$generator")
 elif command -v docker >/dev/null 2>&1; then
-  docker run --rm --volume "$HARNESS_DIR:/work" --workdir /work --entrypoint /bin/bash "$ceph_image" -c "$generator"
+  docker run --rm --volume "$HARNESS_DIR:/work" --workdir /work \
+    --env "STRATUS_CERTIFICATE_ROOT=$certificate_root" \
+    --env "STRATUS_FORCE_CA_ROTATION=$force_ca_rotation" \
+    --entrypoint /bin/bash "$ceph_image" -c "$generator"
 elif command -v podman >/dev/null 2>&1; then
-  podman run --rm --volume "$HARNESS_DIR:/work" --workdir /work --entrypoint /bin/bash "$ceph_image" -c "$generator"
+  podman run --rm --volume "$HARNESS_DIR:/work" --workdir /work \
+    --env "STRATUS_CERTIFICATE_ROOT=$certificate_root" \
+    --env "STRATUS_FORCE_CA_ROTATION=$force_ca_rotation" \
+    --entrypoint /bin/bash "$ceph_image" -c "$generator"
 else
   fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/install-prerequisites.sh, then retry certificate generation."
 fi
-harden_windows_acl "$HARNESS_DIR/private"
-log "Disposable Compose certificate is current. Apply $HARNESS_DIR/certs/object-store.stratus.local.crt and its protected key to RGW; clients receive only $HARNESS_DIR/certs/stratus-ca.crt."
+harden_windows_acl "$HARNESS_DIR/$certificate_root/private"
+log "Disposable Compose certificate is current under $HARNESS_DIR/$certificate_root."

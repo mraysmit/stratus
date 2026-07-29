@@ -35,6 +35,7 @@ openssl_run() {
 scenario() { printf '\n'; log "=== SELFTEST: $1 ==="; }
 
 tmp_dir="$(mktemp -d)"
+staged_certificate_root=".rotation/selftest.$$"
 created_env=false
 moved_env=""
 cleanup() {
@@ -42,6 +43,9 @@ cleanup() {
   if [[ -n "$moved_env" && -f "$moved_env" ]]; then mv "$moved_env" "$HARNESS_DIR/.env"; fi
   if [[ "$created_env" == true ]]; then rm -f "$HARNESS_DIR/.env"; fi
   "$runtime" rmi "$fake_image" >/dev/null 2>&1 || true
+  case "$staged_certificate_root" in
+    .rotation/selftest.*) rm -rf "$HARNESS_DIR/$staged_certificate_root" ;;
+  esac
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
@@ -61,6 +65,18 @@ openssl_run x509 -checkend 604800 -noout -in certs/object-store.stratus.local.cr
 ca_after="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
 [[ "$ca_before" == "$ca_after" ]] || fail "The CA changed during leaf renewal; renewal must preserve the CA"
 log "PASS certificate-renewal"
+
+scenario "forced CA rotation generates and verifies an isolated replacement chain"
+STRATUS_CERTIFICATE_ROOT="$staged_certificate_root" \
+STRATUS_FORCE_CA_ROTATION=true \
+  "$lib_dir/generate-compose-certificates.sh" >/dev/null
+staged_ca="$(openssl_run x509 -sha256 -fingerprint -noout \
+  -in "$staged_certificate_root/certs/stratus-ca.crt")"
+[[ "$staged_ca" != "$ca_after" ]] || fail "Forced rotation reused the existing CA"
+openssl_run verify -CAfile "$staged_certificate_root/certs/stratus-ca.crt" \
+  "$staged_certificate_root/certs/object-store.stratus.local.crt" >/dev/null \
+  || fail "The staged replacement endpoint certificate does not verify against its CA"
+log "PASS isolated-forced-ca-rotation"
 
 scenario "verify-security rejects a verifier that exits 0 without denial evidence"
 if [[ ! -f "$HARNESS_DIR/.env" ]]; then
@@ -104,4 +120,4 @@ fi
 log "PASS teardown-without-env"
 
 printf '\n'
-log "SELFTEST PASS: certificate-renewal, vacuous-verifier-rejected, teardown-without-env"
+log "SELFTEST PASS: certificate-renewal, isolated-forced-ca-rotation, vacuous-verifier-rejected, teardown-without-env"
