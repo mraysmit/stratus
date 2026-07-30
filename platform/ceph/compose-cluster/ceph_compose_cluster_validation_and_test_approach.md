@@ -212,7 +212,11 @@ Three module groups matter for this doc.
 
 | Test | What it enforces |
 |---|---|
-| `CephRgwContractTest` | The reusable live Ceph RGW boundary, tagged `ceph-integration` and therefore not run by this layer; see [Layer 3](#layer-3-live-maven-contract-test-docker) |
+| `CephRgwContractTest` | The reusable live Ceph RGW boundary through the AWS SDK, tagged `ceph-integration` and therefore not run by this layer; see [Layer 3](#layer-3-live-maven-contract-test-docker) |
+| `CephS3RestContractTest` | The same S3 data boundary over raw AWS Signature Version 4 REST with no SDK in the call path, so a signing, payload-hash, or path-style defect cannot be absorbed by SDK compatibility handling. Tagged `ceph-integration` |
+| `CephAdminOpsRestContractTest` | The RGW Admin Operations API (`/admin/...`) through a scoped reader holding only `buckets=read` and `usage=read`, including proof that those caps cannot reach identity keys. Tagged `ceph-integration` |
+| `CephDashboardRestContractTest` | The Ceph Dashboard REST API: token authentication, rejection of unauthenticated callers, and bucket create/read/delete through `/api/rgw`. Tagged `ceph-integration` |
+| `CephTestArchitectureTest` | That every live contract stays deployment-neutral (no Compose or script machinery), consumes the supplied environment, and fails rather than skips when a live profile is selected |
 | `ComposeClusterContractTest` | The Compose implementation's `.env.template`/compose/script/ignore contract: no dead template variables, loopback port binding, correct service policies, secret ignore rules, and safe secret rotation |
 | `ComposeClusterScriptTest` | The Compose implementation's single-bash convention: no `.ps1` twins, fail-fast preambles, and Git Bash path handling |
 
@@ -416,11 +420,18 @@ reason. Subsequent restarts against preserved volumes are much faster.
 ## Layer 3: live Maven contract test (Docker)
 
 Separate from the container-level scripts above, the Ceph-owned test module has
-the deployment-neutral live JVM test `CephRgwContractTest` — the
-product-compatibility boundary. It runs from Maven on your host against any
-Ceph RGW endpoint supplied through the environment. The Compose cluster is one
-provider of that environment; cephadm and future implementations run the same
-test without copying or changing it.
+four deployment-neutral live JVM contracts — the product-compatibility
+boundary. They run from Maven on your host against any Ceph RGW endpoint
+supplied through the environment. The Compose cluster is one provider of that
+environment; cephadm and future implementations run the same tests without
+copying or changing them.
+
+| Contract | Surface |
+|---|---|
+| `CephRgwContractTest` | The S3 data API through the AWS SDK |
+| `CephS3RestContractTest` | The same data API over raw signed REST, no SDK |
+| `CephAdminOpsRestContractTest` | The RGW Admin Operations API (`/admin/...`) |
+| `CephDashboardRestContractTest` | The Ceph Dashboard REST API (`/api/auth`, `/api/rgw/...`) |
 
 ### Requirements
 
@@ -439,7 +450,17 @@ CEPH_DENIED_ACCESS_KEY=<the isolated identity access key from your .env>
 CEPH_DENIED_SECRET_KEY=<the matching isolated identity secret>
 CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
+CEPH_ADMIN_OPS_ACCESS_KEY=<the Admin Operations reader access key from your .env>
+CEPH_DASHBOARD_ENDPOINT=https://object-store.stratus.local:8444
+CEPH_DASHBOARD_USER=<the dashboard user from your .env>
+CEPH_DASHBOARD_PASSWORD=<the matching dashboard password>
 ```
+
+The Admin Operations and Dashboard secrets are omitted above only to keep the
+list readable; `CEPH_ADMIN_OPS_SECRET_KEY` is required alongside its access key.
+Every value comes from the generated `.env`, and
+`ceph-compose-run-live-tests.sh` exports the whole set for you rather than
+requiring any of it by hand.
 
 A selected live profile **fails** (never silently passes) if
 `CEPH_RGW_INTEGRATION=true` is absent, so a skipped live test can never be
