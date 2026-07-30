@@ -39,6 +39,15 @@ Run only the live shared contract from the repository root:
 ./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am
 ```
 
+Against the Compose cluster, use its wrapper instead. It supplies the
+environment, the live opt-in switch, and the CA truststore, so nothing has to be
+exported by hand. Arguments pass through to Maven:
+
+```bash
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh clean verify -Pall-tests
+```
+
 Selecting the live profile without `CEPH_RGW_INTEGRATION=true` fails instead of
 silently skipping the contract.
 

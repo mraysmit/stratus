@@ -17,7 +17,7 @@ document is about how you *test and validate* it.
 
 The environment also provides a browser-based Ceph admin console, officially
 named **Ceph Dashboard**, at `https://object-store.stratus.local:8444`. The
-`verify-dashboard` step validates its REST API, authentication, health, and
+`ceph-compose-verify-dashboard` step validates its REST API, authentication, health, and
 daemon inventory. For workstation hostname, certificate, and browser sign-in
 setup, use the [admin console procedure in the quick-start
 guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#appendix-a-optional-access-to-the-ceph-admin-console-dashboard).
@@ -49,7 +49,7 @@ single workstation. You do not need access to any shared Ceph cluster.
 
 Harness commands are given in **bash** (Linux/macOS/WSL/Git for Windows); the
 harness scripts ship as a single bash implementation (ADR-P1-002). Windows
-users run them from Git Bash, e.g. `bash scripts/lifecycle/startup.sh`.
+users run them from Git Bash, e.g. `bash scripts/lifecycle/ceph-compose-startup.sh`.
 
 ## The four validation layers at a glance
 
@@ -267,14 +267,14 @@ Run every command from the `platform/ceph/compose-cluster` directory.
 
 ```bash
 cd platform/ceph/compose-cluster
-./scripts/lifecycle/startup.sh
-./scripts/verify/bootstrap-buckets.sh
-./scripts/verify/check.sh
-./scripts/verify/verify-java.sh
-./scripts/verify/verify-security.sh
-./scripts/verify/verify-dashboard.sh
-./scripts/verify/verify-dataset.sh
-./scripts/lifecycle/shutdown.sh
+./scripts/lifecycle/ceph-compose-startup.sh
+./scripts/verify/ceph-compose-bootstrap-buckets.sh
+./scripts/verify/ceph-compose-verify-buckets.sh
+./scripts/verify/ceph-compose-verify-storage.sh
+./scripts/verify/ceph-compose-verify-security.sh
+./scripts/verify/ceph-compose-verify-dashboard.sh
+./scripts/verify/ceph-compose-verify-dataset.sh
+./scripts/lifecycle/ceph-compose-shutdown.sh
 ```
 
 To capture the whole run as a transcript (note `2>&1`, so stderr lines are
@@ -282,7 +282,7 @@ included), use the one-liner from the [README](README.md#workflow).
 
 ### Step by step
 
-**`startup`** — [startup.sh](scripts/lifecycle/startup.sh)
+**`startup`** — [ceph-compose-startup.sh](scripts/lifecycle/ceph-compose-startup.sh)
 
 - On first run it creates the git-ignored `.env` from
   [.env.template](.env.template), replacing the credential placeholders with
@@ -301,7 +301,7 @@ included), use the one-liner from the [README](README.md#workflow).
 daemons `healthy`. The one-shot `ceph-bootstrap` and `ceph-configure` jobs show
 as completed/exited 0.
 
-**`bootstrap-buckets`** — creates the five Stratus buckets (`stratus-landing`,
+**`ceph-compose-bootstrap-buckets`** — creates the five Stratus buckets (`stratus-landing`,
 `stratus-bronze`, `stratus-silver`, `stratus-gold`, `stratus-platform`) as the
 verifier identity, plus the isolated `stratus-denied` bucket owned by a
 *separate* RGW identity. That separate owner is what makes the cross-identity
@@ -319,7 +319,7 @@ steady-state cluster health target is `HEALTH_OK`, all three OSDs `up`/`in`, all
 placement groups `active+clean` (inspect directly with the commands in the
 [README](README.md#direct-inspection)).
 
-**`verify-java`** — [verify-java.sh](scripts/verify/verify-java.sh) — runs the prebuilt verifier image once
+**`ceph-compose-verify-storage`** — [ceph-compose-verify-storage.sh](scripts/verify/ceph-compose-verify-storage.sh) — runs the prebuilt verifier image once
 in `CONTRACT` mode against the live endpoint. It first writes an
 `environment-<timestamp>.json` snapshot (compose runtime and platform, resolved
 Ceph and verifier image digests, `ceph version`, `ceph status`, OSD tree), then
@@ -341,7 +341,7 @@ per check (`name` / `passed` / `detail`):
 evidence to `storage-verification-<timestamp>-FAILED.json`, and stops with a
 non-zero status.
 
-**`verify-security`** — [verify-security.sh](scripts/verify/verify-security.sh) — runs three *negative* tests
+**`ceph-compose-verify-security`** — [ceph-compose-verify-security.sh](scripts/verify/ceph-compose-verify-security.sh) — runs three *negative* tests
 where **failure of the operation is the expected, asserted outcome**. Each run
 is bracketed with an `EXPECTED`-failure banner so the transcript self-documents;
 authentication errors, access-denied errors, and PKIX certificate errors in this
@@ -364,7 +364,7 @@ match `PKIX`, `SSLHandshake`, or `certification path`.
 for example RGW accepts bad credentials, or Java trusts an untrusted cert — the
 script fails loudly; that is a real security regression, not a flaky test.
 
-**`verify-dashboard`** — [verify-dashboard.sh](scripts/verify/verify-dashboard.sh) —
+**`ceph-compose-verify-dashboard`** — [ceph-compose-verify-dashboard.sh](scripts/verify/ceph-compose-verify-dashboard.sh) —
 verifies the REST API for the Ceph admin console (Ceph Dashboard), published on
 port `8444`. This management interface is distinct from the S3 API on `8443`.
 The checks run with curl and jq inside `mon1`, so they cross the same nginx TLS
@@ -385,7 +385,7 @@ the session the test created).
 `PASS dashboard-rest-api` line naming `dashboard-verification-<ts>.json`. The
 host asserts on the evidence content, not just the exit code.
 
-**`verify-dataset`** — [verify-dataset.sh](scripts/verify/verify-dataset.sh) —
+**`ceph-compose-verify-dataset`** — [ceph-compose-verify-dataset.sh](scripts/verify/ceph-compose-verify-dataset.sh) —
 proves a dataset written to the object store reads back byte-for-byte
 identical. Inside the `s3client` container it generates 24 seeded files
 (1 KiB–64 KiB across nested directories), uploads them to
@@ -448,8 +448,8 @@ mistaken for a passing one.
 #### Why Layer 3 needs a hosts-file entry and Layer 2 does not
 
 This is the most common reason a Layer 3 run fails on a cluster that is
-demonstrably healthy. Layer 2 scripts such as `verify-java.sh`, `verify-dataset.sh`,
-and `verify-dashboard.sh` execute **inside containers**, where Compose DNS
+demonstrably healthy. Layer 2 scripts such as `ceph-compose-verify-storage.sh`, `ceph-compose-verify-dataset.sh`,
+and `ceph-compose-verify-dashboard.sh` execute **inside containers**, where Compose DNS
 already resolves `object-store.stratus.local` and the container truststore
 already holds the CA. Layer 3 runs on the **workstation JVM**, which uses neither.
 
@@ -500,7 +500,7 @@ regression gate.
 
 ## Layer 4: harness self-test (Docker, destructive)
 
-`selftest` validates the harness *scripts' own behavior* — the things the static
+`ceph-compose-verify-harness` validates the harness *scripts' own behavior* — the things the static
 guardrails in Layer 1 cannot observe because they only read files. Its final
 scenario exercises destructive reset, so it **refuses to run while any harness
 container or preserved cluster volume exists**.
@@ -513,7 +513,7 @@ lose). Then:
 
 ```bash
 cd platform/ceph/compose-cluster
-./scripts/verify/selftest.sh
+./scripts/verify/ceph-compose-verify-harness.sh
 ```
 
 ### What it proves
@@ -521,7 +521,7 @@ cd platform/ceph/compose-cluster
 | Scenario | What it does | Pass condition |
 |---|---|---|
 | Certificate renewal | Backdates the leaf certificate to near-expiry, reruns the generator | The leaf is renewed **and** the CA fingerprint is unchanged (renewal preserves the CA) |
-| Vacuous-verifier rejection | Builds a fake verifier image that prints `{}` and exits 0, points `VERIFIER_IMAGE` at it, runs `verify-security` | `verify-security` **rejects** it with "does not show invalid credentials being rejected" |
+| Vacuous-verifier rejection | Builds a fake verifier image that prints `{}` and exits 0, points `VERIFIER_IMAGE` at it, runs `ceph-compose-verify-security` | `ceph-compose-verify-security` **rejects** it with "does not show invalid credentials being rejected" |
 | Teardown without `.env` | Removes `.env`, runs `shutdown` then `reset --force` | Both succeed with no `.env` present |
 
 It cleans up after itself: it restores your `.env`, deletes the fake image, and
@@ -532,7 +532,7 @@ removes any evidence files it created.
 Three `PASS` lines followed by:
 
 ```text
-SELFTEST PASS: certificate-renewal, vacuous-verifier-rejected, teardown-without-env
+HARNESS CHECK PASS: certificate-renewal, vacuous-verifier-rejected, teardown-without-env
 ```
 
 Any other outcome means a harness script regressed — for example, the vacuous
@@ -547,18 +547,18 @@ A complete local validation from a clean state, in dependency order:
 1. Build the verifier image            (one-time / after verifier source changes)
 2. mvnw clean verify                   Layer 1  — no Docker
 3. cd platform/ceph/compose-cluster
-4. scripts/lifecycle/startup                     Layer 2  — boots the cluster
-5. scripts/verify/bootstrap-buckets
-6. scripts/verify/check
-7. scripts/verify/verify-java
-8. scripts/verify/verify-security
-9. scripts/verify/verify-dashboard
-10. scripts/verify/verify-dataset
+4. scripts/lifecycle/ceph-compose-startup                     Layer 2  — boots the cluster
+5. scripts/verify/ceph-compose-bootstrap-buckets
+6. scripts/verify/ceph-compose-verify-buckets
+7. scripts/verify/ceph-compose-verify-storage
+8. scripts/verify/ceph-compose-verify-security
+9. scripts/verify/ceph-compose-verify-dashboard
+10. scripts/verify/ceph-compose-verify-dataset
 11. (optional) mvnw clean verify -Pall-tests   Layer 3 — needs env + CA trust, cluster up
-12. (optional) scripts/verify/failure-drill   Layer 3 — real daemon outages and recovery
-13. scripts/lifecycle/shutdown
-14. scripts/lifecycle/reset --force              only if you want a fresh cluster next time
-15. scripts/verify/selftest                   Layer 4 — requires the harness stopped, volumes gone
+12. (optional) scripts/verify/ceph-compose-failure-drill   Layer 3 — real daemon outages and recovery
+13. scripts/lifecycle/ceph-compose-shutdown
+14. scripts/lifecycle/ceph-compose-reset --force              only if you want a fresh cluster next time
+15. scripts/verify/ceph-compose-verify-harness                   Layer 4 — requires the harness stopped, volumes gone
 ```
 
 Steps 2 and 4–10 are the normal validation. Add step 11 when the change touches
@@ -586,15 +586,15 @@ inverted meaning for the negatives, where `"success":true` means the denial
 
 | File | Produced by | Meaning of `success:true` |
 |---|---|---|
-| `storage-verification-<ts>.json` | `verify-java` | Every S3 contract check against RGW passed |
-| `storage-verification-<ts>-FAILED.json` | `verify-java` on failure | At least one contract check failed; open it to see which |
-| `environment-<ts>.json` | `verify-java` | Snapshot of runtime, image digests, and cluster state for the same run |
-| `storage-verifier-<ts>.0.log` | `verify-java` | Per-run verifier log; single-line ISO-8601 timestamped records |
-| `storage-invalid-credentials-<ts>.json` | `verify-security` | RGW rejected invalid credentials |
-| `storage-cross-identity-denial-<ts>.json` | `verify-security` | RGW denied cross-identity bucket access |
-| `storage-untrusted-tls-<ts>.log` | `verify-security` | Captured output showing the JVM rejected the untrusted certificate (this is a log, not JSON) |
-| `dashboard-verification-<ts>.json` | `verify-dashboard` | Every Ceph Dashboard REST API check passed, including the 401 for unauthenticated requests |
-| `dataset-verification-<ts>.json` | `verify-dataset` | The generated dataset uploaded, read back byte-for-byte identical, and was purged |
+| `storage-verification-<ts>.json` | `ceph-compose-verify-storage` | Every S3 contract check against RGW passed |
+| `storage-verification-<ts>-FAILED.json` | `ceph-compose-verify-storage` on failure | At least one contract check failed; open it to see which |
+| `environment-<ts>.json` | `ceph-compose-verify-storage` | Snapshot of runtime, image digests, and cluster state for the same run |
+| `storage-verifier-<ts>.0.log` | `ceph-compose-verify-storage` | Per-run verifier log; single-line ISO-8601 timestamped records |
+| `storage-invalid-credentials-<ts>.json` | `ceph-compose-verify-security` | RGW rejected invalid credentials |
+| `storage-cross-identity-denial-<ts>.json` | `ceph-compose-verify-security` | RGW denied cross-identity bucket access |
+| `storage-untrusted-tls-<ts>.log` | `ceph-compose-verify-security` | Captured output showing the JVM rejected the untrusted certificate (this is a log, not JSON) |
+| `dashboard-verification-<ts>.json` | `ceph-compose-verify-dashboard` | Every Ceph Dashboard REST API check passed, including the 401 for unauthenticated requests |
+| `dataset-verification-<ts>.json` | `ceph-compose-verify-dataset` | The generated dataset uploaded, read back byte-for-byte identical, and was purged |
 
 Evidence must never contain RGW secret keys, CA private keys, or the TLS server
 private key. Note that transcripts legitimately contain the JVM line `Picked up
@@ -607,17 +607,17 @@ section](README.md#evidence) has the full rationale.
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `VERIFIER_IMAGE must identify a prebuilt verifier image` or image-not-found on `verify-java` | No local image built | Do the [one-time image build](#one-time-setup-build-the-verifier-image) |
+| `VERIFIER_IMAGE must identify a prebuilt verifier image` or image-not-found on `ceph-compose-verify-storage` | No local image built | Do the [one-time image build](#one-time-setup-build-the-verifier-image) |
 | Startup fails naming a network on `172.28.0.0/24` | Another cluster (often one left under an old project name) holds the subnet | Tear down whatever owns it (`docker compose -p <old-project> down`) and retry |
 | `Neither Docker Compose nor Podman is available` | No container runtime on PATH | Install Docker/Podman, or set `COMPOSE_IMPLEMENTATION` |
-| `verify-security` fails saying a denial was not shown | A security negative did not deny as required (real regression) — or a genuinely broken cluster | Read the named evidence file; do not treat this as flaky |
+| `ceph-compose-verify-security` fails saying a denial was not shown | A security negative did not deny as required (real regression) — or a genuinely broken cluster | Read the named evidence file; do not treat this as flaky |
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
 | `clean verify` fails in `ComposeClusterScriptTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
 | Every live JVM test fails to connect while Layer 2 scripts pass | The workstation does not resolve `object-store.stratus.local`; Layer 2 runs inside containers and never needs it | Add the [hosts-file entry](#why-layer-3-needs-a-hosts-file-entry-and-layer-2-does-not) and confirm with `Resolve-DnsName object-store.stratus.local` |
-| `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
-| Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/common.sh` |
-| First verifier run reports `UnknownHostException: object-store.stratus.local` | The verifier script is stale, or Docker DNS did not register the proxy alias within the bounded readiness period | Use the current `verify-java` script, then inspect the `stratus-ceph-local_ceph` network and the `rgw-proxy` alias; do not add an ad hoc hosts entry inside the container |
+| `ceph-compose-verify-harness` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/ceph-compose-shutdown` then `scripts/lifecycle/ceph-compose-reset --force`, then rerun |
+| Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/ceph-compose-common.sh` |
+| First verifier run reports `UnknownHostException: object-store.stratus.local` | The verifier script is stale, or Docker DNS did not register the proxy alias within the bounded readiness period | Use the current `ceph-compose-verify-storage` script, then inspect the `stratus-ceph-local_ceph` network and the `rgw-proxy` alias; do not add an ad hoc hosts entry inside the container |
 | A shell script fails with `/usr/bin/env: 'bash\r'` or `^M` | CRLF line endings reached a Linux container | Keep `.gitattributes` with `*.sh text eol=lf`, restore the affected script with LF endings, and rerun `bash -n` |
 | Docker Desktop works while `wsl -l -v` shows Ubuntu stopped | Expected Docker Desktop architecture | No remediation is needed. Git Bash and PowerShell use Docker Desktop directly; the user Ubuntu distribution is not a prerequisite |
 
