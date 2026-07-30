@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-25
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Live verification of the Ceph Dashboard REST API published on port 8444.
 # The checks run inside mon1 because the pinned Ceph image guarantees curl
@@ -17,8 +17,8 @@ source "$(dirname "$0")/../lib/common.sh"
 # reported version identifies Ceph, and logout revokes the session.
 
 load_environment
-: "${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required; run startup.sh to generate it}"
-: "${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required; run startup.sh to generate it}"
+: "${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required; run ceph-compose-startup.sh to generate it}"
+: "${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required; run ceph-compose-startup.sh to generate it}"
 : "${CEPH_DASHBOARD_ENDPOINT:?CEPH_DASHBOARD_ENDPOINT is required; update .env from .env.template}"
 
 evidence_dir="${HARNESS_DIR}/evidence"
