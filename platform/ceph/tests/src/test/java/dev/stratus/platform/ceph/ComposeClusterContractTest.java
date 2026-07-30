@@ -140,7 +140,7 @@ final class ComposeClusterContractTest {
     @Test
     void certificateGeneratorPreservesPublicAndPrivateFileBoundaries() {
         List<String> violations = new ArrayList<>();
-        String generator = Repo.read(HARNESS.resolve("scripts/lib/generate-compose-certificates.sh"));
+        String generator = Repo.read(HARNESS.resolve("scripts/lib/ceph-compose-generate-certificates.sh"));
         if (!generator.contains("chmod 0644 \"$ca_cert\" \"$rgw_cert\"")) {
             violations.add("public certificates must be readable by non-root client containers");
         }
@@ -155,7 +155,7 @@ final class ComposeClusterContractTest {
 
     @Test
     void secretRotationUsesOverlapCutoverAndRevocationWithoutDestroyingData() {
-        String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/rotate-secrets.sh"));
+        String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/ceph-compose-rotate-secrets.sh"));
         List<String> violations = new ArrayList<>();
         int create = rotation.indexOf("set_rgw_key create");
         int cutover = rotation.indexOf("log \"CUTOVER PASS:");
@@ -185,7 +185,7 @@ final class ComposeClusterContractTest {
             || !rotation.contains("Rotation failed after revocation began")) {
             violations.add("rotation must distinguish safe rollback from the post-revocation boundary");
         }
-        if (rotation.contains("down --volumes") || rotation.contains("reset.sh")) {
+        if (rotation.contains("down --volumes") || rotation.contains("ceph-compose-reset.sh")) {
             violations.add("secret rotation must never destroy Ceph volumes or reset the cluster");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));

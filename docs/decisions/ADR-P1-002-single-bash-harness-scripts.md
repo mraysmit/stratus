@@ -27,7 +27,7 @@ removed and must not reappear.
 - Windows-only hardening is preserved inside the bash scripts behind an OS
   check: on Windows, the certificate script applies `icacls` restrictions to
   the private-key directory, where `chmod` alone is ineffective on NTFS.
-- PowerShell users invoke the scripts as `bash scripts/lifecycle/startup.sh`.
+- PowerShell users invoke the scripts as `bash scripts/lifecycle/ceph-compose-startup.sh`.
 
 ## Consequences
 

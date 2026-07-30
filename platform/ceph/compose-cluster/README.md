@@ -156,7 +156,7 @@ workstation. Podman compatibility remains a separate runtime qualification.
 
 - Docker Desktop or Docker Engine with Compose v2
 - Bash on Linux, macOS, WSL, or Git for Windows (the scripts are bash-only;
-  PowerShell users run them as `bash scripts/lifecycle/startup.sh`)
+  PowerShell users run them as `bash scripts/lifecycle/ceph-compose-startup.sh`)
 - enough Docker memory and disk for the official Ceph image and three 1 GiB disposable BlueStore volumes
 - a prebuilt verifier image identified by `VERIFIER_IMAGE`
 
@@ -172,10 +172,10 @@ instead of reconstructing their `docker compose` calls. The repository
 On Windows 11 the recommended terminal is **Git Bash**, ideally hosted in a
 Windows Terminal profile (Windows Terminal usually auto-detects Git Bash and
 adds one). PowerShell or cmd work as an outer shell that launches
-`bash scripts/lifecycle/startup.sh`, but they cannot execute `.sh` scripts
+`bash scripts/lifecycle/ceph-compose-startup.sh`, but they cannot execute `.sh` scripts
 natively, and PowerShell ports of the scripts must not reappear (ADR-P1-002).
 Running the harness from WSL bash is not the validated path: the path handling
-in `scripts/lib/common.sh` is MSYS-specific (`cygpath` does not exist in WSL)
+in `scripts/lib/ceph-compose-common.sh` is MSYS-specific (`cygpath` does not exist in WSL)
 and Docker Desktop volume-mount paths behave differently there.
 
 ## Configuration
@@ -192,9 +192,9 @@ Change `VERIFIER_IMAGE` to the immutable image reference produced by the build s
 
 The local CA, server certificate, and private key are generated into ignored `certs/` and `private/` directories. Certificates renew automatically at startup when within seven days of expiry; leaf renewal preserves the existing CA. Client and verifier containers receive only the public CA. The server private key is mounted only into the TLS proxy and is deliberately unencrypted — it must never leave the developer machine.
 
-On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/lifecycle/install-prerequisites.sh` when necessary.
+On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/lifecycle/ceph-compose-install-prerequisites.sh` when necessary.
 
-`verify-java` also waits for the RGW hostname to resolve from a newly created
+`ceph-compose-verify-storage` also waits for the RGW hostname to resolve from a newly created
 verifier container before launching the contract. This closes the short Docker
 DNS registration window that can occur immediately after creating the Compose
 network; an unresolved name after the bounded wait is treated as a real startup
@@ -223,7 +223,7 @@ Scripts live in two directories with a strict split:
   and pools policy and the dashboard, `daemon.sh` is the entrypoint every
   Ceph daemon runs), plus the proxy's `nginx.conf`. Never run these by hand.
   Despite the similar name, `ceph/bootstrap.sh` (cluster identity) is
-  unrelated to `scripts/verify/bootstrap-buckets` (S3 buckets).
+  unrelated to `scripts/verify/ceph-compose-bootstrap-buckets` (S3 buckets).
 
 The host-side scripts are grouped by role:
 
@@ -236,21 +236,22 @@ In the order you meet them:
 
 | Script | What it does | When to run it |
 |---|---|---|
-| `lifecycle/install-prerequisites` | Installs OpenSSL if the host lacks it | Once per machine, only if needed |
-| `lifecycle/startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health | First, every session |
-| `lifecycle/rotate-secrets` | Rotates both RGW key pairs, the Dashboard password, the disposable CA, and the endpoint certificate without deleting Ceph data | When local credentials or certificate keys may be exposed |
-| `verify/bootstrap-buckets` | Creates the five Stratus buckets and the denied-owner bucket through the S3 API | After startup, once per cluster |
-| `verify/check` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
-| `verify/verify-java` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
-| `verify/verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
-| `verify/verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
-| `verify/verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
-| `lifecycle/shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
-| `lifecycle/reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
-| `verify/failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
-| `verify/selftest` | Verifies the harness scripts' own runtime behavior (see "Harness self-test") | After changing the scripts |
-| `lib/generate-compose-certificates` | Creates or renews the disposable Compose CA and server certificate | Called by startup; rarely run directly |
-| `lib/common` | Shared helpers sourced by the other scripts | Never directly |
+| `lifecycle/ceph-compose-install-prerequisites` | Installs OpenSSL if the host lacks it | Once per machine, only if needed |
+| `lifecycle/ceph-compose-startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health | First, every session |
+| `lifecycle/ceph-compose-rotate-secrets` | Rotates both RGW key pairs, the Dashboard password, the disposable CA, and the endpoint certificate without deleting Ceph data | When local credentials or certificate keys may be exposed |
+| `verify/ceph-compose-bootstrap-buckets` | Creates the five Stratus buckets and the denied-owner bucket through the S3 API | After startup, once per cluster |
+| `verify/ceph-compose-verify-buckets` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
+| `verify/ceph-compose-verify-storage` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
+| `verify/ceph-compose-verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
+| `verify/ceph-compose-verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
+| `verify/ceph-compose-verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
+| `verify/ceph-compose-run-live-tests` | Runs the live Maven contracts in [../tests](../tests/README.md) against this cluster, supplying the environment, the live opt-in switch, and a CA truststore the workstation JVM needs. Arguments pass through to Maven | Verifying Java changes against the live cluster |
+| `lifecycle/ceph-compose-shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
+| `lifecycle/ceph-compose-reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
+| `verify/ceph-compose-failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
+| `verify/ceph-compose-verify-harness` | Verifies the harness scripts' own runtime behavior (see "Harness self-test") | After changing the scripts |
+| `lib/ceph-compose-generate-certificates` | Creates or renews the disposable Compose CA and server certificate | Called by startup; rarely run directly |
+| `lib/ceph-compose-common` | Shared helpers sourced by the other scripts | Never directly |
 
 ## Workflow
 
@@ -258,14 +259,14 @@ From `platform/ceph/compose-cluster`, in bash (Linux, macOS, WSL, or Git for
 Windows):
 
 ```bash
-./scripts/lifecycle/startup.sh
-./scripts/verify/bootstrap-buckets.sh
-./scripts/verify/check.sh
-./scripts/verify/verify-java.sh
-./scripts/verify/verify-security.sh
-./scripts/verify/verify-dashboard.sh
-./scripts/verify/verify-dataset.sh
-./scripts/lifecycle/shutdown.sh
+./scripts/lifecycle/ceph-compose-startup.sh
+./scripts/verify/ceph-compose-bootstrap-buckets.sh
+./scripts/verify/ceph-compose-verify-buckets.sh
+./scripts/verify/ceph-compose-verify-storage.sh
+./scripts/verify/ceph-compose-verify-security.sh
+./scripts/verify/ceph-compose-verify-dashboard.sh
+./scripts/verify/ceph-compose-verify-dataset.sh
+./scripts/lifecycle/ceph-compose-shutdown.sh
 ```
 
 `shutdown` removes containers and the project network but preserves Ceph volumes so the environment can restart.
@@ -274,7 +275,7 @@ Capture run transcripts into the ignored harness-local `logs/` directory (the re
 
 ```bash
 timestamp=$(date +%Y%m%d-%H%M%S)
-{ ./scripts/lifecycle/startup.sh && ./scripts/verify/bootstrap-buckets.sh && ./scripts/verify/check.sh && ./scripts/verify/verify-java.sh && ./scripts/verify/verify-security.sh && ./scripts/verify/verify-dashboard.sh && ./scripts/verify/verify-dataset.sh && ./scripts/lifecycle/shutdown.sh; } 2>&1 |
+{ ./scripts/lifecycle/ceph-compose-startup.sh && ./scripts/verify/ceph-compose-bootstrap-buckets.sh && ./scripts/verify/ceph-compose-verify-buckets.sh && ./scripts/verify/ceph-compose-verify-storage.sh && ./scripts/verify/ceph-compose-verify-security.sh && ./scripts/verify/ceph-compose-verify-dashboard.sh && ./scripts/verify/ceph-compose-verify-dataset.sh && ./scripts/lifecycle/ceph-compose-shutdown.sh; } 2>&1 |
     tee "logs/ceph-local-verification-$timestamp.txt"
 ```
 
@@ -285,13 +286,13 @@ Ceph volumes. With the cluster running and healthy, first run the non-mutating
 preflight:
 
 ```bash
-./scripts/lifecycle/rotate-secrets.sh --preflight
+./scripts/lifecycle/ceph-compose-rotate-secrets.sh --preflight
 ```
 
 Then start the confirmed rotation:
 
 ```bash
-./scripts/lifecycle/rotate-secrets.sh
+./scripts/lifecycle/ceph-compose-rotate-secrets.sh
 ```
 
 The script creates replacement RGW keys alongside the old keys, stages a new
@@ -311,14 +312,14 @@ host-side clients. Use `--force` only for non-interactive local automation.
 Reset removes only this Compose project's disposable Ceph configuration and data volumes. It preserves `.env`, generated certificates, pulled images, and evidence. It prompts for confirmation unless forced.
 
 ```bash
-./scripts/lifecycle/reset.sh --force
+./scripts/lifecycle/ceph-compose-reset.sh --force
 ```
 
 The next startup creates a new Ceph cluster, the verifier identity, and the separate owner used for the access-boundary test.
 
 ## Failure drills
 
-`scripts/verify/failure-drill.sh` breaks the real cluster on purpose and
+`scripts/verify/ceph-compose-failure-drill.sh` breaks the real cluster on purpose and
 proves it behaves as claimed — nothing is simulated. With the harness running
 and healthy, the drill executes three scenarios in sequence, each bracketed by
 `EXPECTED-DEGRADATION` banners so transcripts self-document:
@@ -341,9 +342,9 @@ production resilience.
 
 ## Harness self-test
 
-`scripts/verify/selftest.sh` verifies the harness scripts' own runtime behavior:
+`scripts/verify/ceph-compose-verify-harness.sh` verifies the harness scripts' own runtime behavior:
 certificate renewal preserves the CA, forced rotation creates a distinct
-replacement chain in an isolated staging directory, `verify-security` rejects
+replacement chain in an isolated staging directory, `ceph-compose-verify-security` rejects
 a verifier that exits 0 without denial evidence, and shutdown/reset work when
 `.env` is missing. It complements the static checks in
 `platform/ceph/tests`. The self-test refuses to run while harness
@@ -369,7 +370,7 @@ To open it from the host machine:
 1. Start the harness. From this directory (`platform/ceph/compose-cluster`), run:
 
    ```bash
-   ./scripts/lifecycle/startup.sh
+   ./scripts/lifecycle/ceph-compose-startup.sh
    ```
 
    This boots the whole cluster — the same first step as the Workflow section
@@ -388,7 +389,7 @@ To open it from the host machine:
    [../tests](../tests/README.md), which run on the workstation JVM rather than
    inside a container. The harness verification scripts run inside containers
    and resolve the name through Compose DNS, so they pass whether or not this
-   entry exists — a passing `verify-java` is not evidence that the live Maven
+   entry exists — a passing `ceph-compose-verify-storage` is not evidence that the live Maven
    profile can connect.
 
 3. Read the sign-in credentials from the generated `.env`:
@@ -441,7 +442,7 @@ The steady-state developer health target is `HEALTH_OK`, with all three OSDs `up
 
 ## Evidence
 
-Verifier reports (pure JSON, written directly by the verifier via `STRATUS_EVIDENCE_FILE`, each opening with a `description` field stating what the evidence proves), per-run rotating verifier logs (`storage-verifier-<timestamp>.N.log`, single-line ISO-8601 timestamped records), and an `environment-<timestamp>.json` snapshot are written directly under the ignored `evidence/` directory. The snapshot is captured by `verify-java` and records the compose runtime and platform, the resolved Ceph and verifier image identities, `ceph version`, `ceph status`, and the OSD tree. Evidence must record:
+Verifier reports (pure JSON, written directly by the verifier via `STRATUS_EVIDENCE_FILE`, each opening with a `description` field stating what the evidence proves), per-run rotating verifier logs (`storage-verifier-<timestamp>.N.log`, single-line ISO-8601 timestamped records), and an `environment-<timestamp>.json` snapshot are written directly under the ignored `evidence/` directory. The snapshot is captured by `ceph-compose-verify-storage` and records the compose runtime and platform, the resolved Ceph and verifier image identities, `ceph version`, `ceph status`, and the OSD tree. Evidence must record:
 
 - Ceph image digest and `ceph version`
 - Docker version and architecture

@@ -803,7 +803,7 @@ Developer prerequisites:
 - disposable RGW credentials in the ignored local `.env` file
 - the pinned storage verifier image is available from the approved registry
 
-For Windows workstations, run the scripts from Git for Windows Bash (harness scripts ship as a single bash implementation per ADR-P1-002; PowerShell users invoke them as `bash scripts/lifecycle/startup.sh`). Git Bash runs directly against Docker Desktop; a user Ubuntu WSL distribution does not need to be running. The Bash scripts centralize MSYS path handling so Windows host paths reach `docker.exe` in Windows form while container paths such as `/certs` and `/evidence` remain Linux paths. Do not reconstruct the underlying Compose invocation outside the supplied scripts. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
+For Windows workstations, run the scripts from Git for Windows Bash (harness scripts ship as a single bash implementation per ADR-P1-002; PowerShell users invoke them as `bash scripts/lifecycle/ceph-compose-startup.sh`). Git Bash runs directly against Docker Desktop; a user Ubuntu WSL distribution does not need to be running. The Bash scripts centralize MSYS path handling so Windows host paths reach `docker.exe` in Windows form while container paths such as `/certs` and `/evidence` remain Linux paths. Do not reconstruct the underlying Compose invocation outside the supplied scripts. The repository is not mounted into the verifier container; the build system publishes the verifier image before developers run this harness.
 
 The complete PowerShell and Git Bash lifecycle was validated on 2026-07-20 with Docker Desktop: cluster startup, bucket bootstrap and smoke checks, all twelve Java S3 contract checks, three security-negative checks, RGW/MON/OSD failure drills and recovery, shutdown, destructive reset, and the harness self-test. This evidence does not qualify Podman; Podman remains a separate runtime compatibility path.
 
@@ -833,20 +833,20 @@ platform/ceph/compose-cluster/
   evidence/                  # ignored verifier evidence
   scripts/                   # bash-only harness scripts (ADR-P1-002)
     lib/
-      common.sh
-      generate-compose-certificates.sh
+      ceph-compose-common.sh
+      ceph-compose-generate-certificates.sh
     lifecycle/
-      install-prerequisites.sh
-      reset.sh
-      shutdown.sh
-      startup.sh
+      ceph-compose-install-prerequisites.sh
+      ceph-compose-reset.sh
+      ceph-compose-shutdown.sh
+      ceph-compose-startup.sh
     verify/
-      bootstrap-buckets.sh
-      check.sh
-      failure-drill.sh
-      selftest.sh
-      verify-java.sh
-      verify-security.sh
+      ceph-compose-bootstrap-buckets.sh
+      ceph-compose-verify-buckets.sh
+      ceph-compose-failure-drill.sh
+      ceph-compose-verify-harness.sh
+      ceph-compose-verify-storage.sh
+      ceph-compose-verify-security.sh
 ```
 
 The directory should be created once and then reused by developers. `.env` and private key material are local files and must not be committed.
@@ -923,7 +923,7 @@ keys restricted. Client and verifier containers receive only
 `certs/stratus-ca.crt`; only `rgw-proxy` mounts the endpoint private key.
 
 The generator uses host OpenSSL when available and falls back to the pinned
-Ceph image. The `install-prerequisites` script provides explicit host
+Ceph image. The `ceph-compose-install-prerequisites` script provides explicit host
 installation instructions when OpenSSL itself is required. Validate the
 generated public CA at any time with:
 
@@ -931,7 +931,7 @@ generated public CA at any time with:
 openssl x509 -in certs/stratus-ca.crt -noout -subject -issuer -dates
 ```
 
-### `scripts/lifecycle/startup.sh`
+### `scripts/lifecycle/ceph-compose-startup.sh`
 
 The startup script is idempotent. It creates `.env` from the template
 when absent, generates disposable credentials, creates or renews the local CA and
@@ -940,13 +940,13 @@ cluster, and waits for every required service health gate. Certificate renewal
 also verifies that the certificate and private key match. On Git Bash the
 shared wrapper handles Windows host paths and preserves Linux container paths.
 
-### `scripts/verify/check.sh`
+### `scripts/verify/ceph-compose-verify-buckets.sh`
 
 The check script is safe to run repeatedly. It inspects Compose
 service state and requires all five Stratus buckets to be visible through the
 trusted RGW HTTPS endpoint using the prebuilt rclone client.
 
-### `scripts/verify/verify-java.sh`
+### `scripts/verify/ceph-compose-verify-storage.sh`
 
 The Java verification script is safe to run repeatedly. It captures
 the runtime, image identities, Ceph status, and OSD tree; waits until the RGW
@@ -954,7 +954,7 @@ hostname resolves from the one-off verifier container; runs the pinned verifier
 image; and persists the twelve-check JSON report plus the timestamped rolling
 log. Artifact construction and publication happen before this script runs.
 
-### `scripts/lifecycle/shutdown.sh`
+### `scripts/lifecycle/ceph-compose-shutdown.sh`
 
 The shutdown script is idempotent and works even when `.env` is absent.
 It removes this Compose project's containers and network while preserving
@@ -973,54 +973,54 @@ find scripts -type f -name '*.sh' -exec chmod +x {} +
 Start the harness:
 
 ```bash
-scripts/lifecycle/startup.sh
+scripts/lifecycle/ceph-compose-startup.sh
 ```
 
 Bootstrap the Stratus buckets (creates the five Stratus buckets and the isolated denial-test bucket):
 
 ```bash
-scripts/verify/bootstrap-buckets.sh
+scripts/verify/ceph-compose-bootstrap-buckets.sh
 ```
 
 Check the harness:
 
 ```bash
-scripts/verify/check.sh
+scripts/verify/ceph-compose-verify-buckets.sh
 ```
 
 Run Java verification:
 
 ```bash
-scripts/verify/verify-java.sh
+scripts/verify/ceph-compose-verify-storage.sh
 ```
 
 Run the Java security negatives. This uses the same prebuilt image with deliberately invalid credentials, the verifier identity against a bucket owned by a separate RGW identity, and an untrusted verifier service with no lab CA mount. The command succeeds only when all three attempts fail closed for the expected reason:
 
 ```bash
-scripts/verify/verify-security.sh
+scripts/verify/ceph-compose-verify-security.sh
 ```
 
 Run the daemon-level resilience drill after changes to Ceph topology,
 health-checking, proxying, or recovery behavior:
 
 ```bash
-scripts/verify/failure-drill.sh
+scripts/verify/ceph-compose-failure-drill.sh
 ```
 
 Stop the harness:
 
 ```bash
-scripts/lifecycle/shutdown.sh
+scripts/lifecycle/ceph-compose-shutdown.sh
 ```
 
 Shutdown preserves the cluster volumes. Use the explicit destructive reset
 only when a fresh cluster is intended:
 
 ```bash
-scripts/lifecycle/reset.sh --force
+scripts/lifecycle/ceph-compose-reset.sh --force
 ```
 
-After changing the harness scripts, run `scripts/verify/selftest.sh` with the
+After changing the harness scripts, run `scripts/verify/ceph-compose-verify-harness.sh` with the
 harness stopped and its disposable volumes removed. The self-test verifies
 certificate renewal, rejection of a vacuous security verifier, and teardown
 without `.env`.
@@ -1363,7 +1363,7 @@ This section is the executable work breakdown for Increment 1. The technical sec
 | `P1-1.3-D1` | `P1-1.3` | Developer | Generate the developer CA chain and RGW certificate without copying private keys into client/verifier containers. Done when hostname validation succeeds. | Security engineering owner | `P1-1.2-D1` | ignored `platform/ceph/compose-cluster/certs/` and `private/` paths | `openssl verify`, endpoint handshake, SAN validation, file-permission evidence | D5 | Security owner | Certificate chain verification passed; regeneration from destroyed keys re-verified 2026-07-22; security acceptance remains | Verified |
 | `P1-1.2-D2` | `P1-1.2` | Developer | Deploy the disposable Compose Ceph endpoint. Done when three MONs, two MGRs, three BlueStore OSDs, and two RGWs run from the pinned image and the single-infrastructure-host limitations are documented. | Storage owner | `P1-1.2-D1` | `platform/ceph/compose-cluster/compose.yaml`; `platform/ceph/compose-cluster/ceph/` | `ceph status`, quorum and manager inventory, OSD tree and pool detail, RGW S3 round trip, runtime/version output | D4, D7, D13 | Operations owner | Verified `HEALTH_OK`, 3/3 MON quorum, active/standby MGR, 3 OSDs `up`/`in`, two RGWs, and 321 placement groups `active+clean`; production acceptance remains | Verified |
 | `P1-1.3-D2` | `P1-1.3` | Developer | Configure the Compose-cluster RGW HTTPS proxy and apply the developer certificate. Done when trusted clients connect and plaintext/insecure paths are rejected. | Storage owner | `P1-1.3-D1`, `P1-1.2-D2` | `platform/ceph/compose-cluster/ceph/nginx.conf`; Compose TLS mounts | TLS handshake, CA validation, HTTPS S3 list, negative HTTP or untrusted-CA test | D5 | Security owner | Trusted HTTPS passed; untrusted CA was rejected and plaintext RGW was not published; security acceptance remains | Verified |
-| `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and acceptance-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | developer RGW users plus `platform/ceph/compose-cluster/scripts/verify/bootstrap-buckets.*` and `verify-security.*` | Bucket/user inventory plus invalid-credential and cross-identity denial reports | D6, D8, D9 | Security owner | Positive operations, invalid credentials, and cross-identity HTTP 403 passed in the developer environment, re-validated 2026-07-22 with regenerated credentials; canonical evidence indexing and security acceptance remain | Built |
+| `P1-1.4-D1` | `P1-1.4` | Developer | Create the five buckets and acceptance-equivalent scoped identities. Done when positive and negative access tests match the policy matrix. | Storage owner | `P1-1.3-D2` | developer RGW users plus `platform/ceph/compose-cluster/scripts/verify/ceph-compose-bootstrap-buckets.*` and `ceph-compose-verify-security.*` | Bucket/user inventory plus invalid-credential and cross-identity denial reports | D6, D8, D9 | Security owner | Positive operations, invalid credentials, and cross-identity HTTP 403 passed in the developer environment, re-validated 2026-07-22 with regenerated credentials; canonical evidence indexing and security acceptance remain | Built |
 | `P1-1.2-D3` | `P1-1.2` | Developer | Implement the idempotent Compose Ceph and client/verifier harness. Done when startup, check, verifier, shutdown, reset, and repeated startup succeed without manual repair. | Developer-platform owner | `P1-1.3-D1`, `P1-1.4-D1`, `P1-1.6-S1` | `platform/ceph/compose-cluster/compose.yaml`; `.env.template`; lifecycle scripts | Compose validation, real Ceph daemon health, HTTPS S3 round trip, clean reset/start transcript, no Compose build configuration | D3, D12 | Platform owner | Empty-volume recreation, rclone, and the externally prebuilt Java verifier passed; reset/shutdown also remove profiled verifier containers; full lifecycle re-validated 2026-07-22 under the single-bash implementation (ADR-P1-002); formal image publication remains outside this task | Verified |
 | `P1-1.6-D1` | `P1-1.6` | Developer | Run the Java storage contract suite from the published verifier image. Done when all bucket, object, multipart, TLS, and access-boundary tests pass. | Quality engineering owner | `P1-1.2-D3` | `verification/storage/`; `platform/ceph/compose-cluster/evidence/` | Image reference, 100% coverage report, twelve-check live report, invalid-auth/policy/TLS reports, persistent debug log | D10, D12 | Data platform owner | 18 storage-verifier tests and 15 repository guardrail tests pass; live object, pagination, concurrency, multipart, invalid-auth, cross-identity, and untrusted-TLS checks also pass from the developer-built image, most recently 2026-07-22 against a regenerated certificate chain. Immutable registry publication remains deferred under `P1-0.1` | Built |
 | `P1-1.6-D2` | `P1-1.6` | Developer | Run storage-only concurrency, multipart, small-object, and prefix-listing baselines. Done when declared thresholds pass or an owned decision record accepts a variance. | Performance engineering owner | `P1-1.6-D1` | `verification/storage/`; benchmark result bundle | Raw runs, p50/p95/p99, throughput, errors/retries, object counts, environment manifest | D11 | Platform owner | Functional eight-way concurrency, forced pagination, multipart, throttling retry, and bounded timeout checks pass; quantitative latency/throughput/object-count thresholds and benchmark evidence remain | In progress |
@@ -1456,7 +1456,7 @@ No production dataset should be onboarded based only on a single-host or non-sec
 - Confirm firewall access to the RGW HTTPS port.
 - Confirm TLS certificate SAN includes the endpoint hostname.
 - For a verifier-only `UnknownHostException`, use the current
-  `verify-java` script, which performs a bounded DNS readiness probe from the
+  `ceph-compose-verify-storage` script, which performs a bounded DNS readiness probe from the
   one-off verifier container. If that probe expires, inspect the
   `stratus-ceph-local_ceph` network and the `rgw-proxy` network alias instead of
   adding an ad hoc container hosts entry.
@@ -1467,7 +1467,7 @@ No production dataset should be onboarded based only on a single-host or non-sec
   `C:/Program Files/Git/certs/stratus-ca.crt` means a raw Compose command
   bypassed the shared Bash wrapper or the scripts are stale.
 - Run the checked-in lifecycle and verification scripts. Keep the
-  `MSYS_NO_PATHCONV` and `cygpath` handling in `scripts/lib/common.sh`.
+  `MSYS_NO_PATHCONV` and `cygpath` handling in `scripts/lib/ceph-compose-common.sh`.
 - Keep `.gitattributes` configured with `*.sh text eol=lf`; `/usr/bin/env:
   'bash\r'` or visible `^M` indicates that CRLF reached a Linux container.
 

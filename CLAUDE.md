@@ -39,7 +39,7 @@ never a global Maven).
 
 - Harness scripts are bash-only (`.sh`, no PowerShell twins; ADR-P1-002),
   grouped under `scripts/lifecycle/`, `scripts/verify/`, `scripts/lib/`.
-  On Windows, invoke them from Git Bash (`bash scripts/lifecycle/startup.sh`).
+  On Windows, invoke them from Git Bash (`bash scripts/lifecycle/ceph-compose-startup.sh`).
 - No increment-numbered document names; retired names must not reappear
   (see `testing/repo-guardrails/src/test/resources/retired-names.txt`).
 - Published harness ports bind to loopback by default. Never track `.env`,
@@ -53,8 +53,9 @@ never a global Maven).
 ## Verification culture
 
 Changes to the Ceph local harness are verified against a live local cluster
-(startup → bootstrap-buckets → check → verify-java → verify-security →
-shutdown), with transcripts and evidence recorded. Run the
+(ceph-compose-startup → ceph-compose-bootstrap-buckets → ceph-compose-verify-buckets
+→ ceph-compose-verify-storage → ceph-compose-verify-security →
+ceph-compose-shutdown), with transcripts and evidence recorded. Run the
 `stratus-ceph-tests` after any Ceph script, Compose, or `.env.template` change,
 and `stratus-repo-guardrails` after documentation or repository-wide naming
 changes.

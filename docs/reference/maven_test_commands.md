@@ -69,6 +69,13 @@ The Admin Operations identity is scoped to `buckets=read` and `usage=read` caps 
 
 The endpoint hostname must resolve on the machine executing Maven, and the endpoint CA must be trusted by the JVM executing Maven. Both are the caller's responsibility: these tests run in the Maven JVM on the workstation, not inside a container, so a Ceph harness whose own verification scripts pass from inside containers satisfies neither. For the Compose cluster this means a one-time hosts-file entry; see [platform/ceph/compose-cluster/README.md](../../platform/ceph/compose-cluster/README.md).
 
+Against the Compose cluster, do not wire the variables above by hand. Its `verify/ceph-compose-run-live-tests` script supplies them, builds the CA truststore, and passes its arguments through to Maven:
+
+```bash
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh clean verify -Pall-tests
+```
+
 A selected live profile fails when `CEPH_RGW_INTEGRATION=true` is absent; it must never silently report success after skipping the Ceph test.
 
 ## PowerShell Commands

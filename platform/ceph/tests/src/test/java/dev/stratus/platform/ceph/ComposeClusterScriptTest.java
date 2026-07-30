@@ -55,9 +55,9 @@ final class ComposeClusterScriptTest {
                 violations.add(script + " must start with a shebang followed by 'set -euo pipefail'");
             }
         }
-        String common = Repo.read(SCRIPTS.resolve(Path.of("lib", "common.sh")));
+        String common = Repo.read(SCRIPTS.resolve(Path.of("lib", "ceph-compose-common.sh")));
         if (!common.contains("MSYS_NO_PATHCONV=1") || !common.contains("cygpath -w")) {
-            violations.add("common.sh must preserve container paths while passing host paths to Docker from Git Bash");
+            violations.add("ceph-compose-common.sh must preserve container paths while passing host paths to Docker from Git Bash");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }

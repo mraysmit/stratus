@@ -99,7 +99,7 @@ On Windows 11, run the harness from **Git Bash** — that is the terminal the
 harness is validated on, and the shared script library depends on Git Bash
 (MSYS) path handling. Hosting Git Bash in a Windows Terminal profile gives the
 best day-to-day experience. PowerShell can act as an outer shell
-(`bash scripts/lifecycle/startup.sh`) but cannot run the `.sh` scripts
+(`bash scripts/lifecycle/ceph-compose-startup.sh`) but cannot run the `.sh` scripts
 natively; WSL bash is not the validated environment for these scripts.
 
 The following local resources must be available:
@@ -178,7 +178,7 @@ available.
 The harness scripts are bash-only; Windows users run them from Git Bash.
 
 ```bash
-./scripts/lifecycle/startup.sh
+./scripts/lifecycle/ceph-compose-startup.sh
 ```
 
 On the first run, startup:
@@ -209,8 +209,8 @@ cluster is usable at the bucket level before the deeper verification in
 Section 6.
 
 ```bash
-./scripts/verify/bootstrap-buckets.sh
-./scripts/verify/check.sh
+./scripts/verify/ceph-compose-bootstrap-buckets.sh
+./scripts/verify/ceph-compose-verify-buckets.sh
 ```
 
 The bootstrap is idempotent and is safe to repeat. It creates:
@@ -233,13 +233,13 @@ S3 operations, rejected access, certificate trust, the admin console REST API,
 and a multi-file upload/download workflow.
 
 ```bash
-./scripts/verify/verify-java.sh
-./scripts/verify/verify-security.sh
-./scripts/verify/verify-dashboard.sh
-./scripts/verify/verify-dataset.sh
+./scripts/verify/ceph-compose-verify-storage.sh
+./scripts/verify/ceph-compose-verify-security.sh
+./scripts/verify/ceph-compose-verify-dashboard.sh
+./scripts/verify/ceph-compose-verify-dataset.sh
 ```
 
-`verify-java` runs twelve live S3 checks, including bucket discovery, object
+`ceph-compose-verify-storage` runs twelve live S3 checks, including bucket discovery, object
 round trips, overwrite, zero-byte and 1 MiB objects, special-character keys,
 listing and pagination, concurrent access, multipart upload, and cleanup. Its
 JSON result must contain:
@@ -248,12 +248,12 @@ JSON result must contain:
 "success": true
 ```
 
-`verify-security` deliberately tries invalid credentials, cross-identity bucket
+`ceph-compose-verify-security` deliberately tries invalid credentials, cross-identity bucket
 access, and a TLS connection without the local CA. Error output during these
 three scenarios is expected; the script succeeds only when all three attempts
 are rejected for the intended reason.
 
-`verify-dashboard` exercises the Ceph admin console (Ceph Dashboard) REST API
+`ceph-compose-verify-dashboard` exercises the Ceph admin console (Ceph Dashboard) REST API
 on port `8444` — the management interface, distinct from the S3 API on `8443` —
 using the generated credentials from `.env`. It signs in through
 `POST /api/auth`, confirms an
@@ -262,7 +262,7 @@ the three-monitor, three-OSD inventory through `GET /api/health/minimal`,
 reads the cluster version, and logs the session out again. Its JSON result
 must contain `"success": true`.
 
-`verify-dataset` generates a 24-file dataset inside the `s3client` container,
+`ceph-compose-verify-dataset` generates a 24-file dataset inside the `s3client` container,
 uploads it to `stratus-landing/` under the prefix `verification/dataset-<ts>/`, 
 re-downloads every object with a byte-for-byte comparison, copies the whole
 dataset back into a second local tree that must hash-match the original, then
@@ -312,14 +312,14 @@ Normal shutdown removes containers and the Compose network but preserves Ceph
 data volumes for the next session.
 
 ```bash
-./scripts/lifecycle/shutdown.sh
+./scripts/lifecycle/ceph-compose-shutdown.sh
 ```
 
 Use reset only when you intentionally want to delete the disposable cluster
 data and create a fresh cluster on the next startup.
 
 ```bash
-./scripts/lifecycle/reset.sh --force
+./scripts/lifecycle/ceph-compose-reset.sh --force
 ```
 
 Reset preserves `.env`, certificates, pulled images, and existing evidence.
@@ -330,8 +330,8 @@ If the local RGW credentials, Dashboard password, CA key, or endpoint key may
 have been exposed, rotate them in place while the cluster is running:
 
 ```bash
-./scripts/lifecycle/rotate-secrets.sh --preflight
-./scripts/lifecycle/rotate-secrets.sh
+./scripts/lifecycle/ceph-compose-rotate-secrets.sh --preflight
+./scripts/lifecycle/ceph-compose-rotate-secrets.sh
 ```
 
 The preflight changes nothing. The confirmed rotation preserves all buckets,
@@ -359,20 +359,20 @@ set -euo pipefail
 ./mvnw -pl :stratus-storage-verifier -am package
 docker build -f verification/storage/image/Dockerfile -t stratus/storage-verifier:dev .
 cd platform/ceph/compose-cluster
-./scripts/lifecycle/startup.sh
-./scripts/verify/bootstrap-buckets.sh
-./scripts/verify/check.sh
-./scripts/verify/verify-java.sh
-./scripts/verify/verify-security.sh
-./scripts/verify/verify-dashboard.sh
-./scripts/verify/verify-dataset.sh
+./scripts/lifecycle/ceph-compose-startup.sh
+./scripts/verify/ceph-compose-bootstrap-buckets.sh
+./scripts/verify/ceph-compose-verify-buckets.sh
+./scripts/verify/ceph-compose-verify-storage.sh
+./scripts/verify/ceph-compose-verify-security.sh
+./scripts/verify/ceph-compose-verify-dashboard.sh
+./scripts/verify/ceph-compose-verify-dataset.sh
 ```
 
 The cluster remains running after this sequence so you can use the S3 endpoint,
 Dashboard, or another client. When finished, run:
 
 ```bash
-./scripts/lifecycle/shutdown.sh
+./scripts/lifecycle/ceph-compose-shutdown.sh
 ```
 
 ## 10. Optional Next Steps
@@ -385,14 +385,14 @@ Run the real RGW, monitor, and OSD outage/recovery drill while the cluster is
 running:
 
 ```bash
-./scripts/verify/failure-drill.sh
+./scripts/verify/ceph-compose-failure-drill.sh
 ```
 
 After changing harness scripts, stop and reset the cluster, then run the
 destructive harness self-test:
 
 ```bash
-./scripts/verify/selftest.sh
+./scripts/verify/ceph-compose-verify-harness.sh
 ```
 
 ## Appendix A: Optional Access to the Ceph Admin Console (Dashboard)
@@ -412,7 +412,7 @@ the S3 endpoint on port `8443`.
 From `platform/ceph/compose-cluster`:
 
 ```bash
-./scripts/lifecycle/startup.sh
+./scripts/lifecycle/ceph-compose-startup.sh
 ```
 
 Wait for startup to finish and confirm `rgw-proxy`, `mgr1`, and `mgr2` are
@@ -568,8 +568,8 @@ documentation](https://learning.postman.com/latest-v-12/docs/use/send-requests/a
 Start the cluster and create the buckets before opening Postman:
 
 ```bash
-./scripts/lifecycle/startup.sh
-./scripts/verify/bootstrap-buckets.sh
+./scripts/lifecycle/ceph-compose-startup.sh
+./scripts/verify/ceph-compose-bootstrap-buckets.sh
 ```
 
 Postman runs on the workstation, so it needs the same
@@ -753,7 +753,7 @@ section, then continue to the full validation guide if the problem remains.
 | Script reports `bash\r` or `^M` | Restore LF endings; keep the repository `.gitattributes` rule for `*.sh` |
 | Security verification prints authentication, access-denied, or PKIX errors | These are expected inside the three negative scenarios; judge the final script result and evidence file |
 | Self-test refuses to run | Shut down and destructively reset the disposable cluster first |
-| `verify-dashboard` reports an authentication failure | Read the current `CEPH_DASHBOARD_USER`/`CEPH_DASHBOARD_PASSWORD` from `.env` and require `mgr1` and `mgr2` to be healthy; the credentials are applied by `ceph-configure` during startup |
+| `ceph-compose-verify-dashboard` reports an authentication failure | Read the current `CEPH_DASHBOARD_USER`/`CEPH_DASHBOARD_PASSWORD` from `.env` and require `mgr1` and `mgr2` to be healthy; the credentials are applied by `ceph-configure` during startup |
 | Dashboard name does not resolve | Add the workstation hosts-file entry from [Step 2](#step-2-make-the-dashboard-hostname-resolve-on-the-workstation); do not modify a container hosts file |
 | Dashboard port is unreachable | Start the cluster and require `rgw-proxy` plus both manager services to be healthy, then rerun the port check |
 | Browser reports an untrusted certificate | Import `certs/stratus-ca.crt` or explicitly accept the disposable local warning; never disable TLS in the verifier |
@@ -761,7 +761,7 @@ section, then continue to the full validation guide if the problem remains.
 | Postman returns `InvalidAccessKeyId` or `SignatureDoesNotMatch` | Use the current RGW values from `.env`, collection-level `AWS Signature`, service `s3`, scope `default`, request-header authorization, and path-style URLs |
 | Postman reports a self-signed certificate error | Add `certs/stratus-ca.crt` under Postman CA certificates and keep SSL verification enabled |
 | Postman receives `403 AccessDenied` for `stratus-denied` | Expected: that bucket belongs to the separate denial-test identity; use a normal Stratus bucket |
-| `verify-dataset` reports `success:false` in evidence | Open `dataset-verification-<timestamp>.json` to see which check failed; run `docker compose logs s3client` to diagnose rclone upload, download, or hash-comparison failures |
+| `ceph-compose-verify-dataset` reports `success:false` in evidence | Open `dataset-verification-<timestamp>.json` to see which check failed; run `docker compose logs s3client` to diagnose rclone upload, download, or hash-comparison failures |
 
 For deeper diagnosis, use the full [troubleshooting
 table](ceph_compose_cluster_validation_and_test_approach.md#troubleshooting).
