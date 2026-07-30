@@ -78,6 +78,25 @@ addressing needs wildcard DNS for the endpoint domain, which an on-premises
 deployment does not necessarily publish, so `S3_PATH_STYLE_ACCESS=false` fails
 with that reason rather than skipping.
 
+### SignatureV4RestClient
+
+The S3 and Admin Operations contracts share `SignatureV4RestClient`, which signs
+requests with AWS Signature Version 4 — the scheme Ceph RGW implements for both
+APIs — over the JDK HTTP client.
+
+It is a real implementation of a published wire protocol talking to a live
+endpoint, **not a test double**, and does not fall under the section 7.2
+prohibition. Nothing about Ceph is simulated: the client constructs canonical
+requests, hashes payloads, derives signing keys, and Ceph itself decides whether
+each request is valid. Its whole purpose is to remove the AWS SDK from the call
+path, because an SDK's compatibility handling can absorb a wire-level defect in
+the product and hide it. Where a mock would replace the thing under test, this
+replaces only the *client library*, leaving the product's behavior as the thing
+being asserted.
+
+Adding a request builder here is fine. Adding anything that answers requests
+instead of Ceph is not.
+
 ### Additional environment
 
 Beyond the variables listed above, the REST contracts require:

@@ -52,10 +52,26 @@ never a global Maven).
 
 ## Verification culture
 
-Changes to the Ceph local harness are verified against a live local cluster
-(ceph-compose-startup → ceph-compose-bootstrap-buckets → ceph-compose-verify-buckets
-→ ceph-compose-verify-storage → ceph-compose-verify-security →
-ceph-compose-shutdown), with transcripts and evidence recorded. Run the
-`stratus-ceph-tests` after any Ceph script, Compose, or `.env.template` change,
-and `stratus-repo-guardrails` after documentation or repository-wide naming
-changes.
+Changes to the Ceph local harness are verified against a live local cluster,
+with transcripts and evidence recorded. Every harness script is prefixed
+`ceph-compose-`; the full sequence is:
+
+1. `lifecycle/ceph-compose-startup`
+2. `verify/ceph-compose-bootstrap-buckets`
+3. `verify/ceph-compose-verify-buckets`
+4. `verify/ceph-compose-verify-storage`
+5. `verify/ceph-compose-verify-security`
+6. `verify/ceph-compose-verify-dashboard`
+7. `verify/ceph-compose-verify-dataset`
+8. `verify/ceph-compose-run-live-tests` — the live JVM contracts; unlike the
+   steps above it runs on the workstation, so it also needs a hosts-file entry
+   for `object-store.stratus.local` and a CA truststore, both of which the
+   script itself supplies
+9. `lifecycle/ceph-compose-shutdown`
+
+`verify/ceph-compose-verify-harness` is separate: it requires a fully stopped
+harness with no cluster volumes, so it destroys and rebuilds local state.
+
+Run the `stratus-ceph-tests` after any Ceph script, Compose, or `.env.template`
+change, and `stratus-repo-guardrails` after documentation or repository-wide
+naming changes.
