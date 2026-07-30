@@ -126,8 +126,9 @@ and they can disagree (for example, a working image built from stale source).
 - The harness subnet `172.28.0.0/24` must be free. Startup fails early and names
   the offending network if something else already holds it.
 
-**For Layer 3 additionally:** the JVM running Maven must trust the Compose CA, and
-the live environment variables from
+**For Layer 3 additionally:** the workstation must resolve the endpoint hostname,
+the JVM running Maven must trust the Compose CA, and the live environment
+variables from
 [maven_test_commands.md](../../../docs/reference/maven_test_commands.md) must be
 set. See [Layer 3](#layer-3-live-maven-contract-test-docker).
 
@@ -423,8 +424,9 @@ test without copying or changing it.
 
 ### Requirements
 
-The cluster from Layer 2 must be up, the JVM running Maven must trust the Compose CA,
-and these variables must be set (see
+The cluster from Layer 2 must be up, the workstation must resolve the endpoint
+hostname, the JVM running Maven must trust the Compose CA, and these variables
+must be set (see
 [maven_test_commands.md](../../../docs/reference/maven_test_commands.md)):
 
 ```dotenv
@@ -442,6 +444,32 @@ S3_PATH_STYLE_ACCESS=true
 A selected live profile **fails** (never silently passes) if
 `CEPH_RGW_INTEGRATION=true` is absent, so a skipped live test can never be
 mistaken for a passing one.
+
+#### Why Layer 3 needs a hosts-file entry and Layer 2 does not
+
+This is the most common reason a Layer 3 run fails on a cluster that is
+demonstrably healthy. Layer 2 scripts such as `verify-java.sh`, `verify-dataset.sh`,
+and `verify-dashboard.sh` execute **inside containers**, where Compose DNS
+already resolves `object-store.stratus.local` and the container truststore
+already holds the CA. Layer 3 runs on the **workstation JVM**, which uses neither.
+
+A passing Layer 2 run therefore tells you nothing about whether Layer 3 can
+connect. The workstation needs the same one-time hosts-file entry the browser
+needs for the admin console — see
+[Quick Start Step 2](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#step-2-make-the-dashboard-hostname-resolve-on-the-workstation).
+Confirm it resolves before running Maven:
+
+```powershell
+Resolve-DnsName object-store.stratus.local
+```
+
+```bash
+getent hosts object-store.stratus.local
+```
+
+Either must report `127.0.0.1`. `Non-existent domain` or no output means the
+entry is missing, and every live JVM test will fail on connection rather than on
+product behavior.
 
 ### How to run
 
@@ -586,6 +614,7 @@ section](README.md#evidence) has the full rationale.
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
 | `clean verify` fails in `ComposeClusterScriptTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
 | Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
+| Every live JVM test fails to connect while Layer 2 scripts pass | The workstation does not resolve `object-store.stratus.local`; Layer 2 runs inside containers and never needs it | Add the [hosts-file entry](#why-layer-3-needs-a-hosts-file-entry-and-layer-2-does-not) and confirm with `Resolve-DnsName object-store.stratus.local` |
 | `selftest` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/shutdown` then `scripts/lifecycle/reset --force`, then rerun |
 | Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/common.sh` |
 | First verifier run reports `UnknownHostException: object-store.stratus.local` | The verifier script is stale, or Docker DNS did not register the proxy alias within the bounded readiness period | Use the current `verify-java` script, then inspect the `stratus-ceph-local_ceph` network and the `rgw-proxy` alias; do not add an ad hoc hosts entry inside the container |

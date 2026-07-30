@@ -22,11 +22,27 @@ import org.junit.jupiter.api.Test;
 @Tag("unit")
 final class CephTestArchitectureTest {
 
+    /**
+     * Every deployment-neutral live contract in this module. Each proves a
+     * different Ceph API surface: the S3 data API through the SDK and again over
+     * raw signed REST, the Admin Operations API, and the Dashboard REST API.
+     */
+    private static final List<String> LIVE_CONTRACTS = List.of(
+        "CephRgwContractTest",
+        "CephS3RestContractTest",
+        "CephAdminOpsRestContractTest",
+        "CephDashboardRestContractTest");
+
+    private static final String CONTRACT_DIRECTORY =
+        "platform/ceph/tests/src/test/java/dev/stratus/platform/ceph/";
+
     @Test
     void cephTestsLiveUnderTheCephPlatformCapability() {
         Path root = Repo.root();
-        assertTrue(Files.isRegularFile(root.resolve(
-            "platform/ceph/tests/src/test/java/dev/stratus/platform/ceph/CephRgwContractTest.java")));
+        for (String contract : LIVE_CONTRACTS) {
+            assertTrue(Files.isRegularFile(root.resolve(CONTRACT_DIRECTORY + contract + ".java")),
+                () -> contract + " must live under the Ceph platform capability");
+        }
         assertFalse(Files.exists(root.resolve(
             "verification/storage/src/test/java/dev/stratus/verification/storage/CephRgwIntegrationTest.java")));
         assertFalse(Files.exists(root.resolve(
@@ -36,9 +52,7 @@ final class CephTestArchitectureTest {
     }
 
     @Test
-    void liveContractDoesNotInvokeADeploymentImplementation() {
-        String contract = Repo.read(Repo.root().resolve(
-            "platform/ceph/tests/src/test/java/dev/stratus/platform/ceph/CephRgwContractTest.java"));
+    void liveContractsDoNotInvokeADeploymentImplementation() {
         List<String> forbidden = List.of(
             "ProcessBuilder",
             "compose.yaml",
@@ -46,10 +60,24 @@ final class CephTestArchitectureTest {
             "podman compose",
             "scripts/lifecycle",
             "scripts/verify");
-        List<String> violations = forbidden.stream().filter(contract::contains).toList();
-        assertTrue(violations.isEmpty(),
-            () -> "The shared Ceph contract invokes deployment-specific machinery: " + violations);
-        assertTrue(contract.contains("System.getenv()"),
-            "The shared Ceph contract must consume the implementation-supplied environment");
+        for (String name : LIVE_CONTRACTS) {
+            String contract = Repo.read(Repo.root().resolve(CONTRACT_DIRECTORY + name + ".java"));
+            List<String> violations = forbidden.stream().filter(contract::contains).toList();
+            assertTrue(violations.isEmpty(),
+                () -> name + " invokes deployment-specific machinery: " + violations);
+            assertTrue(contract.contains("System.getenv()"),
+                () -> name + " must consume the implementation-supplied environment");
+        }
+    }
+
+    @Test
+    void liveContractsFailRatherThanSkipWhenTheSelectedProfileRequiresACluster() {
+        for (String name : LIVE_CONTRACTS) {
+            String contract = Repo.read(Repo.root().resolve(CONTRACT_DIRECTORY + name + ".java"));
+            assertTrue(contract.contains("Boolean.getBoolean(\"ceph.integration.required\")"),
+                () -> name + " must fail, not skip, when a live Maven profile is selected");
+            assertTrue(contract.contains("assumeTrue"),
+                () -> name + " must skip when no live profile is selected and no cluster is configured");
+        }
     }
 }
