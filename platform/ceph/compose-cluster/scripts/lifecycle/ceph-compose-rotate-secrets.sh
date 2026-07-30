@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-29
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Rotates the two RGW S3 key pairs, Dashboard password, disposable CA, and
 # endpoint certificate without deleting buckets, objects, or Ceph volumes.
@@ -11,7 +11,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 usage() {
   cat <<'EOF'
-Usage: rotate-secrets.sh [--preflight | --force]
+Usage: ceph-compose-rotate-secrets.sh [--preflight | --force]
 
   --preflight  Validate that the live cluster is ready for rotation; change nothing.
   --force      Rotate without the interactive "rotate" confirmation.
@@ -369,7 +369,7 @@ lock_acquired=true
 write_rotated_environment
 STRATUS_CERTIFICATE_ROOT="$stage_relative/new" \
 STRATUS_FORCE_CA_ROTATION=true \
-  "$HARNESS_DIR/scripts/lib/generate-compose-certificates.sh"
+  "$HARNESS_DIR/scripts/lib/ceph-compose-generate-certificates.sh"
 
 set_rgw_key create "$CEPH_DEMO_UID" "$new_primary_access" "$new_primary_secret"
 new_primary_added=true
@@ -381,9 +381,9 @@ dashboard_changed=true
 swap_live_files
 recreate_consumers
 
-"$HARNESS_DIR/scripts/verify/check.sh"
+"$HARNESS_DIR/scripts/verify/ceph-compose-verify-buckets.sh"
 verify_denied_owner_key
-"$HARNESS_DIR/scripts/verify/verify-dashboard.sh"
+"$HARNESS_DIR/scripts/verify/ceph-compose-verify-dashboard.sh"
 assert_old_ca_rejected
 log "CUTOVER PASS: new RGW keys, Dashboard password, and TLS chain are live"
 

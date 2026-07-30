@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Stops the cluster while preserving all configuration and data volumes, so
 # the next startup resumes the same cluster. Idempotent, and must work even

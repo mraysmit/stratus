@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Creates the five platform buckets plus the denied-owner bucket that the
 # security negative tests probe against. Buckets are created through the
@@ -17,7 +17,7 @@ for bucket in stratus-landing stratus-bronze stratus-silver stratus-gold stratus
   compose exec -T s3client rclone --ca-cert /certs/stratus-ca.crt mkdir "cephrgw:${bucket}"
   log "READY bucket=$bucket"
 done
-# The denied bucket is owned by a separate RGW identity so verify-security can
+# The denied bucket is owned by a separate RGW identity so ceph-compose-verify-security can
 # prove the primary verifier cannot cross an identity boundary.
 compose exec -T s3client rclone --ca-cert /certs/stratus-ca.crt mkdir "deniedowner:${CEPH_RGW_DENIED_BUCKET}"
 log "READY isolated-policy-bucket=$CEPH_RGW_DENIED_BUCKET owner=$CEPH_DENIED_UID"

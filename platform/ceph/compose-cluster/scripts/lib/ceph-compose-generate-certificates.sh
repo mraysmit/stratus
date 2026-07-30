@@ -2,14 +2,14 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/ceph-compose-common.sh"
 
 # Same pinned image compose uses; only needed when host OpenSSL is unavailable.
 ceph_image='quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644'
 
 # Certificates are regenerated when absent or expiring within seven days. Leaf
 # renewal preserves the existing CA; only an expiring CA forces re-trusting.
-# rotate-secrets.sh uses a harness-relative staging root and forces a new CA so
+# ceph-compose-rotate-secrets.sh uses a harness-relative staging root and forces a new CA so
 # it can validate the replacement chain before changing the live proxy files.
 certificate_root="${STRATUS_CERTIFICATE_ROOT:-.}"
 force_ca_rotation="${STRATUS_FORCE_CA_ROTATION:-false}"
@@ -84,7 +84,7 @@ elif command -v podman >/dev/null 2>&1; then
     --env "STRATUS_FORCE_CA_ROTATION=$force_ca_rotation" \
     --entrypoint /bin/bash "$ceph_image" -c "$generator"
 else
-  fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/install-prerequisites.sh, then retry certificate generation."
+  fail "OpenSSL, Docker, or Podman is required. Run ./scripts/lifecycle/ceph-compose-install-prerequisites.sh, then retry certificate generation."
 fi
 harden_windows_acl "$HARNESS_DIR/$certificate_root/private"
 log "Disposable Compose certificate is current under $HARNESS_DIR/$certificate_root."

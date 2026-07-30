@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Three negative tests against the live cluster: invalid credentials, a
 # cross-identity access attempt, and an untrusted TLS trust store. The
@@ -10,7 +10,7 @@ source "$(dirname "$0")/../lib/common.sh"
 # for the asserted reason. A verifier exit code alone is never trusted —
 # the recorded evidence is grepped for the specific denial, so a vacuous
 # verifier that exits cleanly without proving anything is rejected
-# (selftest.sh exercises exactly that regression).
+# (ceph-compose-verify-harness.sh exercises exactly that regression).
 
 load_environment
 
