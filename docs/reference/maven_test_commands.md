@@ -55,7 +55,21 @@ CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
 ```
 
-The endpoint CA must also be trusted by the JVM executing Maven. A selected live profile fails when `CEPH_RGW_INTEGRATION=true` is absent; it must never silently report success after skipping the Ceph test.
+The REST API contracts (`CephS3RestContractTest`, `CephAdminOpsRestContractTest`, `CephDashboardRestContractTest`) additionally require:
+
+```dotenv
+CEPH_ADMIN_OPS_ACCESS_KEY=<scoped Admin Operations reader access key>
+CEPH_ADMIN_OPS_SECRET_KEY=<matching secret>
+CEPH_DASHBOARD_ENDPOINT=https://object-store.stratus.local:8444
+CEPH_DASHBOARD_USER=<dashboard sign-in user>
+CEPH_DASHBOARD_PASSWORD=<matching password>
+```
+
+The Admin Operations identity is scoped to `buckets=read` and `usage=read` caps and MUST NOT be granted `users` or `metadata` read caps, which would expose other identities' keys. See [platform/ceph/tests/README.md](../../platform/ceph/tests/README.md) for the full REST contract.
+
+The endpoint hostname must resolve on the machine executing Maven, and the endpoint CA must be trusted by the JVM executing Maven. Both are the caller's responsibility: these tests run in the Maven JVM on the workstation, not inside a container, so a Ceph harness whose own verification scripts pass from inside containers satisfies neither. For the Compose cluster this means a one-time hosts-file entry; see [platform/ceph/compose-cluster/README.md](../../platform/ceph/compose-cluster/README.md).
+
+A selected live profile fails when `CEPH_RGW_INTEGRATION=true` is absent; it must never silently report success after skipping the Ceph test.
 
 ## PowerShell Commands
 

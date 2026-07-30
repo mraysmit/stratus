@@ -384,6 +384,13 @@ To open it from the host machine:
    127.0.0.1 object-store.stratus.local
    ```
 
+   The same entry is required by the live Maven contract tests in
+   [../tests](../tests/README.md), which run on the workstation JVM rather than
+   inside a container. The harness verification scripts run inside containers
+   and resolve the name through Compose DNS, so they pass whether or not this
+   entry exists — a passing `verify-java` is not evidence that the live Maven
+   profile can connect.
+
 3. Read the sign-in credentials from the generated `.env`:
 
    ```bash

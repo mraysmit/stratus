@@ -428,6 +428,14 @@ local mapping once:
 127.0.0.1 object-store.stratus.local
 ```
 
+This entry is **not only for the browser**. Everything that runs on the
+workstation rather than inside a container needs it, including the live Maven
+contract tests (`-Pceph-integration-tests` and `-Pall-tests`). Those tests reach
+RGW on port 8443 from the host JVM, so without this mapping they fail on
+connection rather than on Ceph behavior — even though the harness verification
+scripts, which run inside containers, pass. See
+[Layer 3](ceph_compose_cluster_validation_and_test_approach.md#why-layer-3-needs-a-hosts-file-entry-and-layer-2-does-not).
+
 On Windows, open PowerShell **as Administrator** and run:
 
 ```powershell
