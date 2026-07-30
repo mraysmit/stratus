@@ -9,6 +9,9 @@ set -euo pipefail
 : "${CEPH_DENIED_SECRET_KEY:?CEPH_DENIED_SECRET_KEY is required}"
 : "${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required}"
 : "${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required}"
+: "${CEPH_ADMIN_OPS_UID:?CEPH_ADMIN_OPS_UID is required}"
+: "${CEPH_ADMIN_OPS_ACCESS_KEY:?CEPH_ADMIN_OPS_ACCESS_KEY is required}"
+: "${CEPH_ADMIN_OPS_SECRET_KEY:?CEPH_ADMIN_OPS_SECRET_KEY is required}"
 
 attempts=0
 until ceph osd stat --format json | jq -e '.num_up_osds == 3 and .num_in_osds == 3' >/dev/null; do
@@ -35,6 +38,20 @@ if ! radosgw-admin user info --uid "$CEPH_DENIED_UID" >/dev/null 2>&1; then
     --access-key "$CEPH_DENIED_ACCESS_KEY" \
     --secret-key "$CEPH_DENIED_SECRET_KEY" >/dev/null
 fi
+
+# Scoped reader for the RGW Admin Operations API. The caps are deliberately
+# limited to buckets and usage: "users" or "metadata" read caps would let this
+# identity retrieve other identities' access and secret keys, which a scoped
+# application identity must never be able to do. Caps are reapplied on every
+# run so a hand-edited or partially created user converges back to this grant.
+if ! radosgw-admin user info --uid "$CEPH_ADMIN_OPS_UID" >/dev/null 2>&1; then
+  radosgw-admin user create \
+    --uid "$CEPH_ADMIN_OPS_UID" \
+    --display-name "Stratus admin operations reader" \
+    --access-key "$CEPH_ADMIN_OPS_ACCESS_KEY" \
+    --secret-key "$CEPH_ADMIN_OPS_SECRET_KEY" >/dev/null
+fi
+radosgw-admin caps add --uid "$CEPH_ADMIN_OPS_UID" --caps "buckets=read;usage=read" >/dev/null
 
 for pool in $(ceph osd pool ls); do
   ceph osd pool set "$pool" size 2 >/dev/null

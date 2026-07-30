@@ -241,6 +241,9 @@ services:
       CEPH_DENIED_SECRET_KEY: ${CEPH_DENIED_SECRET_KEY:?CEPH_DENIED_SECRET_KEY is required}
       CEPH_DASHBOARD_USER: ${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required}
       CEPH_DASHBOARD_PASSWORD: ${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required}
+      CEPH_ADMIN_OPS_UID: ${CEPH_ADMIN_OPS_UID:-stratus-admin-ops-reader}
+      CEPH_ADMIN_OPS_ACCESS_KEY: ${CEPH_ADMIN_OPS_ACCESS_KEY:?CEPH_ADMIN_OPS_ACCESS_KEY is required}
+      CEPH_ADMIN_OPS_SECRET_KEY: ${CEPH_ADMIN_OPS_SECRET_KEY:?CEPH_ADMIN_OPS_SECRET_KEY is required}
     depends_on:
       osd1: {condition: service_healthy}
       osd2: {condition: service_healthy}

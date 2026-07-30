@@ -19,25 +19,25 @@ source "$(dirname "$0")/../lib/common.sh"
 load_environment
 : "${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required; run startup.sh to generate it}"
 : "${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required; run startup.sh to generate it}"
+: "${CEPH_DASHBOARD_ENDPOINT:?CEPH_DASHBOARD_ENDPOINT is required; update .env from .env.template}"
 
 evidence_dir="${HARNESS_DIR}/evidence"
 mkdir -p "$evidence_dir"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_file="${evidence_dir}/dashboard-verification-${timestamp}.json"
 
-log "Verifying the Ceph Dashboard REST API at https://object-store.stratus.local:8444 from inside the Compose network"
+log "Verifying the Ceph Dashboard REST API at $CEPH_DASHBOARD_ENDPOINT from inside the Compose network"
 
 set +e
 {
-  printf '%s\n%s\n' "$CEPH_DASHBOARD_USER" "$CEPH_DASHBOARD_PASSWORD"
+  printf '%s\n%s\n%s\n' "$CEPH_DASHBOARD_USER" "$CEPH_DASHBOARD_PASSWORD" "$CEPH_DASHBOARD_ENDPOINT"
   cat "$HARNESS_DIR/certs/stratus-ca.crt"
 } | compose exec -T mon1 bash -c '
 set -euo pipefail
-IFS= read -r user; IFS= read -r pass
+IFS= read -r user; IFS= read -r pass; IFS= read -r base
 work=$(mktemp -d); trap "rm -rf $work" EXIT
 cat > "$work/ca.crt"
 
-base=https://object-store.stratus.local:8444
 accept="Accept: application/vnd.ceph.api.v1.0+json"
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
