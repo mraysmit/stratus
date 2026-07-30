@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Behavior self-test for the harness scripts. Verifies what the static
 # guardrails in testing/repo-guardrails cannot: certificate renewal, rejection
@@ -14,13 +14,13 @@ lifecycle_dir="$(cd "$scripts_dir/../lifecycle" && pwd)"
 lib_dir="$(cd "$scripts_dir/../lib" && pwd)"
 runtime="$(compose_runtime)"
 ceph_image='quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644'
-fake_image='stratus/selftest-vacuous-verifier'
+fake_image='stratus/harness-check-vacuous-verifier'
 
 if [[ -n "$("$runtime" ps -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
-  fail "Stop the harness before running the self-test (scripts/lifecycle/shutdown.sh)"
+  fail "Stop the harness before running the self-test (scripts/lifecycle/ceph-compose-shutdown.sh)"
 fi
 if [[ -n "$("$runtime" volume ls -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
-  fail "Cluster volumes exist and the self-test exercises destructive reset. Run scripts/lifecycle/reset.sh --force first if losing them is intended."
+  fail "Cluster volumes exist and the self-test exercises destructive reset. Run scripts/lifecycle/ceph-compose-reset.sh --force first if losing them is intended."
 fi
 require_free_harness_subnet
 
@@ -32,10 +32,10 @@ openssl_run() {
   fi
 }
 
-scenario() { printf '\n'; log "=== SELFTEST: $1 ==="; }
+scenario() { printf '\n'; log "=== HARNESS CHECK: $1 ==="; }
 
 tmp_dir="$(mktemp -d)"
-staged_certificate_root=".rotation/selftest.$$"
+staged_certificate_root=".rotation/ceph-compose-verify-harness.$$"
 created_env=false
 moved_env=""
 cleanup() {
@@ -44,14 +44,14 @@ cleanup() {
   if [[ "$created_env" == true ]]; then rm -f "$HARNESS_DIR/.env"; fi
   "$runtime" rmi "$fake_image" >/dev/null 2>&1 || true
   case "$staged_certificate_root" in
-    .rotation/selftest.*) rm -rf "$HARNESS_DIR/$staged_certificate_root" ;;
+    .rotation/ceph-compose-verify-harness.*) rm -rf "$HARNESS_DIR/$staged_certificate_root" ;;
   esac
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
 scenario "near-expiry leaf certificate renews while preserving the CA"
-"$lib_dir/generate-compose-certificates.sh" >/dev/null
+"$lib_dir/ceph-compose-generate-certificates.sh" >/dev/null
 ca_before="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
 printf 'subjectAltName=DNS:object-store.stratus.local\nextendedKeyUsage=serverAuth\n' >"$HARNESS_DIR/private/rgw-extensions.cnf"
 openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.local" \
@@ -59,7 +59,7 @@ openssl_run req -newkey rsa:3072 -nodes -sha256 -subj "/CN=object-store.stratus.
 openssl_run x509 -req -sha256 -days 3 -in certs/object-store.stratus.local.csr \
   -CA certs/stratus-ca.crt -CAkey private/stratus-lab-ca.key -CAcreateserial \
   -extfile private/rgw-extensions.cnf -out certs/object-store.stratus.local.crt
-"$lib_dir/generate-compose-certificates.sh" >/dev/null
+"$lib_dir/ceph-compose-generate-certificates.sh" >/dev/null
 openssl_run x509 -checkend 604800 -noout -in certs/object-store.stratus.local.crt >/dev/null \
   || fail "Leaf certificate was not renewed although it was within the renewal window"
 ca_after="$(openssl_run x509 -sha256 -fingerprint -noout -in certs/stratus-ca.crt)"
@@ -69,7 +69,7 @@ log "PASS certificate-renewal"
 scenario "forced CA rotation generates and verifies an isolated replacement chain"
 STRATUS_CERTIFICATE_ROOT="$staged_certificate_root" \
 STRATUS_FORCE_CA_ROTATION=true \
-  "$lib_dir/generate-compose-certificates.sh" >/dev/null
+  "$lib_dir/ceph-compose-generate-certificates.sh" >/dev/null
 staged_ca="$(openssl_run x509 -sha256 -fingerprint -noout \
   -in "$staged_certificate_root/certs/stratus-ca.crt")"
 [[ "$staged_ca" != "$ca_after" ]] || fail "Forced rotation reused the existing CA"
@@ -78,9 +78,9 @@ openssl_run verify -CAfile "$staged_certificate_root/certs/stratus-ca.crt" \
   || fail "The staged replacement endpoint certificate does not verify against its CA"
 log "PASS isolated-forced-ca-rotation"
 
-scenario "verify-security rejects a verifier that exits 0 without denial evidence"
+scenario "ceph-compose-verify-security rejects a verifier that exits 0 without denial evidence"
 if [[ ! -f "$HARNESS_DIR/.env" ]]; then
-  sed 's/generated-at-first-startup/selftest-placeholder/' "$HARNESS_DIR/.env.template" >"$HARNESS_DIR/.env"
+  sed 's/generated-at-first-startup/harness-check-placeholder/' "$HARNESS_DIR/.env.template" >"$HARNESS_DIR/.env"
   created_env=true
 fi
 printf '#!/bin/bash\necho "{}"\nexit 0\n' >"$tmp_dir/java"
@@ -90,17 +90,17 @@ cp "$HARNESS_DIR/.env" "$tmp_dir/env-original"
 sed "s|^VERIFIER_IMAGE=.*|VERIFIER_IMAGE=$fake_image|" "$tmp_dir/env-original" >"$HARNESS_DIR/.env"
 touch "$tmp_dir/marker"
 set +e
-output="$("$scripts_dir/verify-security.sh" 2>&1)"
+output="$("$scripts_dir/ceph-compose-verify-security.sh" 2>&1)"
 status=$?
 set -e
 cp "$tmp_dir/env-original" "$HARNESS_DIR/.env"
 rm -f "$tmp_dir/env-original"
 find "$HARNESS_DIR/evidence" -maxdepth 1 -name 'storage-*' -newer "$tmp_dir/marker" -delete 2>/dev/null || true
 if [[ "$status" -eq 0 ]]; then
-  fail "verify-security accepted a verifier that exits 0 without denial evidence"
+  fail "ceph-compose-verify-security accepted a verifier that exits 0 without denial evidence"
 fi
 printf '%s\n' "$output" | grep -q "does not show invalid credentials being rejected" \
-  || fail "verify-security failed for an unexpected reason: $output"
+  || fail "ceph-compose-verify-security failed for an unexpected reason: $output"
 log "PASS vacuous-verifier-rejected"
 
 scenario "shutdown and destructive reset work without .env"
@@ -111,8 +111,8 @@ elif [[ -f "$HARNESS_DIR/.env" ]]; then
   mv "$HARNESS_DIR/.env" "$tmp_dir/env-backup"
   moved_env="$tmp_dir/env-backup"
 fi
-"$lifecycle_dir/shutdown.sh" >/dev/null
-"$lifecycle_dir/reset.sh" --force >/dev/null
+"$lifecycle_dir/ceph-compose-shutdown.sh" >/dev/null
+"$lifecycle_dir/ceph-compose-reset.sh" --force >/dev/null
 if [[ -n "$moved_env" ]]; then
   mv "$moved_env" "$HARNESS_DIR/.env"
   moved_env=""
@@ -120,4 +120,4 @@ fi
 log "PASS teardown-without-env"
 
 printf '\n'
-log "SELFTEST PASS: certificate-renewal, isolated-forced-ca-rotation, vacuous-verifier-rejected, teardown-without-env"
+log "HARNESS CHECK PASS: certificate-renewal, isolated-forced-ca-rotation, vacuous-verifier-rejected, teardown-without-env"

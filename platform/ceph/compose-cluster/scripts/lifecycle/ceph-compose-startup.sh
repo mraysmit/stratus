@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-07-22
-source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Brings the cluster up, creating it on first run. Idempotent: .env is
 # generated from the template once with per-machine disposable credentials
@@ -57,7 +57,7 @@ if ! grep -q '^CEPH_DASHBOARD_ENDPOINT=' "$HARNESS_DIR/.env"; then
   log "Added CEPH_DASHBOARD_ENDPOINT to $HARNESS_DIR/.env"
 fi
 # Idempotent: generates on first run, renews when a certificate nears expiry.
-"$(dirname "$0")/../lib/generate-compose-certificates.sh"
+"$(dirname "$0")/../lib/ceph-compose-generate-certificates.sh"
 load_environment
 require_free_harness_subnet
 mkdir -p "$HARNESS_DIR/evidence"
