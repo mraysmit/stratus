@@ -91,7 +91,7 @@ of it, or exercise it as a client:
 | Service | Purpose |
 |---|---|
 | `ceph-bootstrap` | One-shot setup job, re-run at every startup but doing its work only once (a sentinel file marks the cluster as bootstrapped). Creates the cluster's identity: its unique cluster ID (the "fsid"), the shared secret keys the daemons use to authenticate each other ("keyrings"), and the monitors' initial databases |
-| `ceph-configure` | One-shot setup job, re-run at every startup and idempotent, that makes the cluster usable: waits for all three OSDs, creates the S3 user the verifier signs in as plus a second, unrelated S3 user whose bucket the verifier must be denied access to, sets every pool to two replicas, and enables the Ceph Dashboard with its sign-in account |
+| `ceph-configure` | One-shot setup job, re-run at every startup and idempotent, that makes the cluster usable: waits for all three OSDs, creates three S3 identities — the one the verifier signs in as, a second unrelated one whose bucket the verifier must be denied access to, and a scoped Admin Operations reader holding only `buckets=read` and `usage=read` — sets every pool to two replicas, and enables the Ceph Dashboard with its sign-in account |
 | `mon1`-`mon3` | The three monitors forming the quorum (see above) |
 | `mgr1`-`mgr2` | The active and standby managers (see above) |
 | `osd1`-`osd3` | The three data-storing OSDs (see above), each with its own Docker volume |
@@ -237,7 +237,7 @@ In the order you meet them:
 | Script | What it does | When to run it |
 |---|---|---|
 | `lifecycle/ceph-compose-install-prerequisites` | Installs OpenSSL if the host lacks it | Once per machine, only if needed |
-| `lifecycle/ceph-compose-startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health | First, every session |
+| `lifecycle/ceph-compose-startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health. Finally configures the Dashboard's own RGW credentials, which must happen after the RGW daemons are healthy and so cannot live in `ceph-configure`; a failure there is logged as a warning and leaves only the Dashboard's RGW views unavailable | First, every session |
 | `lifecycle/ceph-compose-rotate-secrets` | Rotates both RGW key pairs, the Dashboard password, the disposable CA, and the endpoint certificate without deleting Ceph data | When local credentials or certificate keys may be exposed |
 | `verify/ceph-compose-bootstrap-buckets` | Creates the five Stratus buckets and the denied-owner bucket through the S3 API | After startup, once per cluster |
 | `verify/ceph-compose-verify-buckets` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
