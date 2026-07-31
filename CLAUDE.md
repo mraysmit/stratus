@@ -35,6 +35,21 @@ never a global Maven).
   `git diff --check` and tested INFO/DEBUG logging behavior; storage-affecting
   changes must additionally pass the live suite.
 
+## Where new artifacts go
+
+The top-level directory set is closed and enforced by `RepositoryLayoutTest`
+in `stratus-repo-guardrails` — never create a new top-level directory.
+Placement follows the kind of artifact, not the product it relates to
+(authoritative rules: [docs/reference/repository-layout.md](docs/reference/repository-layout.md)):
+
+- Product integration, harnesses, bootstrap → `platform/<product>/`
+- Product-owned tests → `platform/<product>/tests/` (e.g. Ceph tests go in
+  `platform/ceph/tests`, never a root `tests/` directory)
+- Product-neutral capability contracts → `verification/<capability>/`
+- Stratus Spark/Flink job code → `jobs/`; Stratus services → `applications/`
+- Cross-component e2e suites → `testing/`; environment inventory →
+  `environments/<environment>/<product>/`; event/data contracts → `schemas/`
+
 ## Repository conventions
 
 - Harness scripts are bash-only (`.sh`, no PowerShell twins; ADR-P1-002),
