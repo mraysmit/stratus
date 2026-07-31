@@ -96,6 +96,11 @@ The monorepo is organized by stable capability, not implementation sequence:
 | `schemas/` | shared governed event and data contracts |
 | `build-support/` | centralized dependency and Maven build policy |
 | `docs/` | architecture, decisions, implementation, operations, and reference documentation |
+| `scripts/` | repository maintenance tooling (license and copyright headers) |
+| `evidence/` | verification and acceptance evidence anchor; generated evidence is not committed |
+| `logs/` | git-ignored local Maven build logs, created per workstation |
+
+The authoritative layout table — including the placement rules for new artifacts and the guardrail test that enforces the directory set — is [repository-layout.md](docs/reference/repository-layout.md).
 
 The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph Compose cluster](platform/ceph/compose-cluster/).
 
