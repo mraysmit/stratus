@@ -23,7 +23,7 @@ host_only="${endpoint_host%%:*}"
 port="${endpoint_host##*:}"
 [[ "$port" == "$host_only" ]] && port=443
 if ! timeout 5 bash -c "</dev/tcp/${host_only}/${port}" 2>/dev/null; then
-  fail "Cannot reach $CEPH_RGW_ENDPOINT from this workstation. Either the cluster is not running (scripts/lifecycle/ceph-compose-startup.sh), or this machine does not resolve $host_only (add '127.0.0.1 $host_only' to the Windows hosts file as Administrator; see ../../README.md)."
+  fail "Cannot reach $CEPH_RGW_ENDPOINT from this workstation. Ensure the cluster is running, then run scripts/lifecycle/ceph-compose-configure-hostname.sh to configure and verify the system hosts file."
 fi
 
 # Rebuilt whenever it is missing or older than the CA. ceph-compose-reset.sh regenerates the

@@ -421,11 +421,11 @@ healthy.
 ### Step 2: Make the Dashboard hostname resolve on the workstation
 
 Containers already resolve `object-store.stratus.local` through Compose DNS.
-Your host browser uses the workstation's DNS configuration instead, so add this
-local mapping once:
+Your host browser uses the workstation's DNS configuration instead, so configure
+the local mapping once from this directory:
 
-```text
-127.0.0.1 object-store.stratus.local
+```bash
+./scripts/lifecycle/ceph-compose-configure-hostname.sh
 ```
 
 This entry is **not only for the browser**. Everything that runs on the
@@ -436,26 +436,11 @@ connection rather than on Ceph behavior — even though the harness verification
 scripts, which run inside containers, pass. See
 [Layer 3](ceph_compose_cluster_validation_and_test_approach.md#why-layer-3-needs-a-hosts-file-entry-and-layer-2-does-not).
 
-On Windows, open PowerShell **as Administrator** and run:
-
-```powershell
-$hostsFile = "$env:SystemRoot\System32\drivers\etc\hosts"
-$entry = '127.0.0.1 object-store.stratus.local'
-if (-not (Select-String -LiteralPath $hostsFile -Pattern '^\s*127\.0\.0\.1\s+object-store\.stratus\.local(\s|$)' -Quiet)) {
-    Add-Content -LiteralPath $hostsFile -Value "`r`n$entry"
-}
-ipconfig /flushdns
-```
-
-Git Bash users on Windows must make this Windows hosts-file change; editing
-Git Bash's `/etc/hosts` is not the supported path.
-
-On Linux or macOS, run:
-
-```bash
-grep -Eq '^[[:space:]]*127\.0\.0\.1[[:space:]]+object-store\.stratus\.local([[:space:]]|$)' /etc/hosts \
-  || printf '%s\n' '127.0.0.1 object-store.stratus.local' | sudo tee -a /etc/hosts
-```
+On Windows Git Bash, the command invokes a UAC elevation prompt and updates the
+Windows system hosts file—not Git Bash's generated `/etc/hosts`. On Linux and
+macOS it uses `sudo` when `/etc/hosts` is not writable. It can be rerun safely,
+refuses to overwrite a conflicting mapping, and supports a non-loopback host
+address through `--address <ip>`. Use `--check` for read-only validation.
 
 ### Step 3: Confirm the host can reach the UI
 
