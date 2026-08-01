@@ -32,10 +32,14 @@ removed and must not reappear.
 ## Consequences
 
 - One implementation per script; a behavior change is written and reviewed once.
+- Canonical scripts are tracked executable. Previously published Bash paths are
+  retained as thin compatibility wrappers when naming conventions change; a
+  refactor must not silently break runbooks or developer automation.
 - `ComposeClusterScriptTest` under `platform/ceph/tests` no longer asserts
   pairing or twin parity. It now asserts
-  the single-implementation convention: bash fail-fast preambles are retained,
-  and no `.ps1` script may reappear under the harness script tree.
+  the single-implementation convention: bash fail-fast preambles and executable
+  modes are retained, compatibility entry points delegate to the canonical
+  scripts, and no `.ps1` script may reappear under the harness script tree.
 - Documentation and runbooks present bash invocations only.
 - The disallowed-`.ps1` rule applies to the harness script tree, not the whole
   repository; unrelated future tooling may still choose PowerShell with its own
