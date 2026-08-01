@@ -178,9 +178,15 @@ Running the harness from WSL bash is not the validated path: the path handling
 in `scripts/lib/ceph-compose-common.sh` is MSYS-specific (`cygpath` does not exist in WSL)
 and Docker Desktop volume-mount paths behave differently there.
 
+The `ceph-compose-*` filenames are canonical. Entry-point names published
+before that convention remain executable compatibility wrappers, so existing
+automation such as `scripts/lifecycle/startup.sh` and
+`scripts/lifecycle/rotate-secrets.sh` continues to work. Public harness paths
+must not be removed merely as part of a naming refactor.
+
 ## Configuration
 
-The first startup creates the ignored `.env` file from `.env.template`, replacing the credential placeholders with generated per-machine disposable secrets. The endpoint is:
+The first startup creates the ignored `.env` file from `.env.template`, replacing the credential placeholders with generated per-machine disposable secrets. Startup also migrates older `.env` files by adding complete credential bundles introduced in newer versions without replacing existing credentials. A partially populated credential bundle fails before Docker is contacted, because inventing only half of an existing identity could make `.env` disagree with Ceph. The endpoint is:
 
 ```text
 https://object-store.stratus.local:8443
@@ -377,13 +383,16 @@ To open it from the host machine:
    above — and on first run generates the `.env` file with the dashboard
    credentials. Wait for it to finish; all services should report healthy.
 
-2. Make the hostname resolve to loopback, once per machine. Add this line to
-   the hosts file — `C:\Windows\System32\drivers\etc\hosts` on Windows
-   (edit as Administrator), `/etc/hosts` on Linux and macOS:
+2. Make the hostname resolve to loopback, once per machine:
 
-   ```text
-   127.0.0.1 object-store.stratus.local
+   ```bash
+   ./scripts/lifecycle/ceph-compose-configure-hostname.sh
    ```
+
+   The command updates the Windows system hosts file through a UAC prompt, or
+   `/etc/hosts` through `sudo` on Linux and macOS. It is idempotent and refuses
+   to overwrite a conflicting mapping. Verify it later with the same command
+   plus `--check`.
 
    The same entry is required by the live Maven contract tests in
    [../tests](../tests/README.md), which run on the workstation JVM rather than

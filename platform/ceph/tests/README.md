@@ -55,7 +55,9 @@ These tests run in the Maven JVM on your workstation, not inside a container, so
 requirements 3 and 4 are theirs alone. A Ceph implementation whose own
 verification scripts run inside containers satisfies neither by passing those
 scripts. For the Compose cluster this means a one-time hosts-file entry mapping
-`object-store.stratus.local` to `127.0.0.1`; confirm it with
+`object-store.stratus.local` to `127.0.0.1`. Configure it with
+`bash platform/ceph/compose-cluster/scripts/lifecycle/ceph-compose-configure-hostname.sh`
+and verify it later with that command's `--check` option. You can also confirm it with
 `Resolve-DnsName object-store.stratus.local` (PowerShell) or
 `getent hosts object-store.stratus.local` (bash) before running the live profile,
 because without it every test here fails on connection rather than on Ceph

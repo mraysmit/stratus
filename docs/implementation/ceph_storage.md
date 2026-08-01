@@ -836,6 +836,7 @@ platform/ceph/compose-cluster/
       ceph-compose-common.sh
       ceph-compose-generate-certificates.sh
     lifecycle/
+      ceph-compose-configure-hostname.sh
       ceph-compose-install-prerequisites.sh
       ceph-compose-reset.sh
       ceph-compose-shutdown.sh
@@ -939,6 +940,14 @@ endpoint certificate, rejects a conflicting harness subnet, starts the complete
 cluster, and waits for every required service health gate. Certificate renewal
 also verifies that the certificate and private key match. On Git Bash the
 shared wrapper handles Windows host paths and preserves Linux container paths.
+
+### `scripts/lifecycle/ceph-compose-configure-hostname.sh`
+
+The hostname configuration script idempotently maps
+`object-store.stratus.local` in the workstation's system hosts file. It requests
+UAC elevation on Windows Git Bash and uses `sudo` on Linux or macOS when
+needed. It refuses to replace a conflicting mapping, accepts `--address <ip>`
+for a non-loopback installation, and provides a read-only `--check` mode.
 
 ### `scripts/verify/ceph-compose-verify-buckets.sh`
 

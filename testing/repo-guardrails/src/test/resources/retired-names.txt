@@ -7,22 +7,7 @@
 # (image), and storage-verifier (jar/log prefix) in July 2026.
 storage-contract
 
-# Harness scripts renamed to the <product>-<implementation>-<action>-<object>
-# scheme in July 2026, so a script name identifies its harness without its
-# directory. Only names that are not substrings of their replacements can be
-# listed here: this guardrail matches plain substrings, so retiring for example
-# "verify-security" would flag its own replacement
-# "ceph-compose-verify-security". The remaining old names are covered by
-# ComposeClusterScriptTest, which asserts the current script inventory.
-
-# Renamed to ceph-compose-verify-storage: it runs the storage verifier, and the
-# old name identified a language rather than a subject.
-verify-java
-
-# Renamed to ceph-compose-verify-harness, which names what is verified and is
-# kebab-case as section 3 requires.
-selftest
-
-# Renamed to ceph-compose-generate-certificates; "compose" now appears in the
-# harness prefix instead of the middle of the name.
-generate-compose-certificates
+# Ceph Compose canonical script names use the
+# <product>-<implementation>-<action>-<object> scheme. Historical entry-point
+# names remain supported as compatibility wrappers and are therefore not
+# retired names. ComposeClusterScriptTest verifies both interfaces.
