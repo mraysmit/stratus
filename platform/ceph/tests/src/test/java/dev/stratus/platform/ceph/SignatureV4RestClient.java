@@ -116,8 +116,13 @@ final class SignatureV4RestClient implements AutoCloseable {
     private HttpResponse<byte[]> dispatch(String method, String path, Map<String, String> query, byte[] payload,
                                           Map<String, String> headers, String authorization,
                                           Duration requestTimeout) {
+        URI requestUri = URI.create(endpoint + canonicalPath(path) + queryString(query));
+        String surface = path.startsWith("/admin/") ? "rgw-admin" : "s3";
+        RestApiLogging.Exchange exchange = RestApiLogging.started(
+            surface, operation(surface, method, path, query), resource(surface, path, query),
+            method, requestUri, payload, false, authorization != null);
         HttpRequest.Builder request = HttpRequest.newBuilder()
-            .uri(URI.create(endpoint + canonicalPath(path) + queryString(query)))
+            .uri(requestUri)
             .timeout(requestTimeout)
             .method(method, HttpRequest.BodyPublishers.ofByteArray(payload));
         for (Map.Entry<String, String> header : headers.entrySet()) {
@@ -130,13 +135,52 @@ final class SignatureV4RestClient implements AutoCloseable {
             request.header("Authorization", authorization);
         }
         try {
-            return http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response = http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+            RestApiLogging.completed(exchange, response.statusCode(), response.body(), false, response.headers());
+            return response;
         } catch (java.io.IOException e) {
+            RestApiLogging.failed(exchange, e);
             throw new java.io.UncheckedIOException("Signed REST request failed: " + method + " " + path, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            RestApiLogging.failed(exchange, e);
             throw new IllegalStateException("Interrupted during " + method + " " + path, e);
         }
+    }
+
+    private static String operation(String surface, String method, String path, Map<String, String> query) {
+        if ("rgw-admin".equals(surface)) {
+            if ("/admin/bucket".equals(path)) {
+                return query.containsKey("bucket") ? "read-bucket-statistics" : "list-buckets";
+            }
+            return "/admin/user".equals(path) ? "read-user" : "admin-request";
+        }
+        return switch (method) {
+            case "PUT" -> "write-object";
+            case "DELETE" -> "delete-object";
+            case "GET" -> query.containsKey("list-type") ? "list-objects"
+                : path.substring(1).contains("/") ? "read-object" : "read-bucket";
+            default -> "object-request";
+        };
+    }
+
+    private static String resource(String surface, String path, Map<String, String> query) {
+        if ("rgw-admin".equals(surface)) {
+            if (query.containsKey("bucket")) {
+                return "bucket=" + query.get("bucket");
+            }
+            if (query.containsKey("uid")) {
+                return "uid=" + query.get("uid");
+            }
+            return path;
+        }
+        String withoutLeadingSlash = path.startsWith("/") ? path.substring(1) : path;
+        int separator = withoutLeadingSlash.indexOf('/');
+        if (separator < 0) {
+            return "bucket=" + withoutLeadingSlash;
+        }
+        return "bucket=" + withoutLeadingSlash.substring(0, separator)
+            + " key=" + withoutLeadingSlash.substring(separator + 1);
     }
 
     private String authorization(String method, String path, Map<String, String> query,

@@ -15,6 +15,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -192,8 +193,14 @@ final class CephDashboardRestContractTest {
     }
 
     private HttpResponse<String> send(String method, String path, String body) {
+        URI requestUri = URI.create(endpoint + path);
+        byte[] requestData = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
+        boolean authenticationExchange = path.startsWith("/api/auth");
+        RestApiLogging.Exchange exchange = RestApiLogging.started(
+            "dashboard", operation(method, path), resource(method, path, body), method, requestUri,
+            requestData, authenticationExchange, token != null || "/api/auth".equals(path));
         HttpRequest.Builder request = HttpRequest.newBuilder()
-            .uri(URI.create(endpoint + path))
+            .uri(requestUri)
             .timeout(REQUEST_TIMEOUT)
             .header("Accept", ACCEPT)
             .method(method, body == null
@@ -206,13 +213,53 @@ final class CephDashboardRestContractTest {
             request.header("Authorization", "Bearer " + token);
         }
         try {
-            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            RestApiLogging.completed(exchange, response.statusCode(),
+                response.body().getBytes(StandardCharsets.UTF_8), authenticationExchange, response.headers());
+            return response;
         } catch (IOException e) {
+            RestApiLogging.failed(exchange, e);
             throw new UncheckedIOException("Dashboard request failed: " + method + " " + path, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            RestApiLogging.failed(exchange, e);
             throw new IllegalStateException("Interrupted during " + method + " " + path, e);
         }
+    }
+
+    private static String operation(String method, String path) {
+        if ("/api/auth".equals(path)) {
+            return "authenticate";
+        }
+        if ("/api/auth/logout".equals(path)) {
+            return "logout";
+        }
+        if ("/api/summary".equals(path)) {
+            return "read-cluster-summary";
+        }
+        if ("/api/rgw/bucket".equals(path)) {
+            return "POST".equals(method) ? "create-bucket" : "list-buckets";
+        }
+        if (path.startsWith("/api/rgw/bucket/")) {
+            return "DELETE".equals(method) ? "delete-bucket" : "read-bucket";
+        }
+        return "dashboard-request";
+    }
+
+    private static String resource(String method, String path, String body) {
+        if (path.startsWith("/api/rgw/bucket/")) {
+            return "bucket=" + path.substring("/api/rgw/bucket/".length());
+        }
+        if ("POST".equals(method) && "/api/rgw/bucket".equals(path) && body != null) {
+            Object parsed = new Yaml().load(body);
+            if (parsed instanceof Map<?, ?> values) {
+                return "bucket=" + values.get("bucket") + " owner=" + values.get("uid");
+            }
+        }
+        if ("/api/rgw/bucket".equals(path)) {
+            return "buckets";
+        }
+        return path.startsWith("/api/auth") ? "dashboard-session" : "cluster";
     }
 
     private static String rgwFailure(String operation, HttpResponse<String> response) {
