@@ -121,6 +121,20 @@ credentials of its own. A Ceph deployment supplies these however it chooses; the
 Compose cluster configures them during startup, after the RGW daemons are
 healthy, and logs a warning if it cannot.
 
+### REST logging
+
+The REST contracts use SLF4J with the repository-standard JDK logging backend.
+`STRATUS_LOG_LEVEL=INFO` records the semantic operation and resource, HTTP
+method and status, byte counts, elapsed time, and SHA-256 fingerprints of
+non-sensitive test data. A PUT request fingerprint matching the later GET
+response fingerprint proves exactly where the test payload was written and
+read without dumping it into the log. `STRATUS_LOG_LEVEL=DEBUG` additionally
+records query parameter names, authentication-material presence, response
+content type, ETag, and the server request ID. Authentication request and
+response fingerprints are marked `redacted`; request and response bodies,
+query values, credentials, signatures, authorization headers, bearer tokens,
+cookies, and passwords are never logged.
+
 ## Implementation guardrails
 
 `ComposeClusterContractTest` and `ComposeClusterScriptTest` are deliberately
