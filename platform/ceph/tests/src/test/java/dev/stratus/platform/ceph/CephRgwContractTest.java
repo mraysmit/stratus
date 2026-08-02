@@ -22,11 +22,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,6 +83,7 @@ class CephRgwContractTest {
         var evidenceFile = Path.of("target", "live-evidence", "live-contract-report.json");
         Files.deleteIfExists(evidenceFile);
         var environment = liveEnvironment();
+        var logFile = Path.of(environment.get("STRATUS_LOG_FILE").replace("%g", "0"));
         environment.put("STRATUS_EVIDENCE_FILE", evidenceFile.toString());
         environment.put("STRATUS_LOG_LEVEL", "DEBUG");
         var output = new ByteArrayOutputStream();
@@ -97,7 +102,7 @@ class CephRgwContractTest {
         var secret = environment.get("CEPH_RGW_SECRET_KEY");
         assertFalse(evidence.contains(secret), "evidence must never contain the secret key");
         assertFalse(output.toString().contains(secret), "report output must never contain the secret key");
-        var completion = Files.readAllLines(Path.of("target/live-logs/storage-verifier.0.log")).stream()
+        var completion = Files.readAllLines(logFile).stream()
                 .filter(line -> line.contains("Storage contract verification completed"))
                 .reduce((first, second) -> second)
                 .orElseThrow();
@@ -317,7 +322,10 @@ class CephRgwContractTest {
 
     private static Map<String, String> liveEnvironment() {
         var environment = new HashMap<>(System.getenv());
-        environment.put("STRATUS_LOG_FILE", "target/live-logs/storage-verifier.%g.log");
+        var timestamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssSSS'Z'")
+                .withZone(ZoneOffset.UTC).format(Instant.now());
+        environment.put("STRATUS_LOG_FILE",
+                "logs/storage-verifier-" + timestamp + "-" + UUID.randomUUID() + ".%g.log");
         environment.putIfAbsent("STRATUS_LOG_MAX_BYTES", "10485760");
         environment.putIfAbsent("STRATUS_LOG_FILE_COUNT", "2");
         return environment;
