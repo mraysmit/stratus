@@ -41,12 +41,24 @@ Run only the live shared contract from the repository root:
 
 Against the Compose cluster, use its wrapper instead. It supplies the
 environment, the live opt-in switch, and the CA truststore, so nothing has to be
-exported by hand. Arguments pass through to Maven:
+exported by hand. Arguments pass through to Maven. Every invocation also writes
+a timestamped complete transcript with explicit start/end records under
+`platform/ceph/tests/logs/`:
 
 ```bash
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh clean verify -Pall-tests
 ```
+
+`platform/ceph/tests/logs/` is ignored by Git but is outside Maven's `target/`
+tree, so `mvn clean` does not delete retained test evidence. Each live storage
+verifier invocation receives a unique `storage-verifier-<UTC timestamp>-<run
+ID>.%g.log` pattern and cannot append records from another invocation. Wrapper
+transcripts are named `ceph-live-tests-<UTC timestamp>.log`. When REST tests ran,
+the wrapper also creates `rest-api-tests-<same UTC timestamp>.log`, containing
+the sanitized REST records plus the test totals, build result, source-transcript
+name, and wrapper exit code. Operators may archive or remove these logs according
+to their local retention policy.
 
 Selecting the live profile without `CEPH_RGW_INTEGRATION=true` fails instead of
 silently skipping the contract.
@@ -134,6 +146,36 @@ content type, ETag, and the server request ID. Authentication request and
 response fingerprints are marked `redacted`; request and response bodies,
 query values, credentials, signatures, authorization headers, bearer tokens,
 cookies, and passwords are never logged.
+
+### Business dataset lifecycle
+
+The raw S3 contract uses a versioned, synthetic customer-master dataset rather
+than an opaque probe string. It reflects the Stratus landing-to-bronze customer
+flow and contains business keys, names, synthetic email addresses under
+`example.test`, countries, customer segments, account states, revenue and
+currency values, source-system timestamps, and source-system identifiers.
+
+The first version deliberately contains ten rows with nine distinct customer
+IDs and one missing email. The corrected version has ten distinct customer IDs,
+no missing emails, corrected account values, and a new customer. The live test
+then proves this sequence against the same object key:
+
+1. write the raw dataset and capture its ETag;
+2. read it and compare every byte, its content length, ETag, and SHA-256;
+3. rewrite the object with the corrected dataset and require a changed ETag;
+4. read the corrected version and compare every byte, ETag, and SHA-256;
+5. list the landing prefix and find the exact object key;
+6. delete the object; and
+7. read it again and require `404 Not Found`.
+
+Each confirmed step emits a `Business dataset lifecycle` INFO record containing
+the action, dataset/version, exact bucket and key, row and quality counts,
+country coverage, byte count, and dataset SHA-256. The accompanying REST record
+shows the actual HTTP method, status, transferred byte counts, and request or
+response SHA-256. Matching hashes between the write and subsequent read are the
+logged evidence that the same bytes were persisted and returned; differing v1
+and v2 hashes prove that the rewrite replaced the data. Dataset rows and values
+are not written to the log.
 
 ## Implementation guardrails
 

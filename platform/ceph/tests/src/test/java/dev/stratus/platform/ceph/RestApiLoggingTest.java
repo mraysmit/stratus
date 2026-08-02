@@ -131,6 +131,29 @@ final class RestApiLoggingTest {
     }
 
     @Test
+    void businessLifecycleRecordIdentifiesTheDatasetAndItsQualityStateWithoutLoggingRows() {
+        RestApiLogging.configure("INFO");
+        byte[] data = ("customer_id,full_name,email,country\n"
+            + "CUST-1001,Alice Smith,alice.smith@example.test,GB\n"
+            + "CUST-1001,Alice Smith,alice.smith@example.test,GB\n"
+            + "CUST-1002,Bob Jones,,US\n").getBytes(StandardCharsets.UTF_8);
+
+        RestApiLogging.businessDatasetEvent("write-confirmed", "customer-master", "raw-v1",
+            "bucket=stratus-landing key=verification/business/customers/run-1/customers.csv",
+            3, 2, 1, List.of("GB", "US"), data);
+
+        String output = capture.text();
+        assertTrue(output.contains("Business dataset lifecycle action=write-confirmed"
+            + " dataset=customer-master version=raw-v1"));
+        assertTrue(output.contains("resource=bucket=stratus-landing"
+            + " key=verification/business/customers/run-1/customers.csv"));
+        assertTrue(output.contains("rows=3 distinctBusinessKeys=2 missingEmails=1 countries=[GB, US]"));
+        assertTrue(output.contains("datasetBytes=" + data.length + " datasetSha256=" + sha256(data)));
+        assertFalse(output.contains("Alice Smith"));
+        assertFalse(output.contains("alice.smith@example.test"));
+    }
+
+    @Test
     void rejectsAnUnknownConfiguredLevel() {
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
             () -> RestApiLogging.configure("TRACE"));
