@@ -464,4 +464,9 @@ Verifier reports (pure JSON, written directly by the verifier via `STRATUS_EVIDE
 
 Never include RGW secret keys, CA private keys, or the TLS server private key in evidence.
 
-Transcripts and the untrusted-TLS evidence log contain the JVM line `Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=... -Djavax.net.ssl.trustStorePassword=changeit`. This is not a leaked secret: it is emitted by the standard Temurin base-image CA entrypoint, `changeit` is the JVM's publicly documented default keystore password, and the truststore is an ephemeral tmpfs file holding only public certificates. Truststore passwords protect integrity, not confidentiality.
+Containerized verifier transcripts and the untrusted-TLS evidence log may contain
+the JVM line `Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=...
+-Djavax.net.ssl.trustStorePassword=changeit`. This is emitted by the standard
+Temurin base-image CA entrypoint; `changeit` is the JVM's public default and the
+container truststore holds only public certificates. The workstation live-test
+wrapper does not put a truststore password on its command line.

@@ -80,6 +80,16 @@ final class RestApiLogging {
             elapsedMillis(exchange), failure.getClass().getSimpleName());
     }
 
+    static void businessDatasetEvent(String action, String dataset, String version, String resource,
+                                     int rows, int distinctBusinessKeys, int missingEmails,
+                                     List<String> countries, byte[] data) {
+        LOGGER.info("Business dataset lifecycle action={} dataset={} version={} resource={} rows={} "
+                + "distinctBusinessKeys={} missingEmails={} countries={} datasetBytes={} datasetSha256={}",
+            safeToken(action), safeToken(dataset), safeToken(version), safeToken(resource), rows,
+            distinctBusinessKeys, missingEmails, countries.stream().map(RestApiLogging::safeToken).sorted().toList(),
+            data.length, fingerprint(data, false));
+    }
+
     static void configure(String configuredLevel) {
         Level level = switch (configuredLevel.toUpperCase(Locale.ROOT)) {
             case "DEBUG" -> Level.FINE;

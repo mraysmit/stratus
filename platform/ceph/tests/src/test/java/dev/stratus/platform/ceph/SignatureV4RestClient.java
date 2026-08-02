@@ -82,6 +82,17 @@ final class SignatureV4RestClient implements AutoCloseable {
      */
     HttpResponse<byte[]> send(String method, String path, Map<String, String> query, byte[] body,
                               Duration requestTimeout) {
+        return sendForOperation(null, method, path, query, body, requestTimeout);
+    }
+
+    /**
+     * Sends a normally signed request while naming a more precise business
+     * operation than can be inferred from the HTTP method alone, such as an
+     * intentional object rewrite.
+     */
+    HttpResponse<byte[]> sendForOperation(String loggedOperation, String method, String path,
+                                          Map<String, String> query, byte[] body,
+                                          Duration requestTimeout) {
         byte[] payload = body == null ? new byte[0] : body;
         String payloadHash = hex(sha256(payload));
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
@@ -95,7 +106,7 @@ final class SignatureV4RestClient implements AutoCloseable {
         signedHeaders.put("x-amz-date", amzDateTime);
 
         String authorization = authorization(method, path, query, signedHeaders, payloadHash, amzDateTime, scopeDate);
-        return dispatch(method, path, query, payload, signedHeaders, authorization, requestTimeout);
+        return dispatch(loggedOperation, method, path, query, payload, signedHeaders, authorization, requestTimeout);
     }
 
     /**
@@ -110,16 +121,18 @@ final class SignatureV4RestClient implements AutoCloseable {
         headers.put("host", hostHeader());
         headers.put("x-amz-content-sha256", EMPTY_PAYLOAD_SHA256);
         headers.put("x-amz-date", AMZ_DATE_TIME.format(now));
-        return dispatch(method, path, query, new byte[0], headers, authorization, requestTimeout);
+        return dispatch(null, method, path, query, new byte[0], headers, authorization, requestTimeout);
     }
 
-    private HttpResponse<byte[]> dispatch(String method, String path, Map<String, String> query, byte[] payload,
+    private HttpResponse<byte[]> dispatch(String loggedOperation, String method, String path,
+                                          Map<String, String> query, byte[] payload,
                                           Map<String, String> headers, String authorization,
                                           Duration requestTimeout) {
         URI requestUri = URI.create(endpoint + canonicalPath(path) + queryString(query));
         String surface = path.startsWith("/admin/") ? "rgw-admin" : "s3";
         RestApiLogging.Exchange exchange = RestApiLogging.started(
-            surface, operation(surface, method, path, query), resource(surface, path, query),
+            surface, loggedOperation == null ? operation(surface, method, path, query) : loggedOperation,
+            resource(surface, path, query),
             method, requestUri, payload, false, authorization != null);
         HttpRequest.Builder request = HttpRequest.newBuilder()
             .uri(requestUri)

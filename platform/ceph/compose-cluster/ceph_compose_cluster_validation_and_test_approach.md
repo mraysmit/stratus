@@ -618,11 +618,11 @@ inverted meaning for the negatives, where `"success":true` means the denial
 | `dataset-verification-<ts>.json` | `ceph-compose-verify-dataset` | The generated dataset uploaded, read back byte-for-byte identical, and was purged |
 
 Evidence must never contain RGW secret keys, CA private keys, or the TLS server
-private key. Note that transcripts legitimately contain the JVM line `Picked up
-JAVA_TOOL_OPTIONS: ... trustStorePassword=changeit` — this is **not** a leaked
-secret; `changeit` is the JVM's publicly documented default truststore password
-and the truststore holds only public certificates. The [README Evidence
-section](README.md#evidence) has the full rationale.
+private key. Containerized verifier output may contain the JVM's public default
+truststore password because the standard Temurin entrypoint emits its
+`JAVA_TOOL_OPTIONS`; the workstation live-test wrapper omits the password from
+its command line. The [README Evidence section](README.md#evidence) has the full
+rationale.
 
 ## Troubleshooting
 

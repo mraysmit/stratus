@@ -127,6 +127,32 @@ final class ComposeClusterScriptTest {
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
 
+    @Test
+    void liveTestWrapperRetainsBoundedPerRunEvidence() {
+        String wrapper = Repo.read(SCRIPTS.resolve(
+            Path.of("verify", "ceph-compose-run-live-tests.sh")));
+        List<String> violations = new ArrayList<>();
+        for (String required : List.of(
+                "platform/ceph/tests/logs",
+                "run_started_at=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+                "run_completed_at=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+                "run_id=\"ceph-live-tests-$run_timestamp\"",
+                "test_log=\"$test_log_dir/$run_id.log\"",
+                "rest-api-tests-$run_timestamp.log",
+                "${PIPESTATUS[0]}",
+                "sourceTranscript=",
+                "RUN completedAtUtc=",
+                "exit \"$maven_status\"")) {
+            if (!wrapper.contains(required)) {
+                violations.add("live-test wrapper must contain " + required);
+            }
+        }
+        if (wrapper.contains("trustStorePassword")) {
+            violations.add("live-test wrapper must not put the truststore password on the JVM command line");
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
     private static List<Path> scriptFiles() {
         return Repo.trackedFiles().stream()
             .filter(file -> file.startsWith(SCRIPTS))

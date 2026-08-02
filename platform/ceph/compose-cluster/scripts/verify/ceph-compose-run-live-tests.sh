@@ -47,11 +47,47 @@ if command -v cygpath >/dev/null 2>&1; then
   truststore_path="$(cygpath -m "$truststore")"
 fi
 export CEPH_RGW_INTEGRATION=true
-export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=${truststore_path} -Djavax.net.ssl.trustStorePassword=changeit"
+export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=${truststore_path}"
 
 log "Running the live Maven contracts against $CEPH_RGW_ENDPOINT"
 cd "$REPO_DIR"
+test_log_dir="$REPO_DIR/platform/ceph/tests/logs"
+mkdir -p "$test_log_dir"
+run_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+run_id="ceph-live-tests-$run_timestamp"
+test_log="$test_log_dir/$run_id.log"
+log "Writing the complete live-test transcript to $test_log"
 if [[ "$#" -eq 0 ]]; then
-  exec ./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am
+  set -- test -Pceph-integration-tests -pl :stratus-ceph-tests -am
 fi
-exec ./mvnw "$@"
+
+# Preserve Maven's exit code through tee, then create a REST-only evidence file
+# when this invocation exercised the REST contracts. Both artifacts have an
+# explicit run boundary and final result; neither appends unrelated runs.
+set +e
+{
+  printf 'RUN startedAtUtc=%s runId=%s endpoint=%s\n' \
+    "$run_started_at" "$run_id" "$CEPH_RGW_ENDPOINT"
+  ./mvnw "$@"
+} 2>&1 | tee "$test_log"
+maven_status="${PIPESTATUS[0]}"
+set -e
+run_completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf 'RUN completedAtUtc=%s runId=%s exitCode=%s\n' \
+  "$run_completed_at" "$run_id" "$maven_status" | tee -a "$test_log"
+
+if grep -q 'dev.stratus.platform.ceph.RestApiLogging' "$test_log"; then
+  rest_log="$test_log_dir/rest-api-tests-$run_timestamp.log"
+  {
+    printf 'RUN startedAtUtc=%s runId=%s sourceTranscript=%s\n' \
+      "$run_started_at" "$run_id" "$(basename "$test_log")"
+    grep -E 'dev\.stratus\.platform\.ceph\.RestApiLogging|^\[INFO\] Tests run:|^\[INFO\] BUILD (SUCCESS|FAILURE)' \
+      "$test_log"
+    printf 'RUN completedAtUtc=%s runId=%s exitCode=%s\n' \
+      "$run_completed_at" "$run_id" "$maven_status"
+  } > "$rest_log"
+  log "Writing the REST evidence log to $rest_log"
+fi
+
+exit "$maven_status"
