@@ -1,0 +1,11 @@
+# Local disposable state only; nothing here is ever committed.
+.env
+certs/
+private/
+logs/
+evidence/*
+!evidence/.gitkeep
+*.key
+*.csr
+*.srl
+*.pem
