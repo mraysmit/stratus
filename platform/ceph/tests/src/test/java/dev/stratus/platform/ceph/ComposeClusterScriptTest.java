@@ -153,6 +153,45 @@ final class ComposeClusterScriptTest {
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
 
+    @Test
+    void validationOrchestratorRunsTheDocumentedSequenceInOrderWithPerRunEvidence() {
+        String orchestrator = Repo.read(SCRIPTS.resolve(
+            Path.of("verify", "ceph-compose-validate-cluster.sh")));
+        List<String> violations = new ArrayList<>();
+        int previousIndex = -1;
+        for (String delegate : List.of(
+                "verify/ceph-compose-bootstrap-buckets.sh",
+                "verify/ceph-compose-verify-buckets.sh",
+                "verify/ceph-compose-verify-storage.sh",
+                "verify/ceph-compose-verify-security.sh",
+                "verify/ceph-compose-verify-dashboard.sh",
+                "verify/ceph-compose-verify-dataset.sh",
+                "verify/ceph-compose-run-live-tests.sh")) {
+            int index = orchestrator.indexOf(delegate);
+            if (index < 0) {
+                violations.add("validation orchestrator must delegate to " + delegate);
+            } else if (index < previousIndex) {
+                violations.add(delegate + " must run in the documented verification order");
+            } else {
+                previousIndex = index;
+            }
+        }
+        for (String required : List.of(
+                "validate-cluster-$run_timestamp.txt",
+                "run_id=\"ceph-validate-cluster-$run_timestamp\"",
+                "RUN startedAtUtc=",
+                "RESULT PASS runId=",
+                "RESULT FAIL runId=",
+                "${PIPESTATUS[0]}",
+                "lifecycle/ceph-compose-startup.sh",
+                "lifecycle/ceph-compose-shutdown.sh")) {
+            if (!orchestrator.contains(required)) {
+                violations.add("validation orchestrator must contain " + required);
+            }
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
     private static List<Path> scriptFiles() {
         return Repo.trackedFiles().stream()
             .filter(file -> file.startsWith(SCRIPTS))
