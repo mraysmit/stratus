@@ -93,11 +93,11 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 |---|---|---|---|---|---|---|
 | P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | In progress |
 | P1-1.1 | Ceph decision due diligence | Platform architect | Architecture storage requirements | Confirmed Ceph baseline, retained comparison record, proof-of-fit targets, production topology, and explicit reconsideration triggers | Architecture owner | Accepted |
-| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | In progress |
-| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | In progress |
-| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | In progress |
-| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | In progress |
-| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | In progress |
+| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | In progress - developer track accepted 2026-08-03 |
+| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | In progress - developer track accepted 2026-08-03 |
+| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | In progress - developer track accepted 2026-08-03 |
+| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | In progress - developer track accepted 2026-08-03 |
+| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | In progress - developer track accepted 2026-08-03 with the quantitative-threshold variance carried to `P1-1.6-P1`; image publication remains under P1-0.1 |
 | P1-2.1 | Polaris production metadata store | Data platform owner | P1-1 accepted | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Not started |
 | P1-2.2 | Polaris service deployment | Data platform owner | P1-2.1 | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | Not started |
 | P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2, P1-1.4 | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | Not started |
@@ -132,6 +132,8 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 | P1-7.5 | Encryption-at-rest and credential rotation | Security owner | P1-7.1, P1-1.4 | Ceph/RGW encryption evidence for gold/platform zones and rotation runbook test | Security owner | Not started |
 | P1-7.6 | Integrated security verification | Security owner | P1-7.3, P1-7.4, P1-7.5 | Positive and negative authentication, authorization, TLS, and no-shared-credential evidence | Platform owner | Not started |
 | P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, concurrent Spark/Trino/Polaris/storage qualification, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
+
+On 2026-08-03 the platform owner accepted the Increment 1 developer gate (`P1-1.G-D` in [ceph_storage.md](ceph_storage.md#17-implementation-task-track)) against live full-sequence evidence, with two recorded deferrals: immutable verifier-image publication (under `P1-0.1`) and quantitative performance thresholds (carried to `P1-1.6-P1`). Increment 2 engineering is unblocked. The `P1-1.x` rows above remain `In progress` at portfolio level because their production child tasks have not started.
 
 ### P1-0.1 Build and artifact delivery acceptance checklist
 
