@@ -252,6 +252,7 @@ In the order you meet them:
 | `verify/ceph-compose-verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
 | `verify/ceph-compose-verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
 | `verify/ceph-compose-run-live-tests` | Runs the live Maven contracts in [../tests](../tests/README.md) against this cluster, supplying the environment, the live opt-in switch, and a CA truststore the workstation JVM needs. Arguments pass through to Maven | Verifying Java changes against the live cluster |
+| `verify/ceph-compose-validate-cluster` | Runs the whole verification sequence above in order — `bootstrap-buckets` through `run-live-tests` — with per-step results and a timestamped transcript in `logs/`. With `--full` it also wraps the run in `startup` and `shutdown`; after any failed step the cluster is left running for diagnosis | One-command comprehensive validation |
 | `lifecycle/ceph-compose-shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
 | `lifecycle/ceph-compose-reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
 | `verify/ceph-compose-failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
@@ -276,6 +277,15 @@ Windows):
 ```
 
 `shutdown` removes containers and the project network but preserves Ceph volumes so the environment can restart.
+
+The same sequence — plus the live Maven contracts — runs as one command that
+writes its own transcript to `logs/validate-cluster-<timestamp>.txt`:
+
+```bash
+./scripts/verify/ceph-compose-validate-cluster.sh --full
+```
+
+Without `--full` it validates an already-running cluster and leaves it up.
 
 Capture run transcripts into the ignored harness-local `logs/` directory (the repository-root `logs/` is reserved for Maven build logs). Use `2>&1` so stderr lines are included:
 

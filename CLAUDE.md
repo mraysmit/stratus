@@ -84,6 +84,10 @@ with transcripts and evidence recorded. Every harness script is prefixed
    script itself supplies
 9. `lifecycle/ceph-compose-shutdown`
 
+`verify/ceph-compose-validate-cluster` runs steps 2–8 as one command against a
+running cluster and writes a per-step transcript; with `--full` it runs the
+whole sequence 1–9.
+
 `verify/ceph-compose-verify-harness` is separate: it requires a fully stopped
 harness with no cluster volumes, so it destroys and rebuilds local state.
 
