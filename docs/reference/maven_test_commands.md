@@ -21,7 +21,7 @@ Therefore, `mvnw clean verify` is the complete local regression command. It runs
 
 | Profile | Included tags | Coverage report | External requirements | Purpose |
 |---|---|---:|---|---|
-| none | `unit` | yes | none | Complete local build and offline regression |
+| none | `unit` plus untagged | yes | none | Complete local build and offline regression |
 | `-Punit-tests` | `unit` | no | none | Targeted diagnosis of a known unit-test failure |
 | `-Pceph-integration-tests` | `ceph-integration` | no | running local Ceph harness | Targeted live Ceph suite run |
 | `-Pall-tests` | all tags | yes | running local Ceph harness | Full offline plus live regression and acceptance boundary |
@@ -75,6 +75,11 @@ Against the Compose cluster, do not wire the variables above by hand. Its `verif
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh clean verify -Pall-tests
 ```
+
+To run the complete harness verification sequence — including the live Maven
+contracts — as one command with a per-step transcript, use
+`verify/ceph-compose-validate-cluster.sh` (add `--full` to wrap the run in
+startup and shutdown).
 
 A selected live profile fails when `CEPH_RGW_INTEGRATION=true` is absent; it must never silently report success after skipping the Ceph test.
 
