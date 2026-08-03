@@ -287,6 +287,25 @@ writes its own transcript to `logs/validate-cluster-<timestamp>.txt`:
 
 Without `--full` it validates an already-running cluster and leaves it up.
 
+## Attachment contract
+
+Other product harnesses compose with this cluster over internal DNS
+(ADR-P1-003): a consumer joins this harness's Docker network and addresses RGW
+through the TLS proxy, never a backend daemon directly. The published contract
+is:
+
+| Value | Meaning |
+|---|---|
+| `stratus-ceph-local_ceph` | Docker network to join (`external: true` in the consumer's Compose file); subnet `172.28.0.0/24` |
+| `https://object-store.stratus.local:8443` | S3 endpoint; resolves via Docker DNS to the TLS proxy inside the network, and via the hosts file to loopback on the workstation |
+| `https://object-store.stratus.local:8444` | Ceph Dashboard endpoint, same resolution behavior |
+| `certs/stratus-ca.crt` | Disposable CA certificate, mounted read-only by consumers; private keys are never shared |
+
+Everything else — backend container names, internal addresses, daemon
+topology — is private to this harness and may change without notice. Consumer
+startup scripts must fail fast with an actionable message when the network is
+absent instead of starting this harness transitively.
+
 Capture run transcripts into the ignored harness-local `logs/` directory (the repository-root `logs/` is reserved for Maven build logs). Use `2>&1` so stderr lines are included:
 
 ```bash
