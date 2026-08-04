@@ -246,6 +246,7 @@ In the order you meet them:
 | `lifecycle/ceph-compose-startup` | Brings everything up: generates `.env` secrets and certificates, then `docker compose up` and waits for health. Finally configures the Dashboard's own RGW credentials, which must happen after the RGW daemons are healthy and so cannot live in `ceph-configure`; a failure there is logged as a warning and leaves only the Dashboard's RGW views unavailable | First, every session |
 | `lifecycle/ceph-compose-rotate-secrets` | Rotates both RGW key pairs, the Dashboard password, the disposable CA, and the endpoint certificate without deleting Ceph data | When local credentials or certificate keys may be exposed |
 | `verify/ceph-compose-bootstrap-buckets` | Creates the five Stratus buckets and the denied-owner bucket through the S3 API | After startup, once per cluster |
+| `verify/ceph-compose-provision-service-identities` | Provisions the platform service identities declared in [`service-identities.conf`](service-identities.conf): generates credentials into `.env`, creates the RGW users, applies one merged bucket policy per bucket, and probes each identity positively and negatively. Developer harness only — production provisions identities through the approved secret-management process | After bucket bootstrap, once per cluster |
 | `verify/ceph-compose-verify-buckets` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
 | `verify/ceph-compose-verify-storage` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
 | `verify/ceph-compose-verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
@@ -268,6 +269,7 @@ Windows):
 ```bash
 ./scripts/lifecycle/ceph-compose-startup.sh
 ./scripts/verify/ceph-compose-bootstrap-buckets.sh
+./scripts/verify/ceph-compose-provision-service-identities.sh
 ./scripts/verify/ceph-compose-verify-buckets.sh
 ./scripts/verify/ceph-compose-verify-storage.sh
 ./scripts/verify/ceph-compose-verify-security.sh

@@ -45,6 +45,7 @@ bash scripts/lifecycle/polaris-compose-shutdown.sh
 |---|---|
 | `lifecycle/polaris-compose-startup.sh` | Generates `.env` from the template once (disposable bootstrap credential), requires the Ceph harness network, validates Compose interpolation, starts the service |
 | `verify/polaris-compose-verify-endpoint.sh` | Liveness smoke check: the Polaris API answers on the loopback port (an unauthenticated 401/403 counts as listening). Not a catalog conformance test |
+| `verify/polaris-compose-bootstrap-catalog.sh` | Idempotently creates the `stratus` catalog (bound to the five Ceph buckets) and the `bronze`, `silver`, `gold`, `platform` namespaces, then runs a positive listing check and a forged-token negative. Requires the svc-polaris credentials in `.env`: copy `CEPH_SVC_POLARIS_ACCESS_KEY`/`_SECRET_KEY` from `platform/ceph/compose-cluster/.env` into `CEPH_RGW_ACCESS_KEY`/`_SECRET_KEY` |
 | `lifecycle/polaris-compose-shutdown.sh` | Idempotent stop; preserves the `polaris-data` volume and `.env`; never removes the external Ceph network |
 | `lifecycle/polaris-compose-reset.sh` | Destroys the disposable catalog state (containers and data volume) for a fresh catalog next startup; prompts unless `--force` |
 

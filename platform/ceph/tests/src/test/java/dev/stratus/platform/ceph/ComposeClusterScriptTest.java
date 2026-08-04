@@ -161,6 +161,7 @@ final class ComposeClusterScriptTest {
         int previousIndex = -1;
         for (String delegate : List.of(
                 "verify/ceph-compose-bootstrap-buckets.sh",
+                "verify/ceph-compose-provision-service-identities.sh",
                 "verify/ceph-compose-verify-buckets.sh",
                 "verify/ceph-compose-verify-storage.sh",
                 "verify/ceph-compose-verify-security.sh",

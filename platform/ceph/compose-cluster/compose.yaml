@@ -364,6 +364,30 @@ services:
     networks:
       - ceph
 
+  # One-off S3 administration tool for operations rclone cannot perform,
+  # currently bucket-policy application during bucket bootstrap. Runs only on
+  # demand ("tools" profile) with the bucket-owner identity; it is not part
+  # of the steady-state cluster.
+  s3admin:
+    image: ${S3ADMIN_IMAGE:-amazon/aws-cli:2.36.0}
+    profiles: ["tools"]
+    entrypoint: ["aws"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${CEPH_RGW_ACCESS_KEY:?CEPH_RGW_ACCESS_KEY is required}
+      AWS_SECRET_ACCESS_KEY: ${CEPH_RGW_SECRET_KEY:?CEPH_RGW_SECRET_KEY is required}
+      AWS_DEFAULT_REGION: "default"
+      AWS_CA_BUNDLE: /certs/stratus-ca.crt
+    volumes:
+      - ./certs/stratus-ca.crt:/certs/stratus-ca.crt:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /aws:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - ceph
+
   verifier:
     image: ${VERIFIER_IMAGE:?VERIFIER_IMAGE must identify a prebuilt verifier image}
     profiles: ["verification"]

@@ -1038,12 +1038,13 @@ harness stopped and its disposable volumes removed. The self-test verifies
 certificate renewal, rejection of a vacuous security verifier, and teardown
 without `.env`.
 
-The harness ships six further scripts not detailed above; the
+The harness ships further scripts not detailed above; the
 [Compose cluster README](../../platform/ceph/compose-cluster/README.md) is
 their normative documentation:
 
 - `scripts/lifecycle/ceph-compose-install-prerequisites.sh` — one-time host prerequisite installation
 - `scripts/lifecycle/ceph-compose-rotate-secrets.sh` — in-place rotation of RGW keys, the dashboard password, the CA, and the endpoint certificate
+- `scripts/verify/ceph-compose-provision-service-identities.sh` — provisions the platform service identities and bucket-policy grants declared in `service-identities.conf` (developer harness only; the production track provisions identities through the approved secret-management process, `P1-1.4-P1`)
 - `scripts/verify/ceph-compose-verify-dashboard.sh` — Ceph Dashboard REST API conformance test
 - `scripts/verify/ceph-compose-verify-dataset.sh` — multi-file dataset round trip with hash-matched read-back
 - `scripts/verify/ceph-compose-run-live-tests.sh` — runs the live workstation JVM conformance suite (`stratus-ceph-tests`), supplying the environment, live opt-in switch, and CA truststore, with per-run transcripts in `platform/ceph/tests/logs/`

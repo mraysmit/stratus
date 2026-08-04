@@ -73,20 +73,24 @@ with transcripts and evidence recorded. Every harness script is prefixed
 
 1. `lifecycle/ceph-compose-startup`
 2. `verify/ceph-compose-bootstrap-buckets`
-3. `verify/ceph-compose-verify-buckets`
-4. `verify/ceph-compose-verify-storage`
-5. `verify/ceph-compose-verify-security`
-6. `verify/ceph-compose-verify-dashboard`
-7. `verify/ceph-compose-verify-dataset`
-8. `verify/ceph-compose-run-live-tests` — the live JVM conformance tests; unlike the
+3. `verify/ceph-compose-provision-service-identities` — provisions the
+   platform service identities and bucket policies declared in
+   `service-identities.conf` (developer harness only; production provisions
+   identities through the approved secret-management process)
+4. `verify/ceph-compose-verify-buckets`
+5. `verify/ceph-compose-verify-storage`
+6. `verify/ceph-compose-verify-security`
+7. `verify/ceph-compose-verify-dashboard`
+8. `verify/ceph-compose-verify-dataset`
+9. `verify/ceph-compose-run-live-tests` — the live JVM conformance tests; unlike the
    steps above it runs on the workstation, so it also needs a hosts-file entry
    for `object-store.stratus.local` and a CA truststore, both of which the
    script itself supplies
-9. `lifecycle/ceph-compose-shutdown`
+10. `lifecycle/ceph-compose-shutdown`
 
-`verify/ceph-compose-validate-cluster` runs steps 2–8 as one command against a
+`verify/ceph-compose-validate-cluster` runs steps 2–9 as one command against a
 running cluster and writes a per-step transcript; with `--full` it runs the
-whole sequence 1–9.
+whole sequence 1–10.
 
 `verify/ceph-compose-verify-harness` is separate: it requires a fully stopped
 harness with no cluster volumes, so it destroys and rebuilds local state.

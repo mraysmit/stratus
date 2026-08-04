@@ -240,35 +240,49 @@ echo "Token acquired: ${TOKEN:0:20}..."
 
 ### Create the Stratus catalog
 
+The payload shape below is verified against Polaris 1.5.0 (the developer
+harness script `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh`
+is the executable form): the request wraps a `catalog` object, the S3
+endpoint and path-style flags are `storageConfigInfo` fields, and the
+`s3.*` FileIO keys go in catalog `properties`. Static S3 credentials are
+supplied to the serving layer, never embedded in the catalog record.
+
 ```bash
 curl --cacert /etc/stratus/certs/ca.crt -s -X POST \
   https://polaris.stratus.local:8181/api/management/v1/catalogs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "stratus",
-    "type": "INTERNAL",
-    "properties": {
-      "default-base-location": "s3://stratus-bronze"
-    },
-    "storageConfigInfo": {
-      "storageType": "S3",
-      "allowedLocations": [
-        "s3://stratus-landing",
-        "s3://stratus-bronze",
-        "s3://stratus-silver",
-        "s3://stratus-gold",
-        "s3://stratus-platform"
-      ],
-      "s3.endpoint": "https://object-store.stratus.local",
-      "s3.access-key-id": "svc-polaris",
-      "s3.secret-access-key": "<svc-polaris secret>",
-      "s3.path-style-access": "true"
+    "catalog": {
+      "name": "stratus",
+      "type": "INTERNAL",
+      "properties": {
+        "default-base-location": "s3://stratus-bronze",
+        "s3.endpoint": "https://object-store.stratus.local:8443",
+        "s3.path-style-access": "true"
+      },
+      "storageConfigInfo": {
+        "storageType": "S3",
+        "endpoint": "https://object-store.stratus.local:8443",
+        "pathStyleAccess": true,
+        "allowedLocations": [
+          "s3://stratus-landing",
+          "s3://stratus-bronze",
+          "s3://stratus-silver",
+          "s3://stratus-gold",
+          "s3://stratus-platform"
+        ]
+      }
     }
   }'
 ```
 
 ### Create namespaces
+
+Polaris disables custom namespace locations by default and requires each
+namespace under `<allowedLocation>/<namespace>/` (verified against 1.5.0).
+Stratus conforms to that safety rule instead of disabling it, so each zone's
+data lives at `s3://stratus-<zone>/<zone>/`:
 
 ```bash
 for NS in bronze silver gold platform; do
@@ -279,7 +293,7 @@ for NS in bronze silver gold platform; do
     -d "{
       \"namespace\": [\"${NS}\"],
       \"properties\": {
-        \"location\": \"s3://stratus-${NS}\",
+        \"location\": \"s3://stratus-${NS}/${NS}/\",
         \"zone\": \"${NS}\"
       }
     }"
@@ -822,7 +836,7 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
 | `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. TLS for `polaris.stratus.local` remains open ahead of any shared or representative use; digest pin belongs to `P1-2.2-S1` | Verified |
-| `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/config/`; `environments/developer/polaris/`; bootstrap module | Namespace/location inventory and access tests | D1 | Security owner | Credential leakage | Not started |
+| `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh`; Ceph harness svc-polaris identity and bucket policies; `environments/developer/polaris/` | Namespace/location inventory and access tests | D1 | Security owner | Verified 2026-08-04: scoped `svc-polaris` RGW identity created by the Ceph harness with bucket policies on the five Stratus buckets only (positive write/list/delete probe passed; denied-bucket listing failed closed); `stratus` catalog and four zone namespaces bootstrapped idempotently over the live API with a forged-token 401 negative. Transcripts in both harness `logs/` directories. Engine principals (svc-spark, svc-trino) belong to their increments; Polaris-to-RGW TLS trust for table IO is wired under `P1-2.4` | Verified |
 | `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | None recorded | Not started |
 | `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `platform/polaris/database/`; `environments/production/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
 | `P1-2.2-P1` | `P1-2.2` | Production | Deploy redundant production Polaris services with trusted TLS, health routing, immutable image, and managed config. | Platform owner | `P1-2.1-P1` | `platform/polaris/`; `environments/production/polaris/` | Endpoint failover, config snapshot, digest check | P1-P5 | Operations owner | Load-balancer ownership | Not started |
