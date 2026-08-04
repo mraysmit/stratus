@@ -4,8 +4,8 @@ set -euo pipefail
 # Date: 2026-07-30
 source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
-# Runs the deployment-neutral live Maven contracts in platform/ceph/tests
-# against this Compose cluster. The contracts execute in the workstation JVM,
+# Runs the deployment-neutral live Maven conformance tests in platform/ceph/tests
+# against this Compose cluster. The conformance tests execute in the workstation JVM,
 # not inside a container, so they need three things every other verify script
 # gets for free: the harness environment, the live opt-in switch, and a
 # truststore holding the disposable CA. This script supplies all three.
@@ -29,7 +29,7 @@ fi
 # Rebuilt whenever it is missing or older than the CA. ceph-compose-reset.sh regenerates the
 # CA, and a stale truststore would otherwise fail every handshake with no clue
 # why. Lives under certs/, which is already ignored and guardrail-enforced.
-: "${JAVA_HOME:?JAVA_HOME is required to build the contract truststore}"
+: "${JAVA_HOME:?JAVA_HOME is required to build the conformance-test truststore}"
 truststore="$HARNESS_DIR/certs/stratus-truststore.jks"
 ca_certificate="$HARNESS_DIR/certs/stratus-ca.crt"
 if [[ ! -f "$truststore" || "$ca_certificate" -nt "$truststore" ]]; then
@@ -49,7 +49,7 @@ fi
 export CEPH_RGW_INTEGRATION=true
 export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=${truststore_path}"
 
-log "Running the live Maven contracts against $CEPH_RGW_ENDPOINT"
+log "Running the live Maven conformance tests against $CEPH_RGW_ENDPOINT"
 cd "$REPO_DIR"
 test_log_dir="$REPO_DIR/platform/ceph/tests/logs"
 mkdir -p "$test_log_dir"
@@ -63,7 +63,7 @@ if [[ "$#" -eq 0 ]]; then
 fi
 
 # Preserve Maven's exit code through tee, then create a REST-only evidence file
-# when this invocation exercised the REST contracts. Both artifacts have an
+# when this invocation exercised the REST conformance tests. Both artifacts have an
 # explicit run boundary and final result; neither appends unrelated runs.
 set +e
 {

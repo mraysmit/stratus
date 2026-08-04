@@ -6,29 +6,36 @@ services:
     image: ${POLARIS_IMAGE:?Set POLARIS_IMAGE in .env to the approved pinned release; never latest}
     env_file:
       - .env
+    environment:
+      # From the provider's connection.env, exported by the harness
+      # scripts. Never literal here: the provider owns these values.
+      CEPH_RGW_ENDPOINT: ${CEPH_RGW_ENDPOINT:?Ceph connection settings not loaded; invoke through the harness scripts}
     ports:
       # Loopback-only by default, matching every harness port convention.
       - "${POLARIS_BIND_ADDRESS:-127.0.0.1}:${POLARIS_PORT:-8181}:8181"
     volumes:
-      # ADR-P1-003 attachment contract: the Ceph harness CA certificate is
-      # consumed read-only; no private key crosses the harness boundary.
-      - ../../ceph/compose-cluster/certs/stratus-ca.crt:/etc/stratus/certs/stratus-ca.crt:ro
+      # ADR-P1-003: the Ceph harness CA certificate is
+      # consumed read-only; no private key crosses the harness boundary. The
+      # path is exported by the harness scripts from the Ceph connection.env.
+      - ${CEPH_HARNESS_CA_FILE:?Ceph connection settings not loaded; invoke through the harness scripts}:/etc/stratus/certs/stratus-ca.crt:ro
       - polaris-data:/data/polaris
     networks:
       ceph:
         aliases:
           # Published so engine harnesses (Spark, Trino, Flink) resolve the
           # catalog by its stable name on the shared harness network. This
-          # alias is part of this harness's own attachment contract.
+          # alias is published for engine consumers, as connection.env publishes Ceph's.
           - polaris.stratus.local
     restart: unless-stopped
 
 networks:
   # ADR-P1-003: join the Ceph harness network. Never recreate it here; the
   # startup script fails fast with a remediation command when it is absent.
+  # The name comes from the provider's connection.env, exported by
+  # the harness scripts — never a literal in this file.
   ceph:
     external: true
-    name: stratus-ceph-local_ceph
+    name: ${CEPH_HARNESS_NETWORK:?Ceph connection settings not loaded; invoke through the harness scripts}
 
 volumes:
   polaris-data:

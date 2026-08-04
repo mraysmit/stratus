@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Offline tests for the verifier's process boundary: configuration failure
  * exit codes, evidence-write failure, and behavior when the real client
- * cannot reach any endpoint. Successful contract runs, negative security
+ * cannot reach any endpoint. Successful conformance runs, negative security
  * modes, and evidence content are proven exclusively against the live local
  * Ceph service by the Ceph-owned {@code platform/ceph/tests} module; no
  * simulated S3 endpoint is permitted anywhere in this module.

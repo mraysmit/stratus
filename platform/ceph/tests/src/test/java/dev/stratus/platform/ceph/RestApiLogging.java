@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Sanitized protocol-boundary logging shared by the live Ceph REST contracts.
+ * Sanitized protocol-boundary logging shared by the live Ceph REST conformance tests.
  *
  * <p>Request and response bodies, credentials, signatures, authorization
  * headers, cookies, and bearer tokens never cross this boundary. INFO records

@@ -34,7 +34,7 @@ Guide](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md).
 - [One-time setup: build the verifier image](#one-time-setup-build-the-verifier-image)
 - [Layer 1: static and JVM tests (no Docker)](#layer-1-static-and-jvm-tests-no-docker)
 - [Layer 2: live harness validation (Docker)](#layer-2-live-harness-validation-docker)
-- [Layer 3: live Maven contract test (Docker)](#layer-3-live-maven-contract-test-docker)
+- [Layer 3: live Maven conformance test (Docker)](#layer-3-live-maven-conformance-test-docker)
 - [Layer 4: harness self-test (Docker, destructive)](#layer-4-harness-self-test-docker-destructive)
 - [Run everything, in order](#run-everything-in-order)
 - [Understanding the evidence](#understanding-the-evidence)
@@ -60,8 +60,8 @@ need.
 | # | Layer | What it checks | Docker? | Live cluster? | Roughly how long |
 |---|---|---|---|---|---|
 | 1 | Static and JVM tests | Verifier Java logic, plus repository consistency guardrails | No | No | Seconds to ~1 min |
-| 2 | Live harness validation | A real Ceph cluster boots and passes every S3 contract, security-negative, management REST API, and dataset round-trip check | Yes | Yes (this module starts it) | Several minutes |
-| 3 | Live Maven contract test | The verifier's own JVM test suite, run from Maven against the live endpoint | Yes | Yes | Minutes |
+| 2 | Live harness validation | A real Ceph cluster boots and passes every S3 conformance, security-negative, management REST API, and dataset round-trip check | Yes | Yes (this module starts it) | Several minutes |
+| 3 | Live Maven conformance test | The verifier's own JVM test suite, run from Maven against the live endpoint | Yes | Yes | Minutes |
 | 4 | Harness self-test | The harness *scripts themselves* (cert renewal, teardown, refusal to accept a fake verifier) | Yes | No (must be stopped) | ~1 min |
 
 The mandatory gate for any code change is **Layer 1** (`clean verify`). Layers 2
@@ -73,7 +73,7 @@ is run when you change the harness scripts.
 
 The 2026-07-20 workstation validation used Docker Desktop from PowerShell and
 from Git for Windows Bash. Both command surfaces completed the full live
-lifecycle. The Bash run included all twelve S3 contract checks, all three
+lifecycle. The Bash run included all twelve S3 conformance checks, all three
 security negatives, RGW/MON/OSD failure and recovery scenarios, shutdown,
 destructive reset, and the three harness self-test scenarios. `clean verify`
 passed 18 storage-verifier tests and 15 repository guardrail tests. Podman was
@@ -88,8 +88,8 @@ things that must not be mixed up:
 1. **The verifier as a Java program under test.** Its source lives in
    [`verification/storage/`](../../../verification/storage/) as the Maven module
    `stratus-storage-verifier`. Its unit tests (Layer 1) run on your host JVM
-   with no Docker and no Ceph. The implementation-neutral live contract is
-   owned separately by `platform/ceph/tests` as `CephRgwContractTest`
+   with no Docker and no Ceph. The implementation-neutral live conformance test is
+   owned separately by `platform/ceph/tests` as `CephRgwConformanceTest`
    (Layer 3) and runs on your host JVM against the supplied live endpoint.
 
 2. **The verifier as a prebuilt container image.** The build system packages
@@ -130,7 +130,7 @@ and they can disagree (for example, a working image built from stale source).
 the JVM running Maven must trust the Compose CA, and the live environment
 variables from
 [maven_test_commands.md](../../../docs/reference/maven_test_commands.md) must be
-set. See [Layer 3](#layer-3-live-maven-contract-test-docker).
+set. See [Layer 3](#layer-3-live-maven-conformance-test-docker).
 
 ## One-time setup: build the verifier image
 
@@ -203,7 +203,7 @@ Three module groups matter for this doc.
 | Test | Tag | What it proves |
 |---|---|---|
 | `StorageVerifierTest` | unit | Failure reporting against a real closed port plus INFO/DEBUG and rolling-file logging behavior |
-| `StorageVerifierMainTest` | unit | The entrypoint: mode selection (contract vs the two negatives), exit codes, writing pure-JSON evidence to `STRATUS_EVIDENCE_FILE`, the unwritable-evidence failure, and single-line ISO-8601 log records |
+| `StorageVerifierMainTest` | unit | The entrypoint: mode selection (conformance run vs the two negatives), exit codes, writing pure-JSON evidence to `STRATUS_EVIDENCE_FILE`, the unwritable-evidence failure, and single-line ISO-8601 log records |
 | `StorageVerifierConfigTest` | unit | Environment-variable parsing and validation |
 | `VerificationReportTest` | unit | JSON serialization and string escaping of the report |
 
@@ -212,12 +212,12 @@ Three module groups matter for this doc.
 
 | Test | What it enforces |
 |---|---|
-| `CephRgwContractTest` | The reusable live Ceph RGW boundary through the AWS SDK, tagged `ceph-integration` and therefore not run by this layer; see [Layer 3](#layer-3-live-maven-contract-test-docker) |
-| `CephS3RestContractTest` | The same S3 data boundary over raw AWS Signature Version 4 REST with no SDK in the call path, so a signing, payload-hash, or path-style defect cannot be absorbed by SDK compatibility handling. Tagged `ceph-integration` |
-| `CephAdminOpsRestContractTest` | The RGW Admin Operations API (`/admin/...`) through a scoped reader holding only `buckets=read` and `usage=read`, including proof that those caps cannot reach identity keys. Tagged `ceph-integration` |
-| `CephDashboardRestContractTest` | The Ceph Dashboard REST API: token authentication, rejection of unauthenticated callers, and bucket create/read/delete through `/api/rgw`. Tagged `ceph-integration` |
-| `CephTestArchitectureTest` | That every live contract stays deployment-neutral (no Compose or script machinery), consumes the supplied environment, and fails rather than skips when a live profile is selected |
-| `ComposeClusterContractTest` | The Compose implementation's `.env.template`/compose/script/ignore contract: no dead template variables, loopback port binding, correct service policies, secret ignore rules, and safe secret rotation |
+| `CephRgwConformanceTest` | The reusable live Ceph RGW boundary through the AWS SDK, tagged `ceph-integration` and therefore not run by this layer; see [Layer 3](#layer-3-live-maven-conformance-test-docker) |
+| `CephS3RestConformanceTest` | The same S3 data boundary over raw AWS Signature Version 4 REST with no SDK in the call path, so a signing, payload-hash, or path-style defect cannot be absorbed by SDK compatibility handling. Tagged `ceph-integration` |
+| `CephAdminOpsRestConformanceTest` | The RGW Admin Operations API (`/admin/...`) through a scoped reader holding only `buckets=read` and `usage=read`, including proof that those caps cannot reach identity keys. Tagged `ceph-integration` |
+| `CephDashboardRestConformanceTest` | The Ceph Dashboard REST API: token authentication, rejection of unauthenticated callers, and bucket create/read/delete through `/api/rgw`. Tagged `ceph-integration` |
+| `CephTestArchitectureTest` | That every live conformance test stays deployment-neutral (no Compose or script machinery), consumes the supplied environment, and fails rather than skips when a live profile is selected |
+| `ComposeClusterConformanceTest` | The Compose implementation's `.env.template`/compose/script/ignore contract: no dead template variables, loopback port binding, correct service policies, secret ignore rules, and safe secret rotation |
 | `ComposeClusterScriptTest` | The Compose implementation's single-bash convention: no `.ps1` twins, fail-fast preambles, and Git Bash path handling |
 
 **The repository guardrails (`stratus-repo-guardrails`)** — technology-neutral
@@ -260,7 +260,7 @@ repository's memory of decisions already made, not obstacles to route around.
 This boots a genuine Ceph Tentacle 20.2.2 cluster in Docker (three monitors, two
 managers, three BlueStore OSDs, two RGW daemons behind a TLS proxy), creates the
 buckets, checks cluster health, and runs the **prebuilt verifier image** against
-the live endpoint for both the positive S3 contract and the three security
+the live endpoint for both the positive S3 conformance and the three security
 negatives. It then verifies the Ceph Dashboard REST API on port `8444` and
 proves a generated dataset round-trips through the object store byte-for-byte
 identical.
@@ -330,7 +330,7 @@ Ceph and verifier image digests, `ceph version`, `ceph status`, OSD tree), then
 runs the verifier, which writes its report directly to
 `storage-verification-<timestamp>.json`.
 
-The verifier performs these contract checks, in order, and reports one result
+The verifier performs these conformance checks, in order, and reports one result
 per check (`name` / `passed` / `detail`):
 
 `required-buckets` → `missing-object` → `object-round-trip` → `zero-byte-object`
@@ -417,10 +417,10 @@ initializes three OSDs, so it is noticeably slower than later runs. The OSD
 health checks allow up to a 30 s start period plus retries for exactly this
 reason. Subsequent restarts against preserved volumes are much faster.
 
-## Layer 3: live Maven contract test (Docker)
+## Layer 3: live Maven conformance test (Docker)
 
 Separate from the container-level scripts above, the Ceph-owned test module has
-four deployment-neutral live JVM contracts — the product-compatibility
+four deployment-neutral live JVM conformance tests — the product-compatibility
 boundary. They run from Maven on your host against any Ceph RGW endpoint
 supplied through the environment. The Compose cluster is one provider of that
 environment; cephadm and future implementations run the same tests without
@@ -428,10 +428,10 @@ copying or changing them.
 
 | Contract | Surface |
 |---|---|
-| `CephRgwContractTest` | The S3 data API through the AWS SDK |
-| `CephS3RestContractTest` | The same data API over raw signed REST, no SDK |
-| `CephAdminOpsRestContractTest` | The RGW Admin Operations API (`/admin/...`) |
-| `CephDashboardRestContractTest` | The Ceph Dashboard REST API (`/api/auth`, `/api/rgw/...`) |
+| `CephRgwConformanceTest` | The S3 data API through the AWS SDK |
+| `CephS3RestConformanceTest` | The same data API over raw signed REST, no SDK |
+| `CephAdminOpsRestConformanceTest` | The RGW Admin Operations API (`/admin/...`) |
+| `CephDashboardRestConformanceTest` | The Ceph Dashboard REST API (`/api/auth`, `/api/rgw/...`) |
 
 ### Requirements
 
@@ -583,7 +583,7 @@ A complete local validation from a clean state, in dependency order:
 ```
 
 Steps 2 and 4–10 are the normal validation. Add step 11 when the change touches
-the live Ceph contract, and step 12 when it affects resilience or failover
+the live Ceph conformance suite, and step 12 when it affects resilience or failover
 behavior (the drill stops a real RGW, monitor, and OSD in turn and requires
 recovery to `HEALTH_OK`). Run step 15 when you change harness scripts. Steps
 14–15 are destructive to the cluster; `reset` prompts for confirmation unless
@@ -607,8 +607,8 @@ inverted meaning for the negatives, where `"success":true` means the denial
 
 | File | Produced by | Meaning of `success:true` |
 |---|---|---|
-| `storage-verification-<ts>.json` | `ceph-compose-verify-storage` | Every S3 contract check against RGW passed |
-| `storage-verification-<ts>-FAILED.json` | `ceph-compose-verify-storage` on failure | At least one contract check failed; open it to see which |
+| `storage-verification-<ts>.json` | `ceph-compose-verify-storage` | Every S3 conformance check against RGW passed |
+| `storage-verification-<ts>-FAILED.json` | `ceph-compose-verify-storage` on failure | At least one conformance check failed; open it to see which |
 | `environment-<ts>.json` | `ceph-compose-verify-storage` | Snapshot of runtime, image digests, and cluster state for the same run |
 | `storage-verifier-<ts>.0.log` | `ceph-compose-verify-storage` | Per-run verifier log; single-line ISO-8601 timestamped records |
 | `storage-invalid-credentials-<ts>.json` | `ceph-compose-verify-security` | RGW rejected invalid credentials |
@@ -634,7 +634,7 @@ rationale.
 | `ceph-compose-verify-security` fails saying a denial was not shown | A security negative did not deny as required (real regression) — or a genuinely broken cluster | Read the named evidence file; do not treat this as flaky |
 | `clean verify` fails in `DocumentationLinkTest` | A Markdown link or `#anchor` broke | The assertion prints the exact source → target; fix the link |
 | `clean verify` fails in `ComposeClusterScriptTest` | A `.ps1` script reappeared under the harness script tree, or a bash script lost its shebang or `set -euo pipefail` preamble | Remove the `.ps1` or restore the preamble per the assertion message; the harness is bash-only (ADR-P1-002) |
-| Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-contract-test-docker) variable set; a selected live profile must never skip silently |
+| Live Maven profile "passes" but ran no Ceph test | `CEPH_RGW_INTEGRATION=true` not set | Set the full [Layer 3](#layer-3-live-maven-conformance-test-docker) variable set; a selected live profile must never skip silently |
 | Every live JVM test fails to connect while Layer 2 scripts pass | The workstation does not resolve `object-store.stratus.local`; Layer 2 runs inside containers and never needs it | Add the [hosts-file entry](#why-layer-3-needs-a-hosts-file-entry-and-layer-2-does-not) and confirm with `Resolve-DnsName object-store.stratus.local` |
 | `ceph-compose-verify-harness` refuses to start | Harness containers or cluster volumes still exist | `scripts/lifecycle/ceph-compose-shutdown` then `scripts/lifecycle/ceph-compose-reset --force`, then rerun |
 | Git Bash changes `/certs/...` into `C:/Program Files/Git/certs/...` | A raw `docker compose` command bypassed the shared MSYS path handling, or the scripts are stale | Run the checked-in lifecycle/verify scripts. Do not remove `MSYS_NO_PATHCONV` or the `cygpath` conversion in `scripts/lib/ceph-compose-common.sh` |

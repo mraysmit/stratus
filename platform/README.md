@@ -13,4 +13,4 @@ Product directories may contain:
 - bootstrap and policy automation
 - product-specific operational helpers
 
-Stratus-owned Java services belong under `applications/`, compute jobs under `jobs/`, and contract tests under `verification/`.
+Stratus-owned Java services belong under `applications/`, compute jobs under `jobs/`, and conformance tests under `verification/`.

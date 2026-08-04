@@ -44,7 +44,7 @@ import org.yaml.snakeyaml.Yaml;
  * @version 1.0.0
  */
 @Tag("ceph-integration")
-final class CephAdminOpsRestContractTest {
+final class CephAdminOpsRestConformanceTest {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);

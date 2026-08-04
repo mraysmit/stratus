@@ -38,7 +38,7 @@ public final class StorageVerifierMain {
 
     /**
      * Runs the verifier with explicit process boundaries so technology-owned
-     * contract modules can exercise the packaged behavior without replacing
+     * conformance-test modules can exercise the packaged behavior without replacing
      * the real storage client.
      */
     public static int run(

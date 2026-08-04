@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 # Failure drills against the live cluster: stop real daemons one class at a
-# time, prove the S3 contract continues through the outage, and require full
+# time, prove the S3 conformance continues through the outage, and require full
 # recovery to HEALTH_OK with every placement group active+clean. These are
 # real failures on the real cluster; nothing is simulated. This is a
 # single-Docker-host drill: it proves daemon-level failover and recovery,
@@ -43,7 +43,7 @@ scenario() { printf '\n'; log "=== DRILL: $1 ==="; }
 
 require_healthy "baseline before drills" 60
 
-scenario "RGW daemon outage: the S3 contract continues through the surviving gateway"
+scenario "RGW daemon outage: the S3 conformance continues through the surviving gateway"
 log "EXPECTED-DEGRADATION begin service=rgw1"
 compose stop rgw1 >/dev/null
 "$verify_dir/ceph-compose-verify-buckets.sh"
@@ -51,7 +51,7 @@ compose start rgw1 >/dev/null
 log "EXPECTED-DEGRADATION end service=rgw1"
 require_healthy "after RGW restart"
 
-scenario "monitor outage: two of three monitors keep quorum and the S3 contract continues"
+scenario "monitor outage: two of three monitors keep quorum and the S3 conformance continues"
 log "EXPECTED-DEGRADATION begin service=mon3"
 compose stop mon3 >/dev/null
 compose exec -T mon1 bash -c 'for attempt in $(seq 1 60); do ceph quorum_status --format json | jq -e ".quorum | length == 2" >/dev/null && exit 0; sleep 2; done; echo "quorum did not drop to two monitors" >&2; exit 1' \

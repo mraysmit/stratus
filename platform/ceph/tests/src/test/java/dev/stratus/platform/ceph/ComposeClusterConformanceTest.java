@@ -28,7 +28,7 @@ import org.yaml.snakeyaml.Yaml;
  * @version 1.0.0
  */
 @Tag("unit")
-final class ComposeClusterContractTest {
+final class ComposeClusterConformanceTest {
 
     private static final Path HARNESS = Repo.root().resolve(Path.of("platform", "ceph", "compose-cluster"));
     private static final Pattern COMPOSE_VARIABLE = Pattern.compile("\\$\\{([A-Z0-9_]+)(:-|:\\?)?");

@@ -45,7 +45,7 @@ Placement follows the kind of artifact, not the product it relates to
 - Product integration, harnesses, bootstrap → `platform/<product>/`
 - Product-owned tests → `platform/<product>/tests/` (e.g. Ceph tests go in
   `platform/ceph/tests`, never a root `tests/` directory)
-- Product-neutral capability contracts → `verification/<capability>/`
+- Product-neutral capability conformance suites → `verification/<capability>/`
 - Stratus Spark/Flink job code → `jobs/`; Stratus services → `applications/`
 - Cross-component e2e suites → `testing/`; environment inventory →
   `environments/<environment>/<product>/`; event/data contracts → `schemas/`
@@ -78,7 +78,7 @@ with transcripts and evidence recorded. Every harness script is prefixed
 5. `verify/ceph-compose-verify-security`
 6. `verify/ceph-compose-verify-dashboard`
 7. `verify/ceph-compose-verify-dataset`
-8. `verify/ceph-compose-run-live-tests` — the live JVM contracts; unlike the
+8. `verify/ceph-compose-run-live-tests` — the live JVM conformance tests; unlike the
    steps above it runs on the workstation, so it also needs a hosts-file entry
    for `object-store.stratus.local` and a CA truststore, both of which the
    script itself supplies
