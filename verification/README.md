@@ -10,6 +10,7 @@ Current modules:
 |---|---|---|
 | `storage` | Object storage — Ceph RGW S3 operations | Active |
 | `catalog` | Table catalog — Apache Iceberg + Apache Polaris | Active |
+| `secrets` | Secret distribution — OpenBao (ADR-P1-004) | Active |
 | `compute` | Batch compute — Apache Spark pipeline | Placeholder |
 | `orchestration` | Workflow orchestration — Apache Airflow | Placeholder |
 | `query` | Interactive query — Trino | Placeholder |

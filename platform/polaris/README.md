@@ -27,6 +27,8 @@ owned by
 - Developer environment profile: [environments/developer/polaris/](../../environments/developer/polaris/README.md)
 - Ceph connection settings this harness consumes:
   [Ceph Compose cluster README — Connection settings](../ceph/compose-cluster/README.md#connection-settings-for-other-harnesses)
+- Secret store the harness pulls its storage credentials from:
+  [OpenBao harness](../openbao/README.md) (ADR-P1-004)
 
 ## What this harness publishes for other harnesses
 

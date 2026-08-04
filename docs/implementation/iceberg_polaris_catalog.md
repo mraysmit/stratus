@@ -213,7 +213,10 @@ evidence. Any result produced with this mode must be labelled
 The developer harness at `platform/polaris/compose-service/` configures this
 mode explicitly; bootstrap credentials use the verified
 `polaris.bootstrap.credentials` property in `realm,client-id,client-secret`
-form (environment variable `POLARIS_BOOTSTRAP_CREDENTIALS`).
+form (environment variable `POLARIS_BOOTSTRAP_CREDENTIALS`). The
+`svc-polaris` storage credentials are not copied into the harness: its
+scripts pull them from the OpenBao secret store, where the Ceph
+provisioning step publishes them (ADR-P1-004).
 
 ### Verify the container started
 
