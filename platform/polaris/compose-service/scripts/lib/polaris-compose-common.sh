@@ -51,6 +51,36 @@ load_environment() {
   [[ "$POLARIS_IMAGE" != *latest* ]] || fail "POLARIS_IMAGE must be a pinned release, never latest"
   [[ -f "$CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT" ]] \
     || fail "Missing $CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT; start the Ceph harness once to generate it"
+  fetch_service_identity_from_openbao
+}
+
+# Pull-based credentials (ADR-P1-004): the svc-polaris key pair comes from
+# the developer secret store, published there by the Ceph provisioning step.
+# An explicit .env override still wins for diagnosis, but the template
+# deliberately carries no credential fields — nothing is copied by hand.
+fetch_service_identity_from_openbao() {
+  if [[ -n "${CEPH_RGW_ACCESS_KEY:-}" && -n "${CEPH_RGW_SECRET_KEY:-}" ]]; then
+    return 0
+  fi
+  local openbao_dir="$REPO_DIR/platform/openbao/compose-service"
+  [[ -f "$openbao_dir/connection.env" ]] \
+    || fail "Missing $openbao_dir/connection.env; the OpenBao harness must publish its connection settings"
+  set -a
+  # shellcheck disable=SC1091
+  source "$openbao_dir/connection.env"
+  set +a
+  local token_file="$openbao_dir/$OPENBAO_TOKEN_FILE"
+  [[ -f "$token_file" ]] \
+    || fail "Missing $token_file. Start the secret store first: bash platform/openbao/compose-service/scripts/lifecycle/openbao-compose-startup.sh"
+  local response
+  response="$(curl --silent --max-time 10 -H "X-Vault-Token: $(cat "$token_file")" \
+    "$OPENBAO_ENDPOINT/v1/$OPENBAO_KV_MOUNT/data/$OPENBAO_SERVICE_IDENTITY_PATH/svc-polaris" || true)"
+  CEPH_RGW_ACCESS_KEY="$(printf '%s' "$response" | sed -nE 's/.*"access_key" *: *"([^"]+)".*/\1/p')"
+  CEPH_RGW_SECRET_KEY="$(printf '%s' "$response" | sed -nE 's/.*"secret_key" *: *"([^"]+)".*/\1/p')"
+  [[ -n "$CEPH_RGW_ACCESS_KEY" && -n "$CEPH_RGW_SECRET_KEY" ]] \
+    || fail "svc-polaris credentials are not in OpenBao. Publish them by running: bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-provision-service-identities.sh (with the OpenBao harness running)"
+  export CEPH_RGW_ACCESS_KEY CEPH_RGW_SECRET_KEY
+  log "Fetched svc-polaris credentials from OpenBao"
 }
 
 compose_runtime() {

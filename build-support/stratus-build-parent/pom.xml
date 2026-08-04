@@ -55,6 +55,7 @@
                         <systemPropertyVariables>
                             <ceph.integration.required>${ceph.integration.required}</ceph.integration.required>
                             <catalog.integration.required>${catalog.integration.required}</catalog.integration.required>
+                            <secrets.integration.required>${secrets.integration.required}</secrets.integration.required>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>

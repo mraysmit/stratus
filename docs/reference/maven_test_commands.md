@@ -25,6 +25,7 @@ Therefore, `mvnw clean verify` is the complete local regression command. It runs
 | `-Punit-tests` | `unit` | no | none | Targeted diagnosis of a known unit-test failure |
 | `-Pceph-integration-tests` | `ceph-integration` | no | running local Ceph harness | Targeted live Ceph suite run |
 | `-Pcatalog-integration-tests` | `catalog-integration` | no | running local Ceph and Polaris harnesses | Targeted live catalog conformance run (use `verify/polaris-compose-run-catalog-tests.sh`) |
+| `-Psecrets-integration-tests` | `secrets-integration` | no | running local OpenBao harness | Targeted live secret-store conformance run (use `verify/openbao-compose-run-secrets-tests.sh`) |
 | `-Pall-tests` | all tags | yes | running local Ceph and Polaris harnesses | Full offline plus live regression and acceptance boundary |
 | `-Puntagged-tests` | no known tag | no | none | Audit for tests missing an approved tag |
 

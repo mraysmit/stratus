@@ -1,0 +1,6 @@
+# Local disposable state only; nothing here is ever committed.
+.env
+private/
+logs/
+evidence/*
+!evidence/.gitkeep

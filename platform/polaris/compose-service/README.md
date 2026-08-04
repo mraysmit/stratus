@@ -28,16 +28,22 @@ API correctly answers 401. Known open items:
 
 - The Ceph Compose cluster must already be running; startup fails fast with
   the remediation command when its network is absent. This harness never
-  starts the Ceph harness transitively.
+  starts a provider transitively.
+- The OpenBao harness must be running with the `svc-polaris` identity
+  published (by the Ceph provisioning step): the scripts pull the storage
+  credentials from the store per ADR-P1-004 and fail fast with the
+  remediation when the store or the secret is absent.
 - Docker Desktop, Docker Engine, or Podman, as for the Ceph harness.
 
 ## Workflow
 
-From `platform/polaris/compose-service`, in bash:
+From `platform/polaris/compose-service`, in bash (after Ceph startup,
+bucket bootstrap, OpenBao startup, and service-identity provisioning):
 
 ```bash
 bash scripts/lifecycle/polaris-compose-startup.sh
 bash scripts/verify/polaris-compose-verify-endpoint.sh
+bash scripts/verify/polaris-compose-bootstrap-catalog.sh
 bash scripts/lifecycle/polaris-compose-shutdown.sh
 ```
 
@@ -45,7 +51,7 @@ bash scripts/lifecycle/polaris-compose-shutdown.sh
 |---|---|
 | `lifecycle/polaris-compose-startup.sh` | Generates `.env` from the template once (disposable bootstrap credential), requires the Ceph harness network, validates Compose interpolation, starts the service |
 | `verify/polaris-compose-verify-endpoint.sh` | Liveness smoke check: the Polaris API answers on the loopback port (an unauthenticated 401/403 counts as listening). Not a catalog conformance test |
-| `verify/polaris-compose-bootstrap-catalog.sh` | Idempotently creates the `stratus` catalog (bound to the five Ceph buckets) and the `bronze`, `silver`, `gold`, `platform` namespaces, then runs a positive listing check and a forged-token negative. Requires the svc-polaris credentials in `.env`: copy `CEPH_SVC_POLARIS_ACCESS_KEY`/`_SECRET_KEY` from `platform/ceph/compose-cluster/.env` into `CEPH_RGW_ACCESS_KEY`/`_SECRET_KEY` |
+| `verify/polaris-compose-bootstrap-catalog.sh` | Idempotently creates the `stratus` catalog (bound to the five Ceph buckets), grants `CATALOG_MANAGE_CONTENT` to `catalog_admin`, and creates the `bronze`, `silver`, `gold`, `platform` namespaces, then runs a positive listing check and a forged-token negative. The svc-polaris credentials are pulled from OpenBao automatically |
 | `lifecycle/polaris-compose-shutdown.sh` | Idempotent stop; preserves the `polaris-data` volume and `.env`; never removes the external Ceph network |
 | `lifecycle/polaris-compose-reset.sh` | Destroys the disposable catalog state (containers and data volume) for a fresh catalog next startup; prompts unless `--force` |
 | `verify/polaris-compose-run-catalog-tests.sh` | Runs the live catalog conformance suite (`stratus-catalog-verifier`) against this service and the Ceph cluster behind it, supplying the environment, live opt-in switch, and CA truststore; per-run transcripts land in `logs/` |
@@ -67,10 +73,15 @@ All verified live against `apache/polaris:1.5.0` and Ceph Tentacle 20.2.2 on
 
 Consumed from the Ceph harness: its network, S3 endpoint, and CA
 certificate, all sourced by the harness scripts from
-[`connection.env`](../../ceph/compose-cluster/connection.env) — the only
-provider value written into this harness is the Ceph harness's repository
-path (one line in `scripts/lib/polaris-compose-common.sh`). No Ceph private
-key is ever mounted here.
+[`connection.env`](../../ceph/compose-cluster/connection.env). Consumed
+from the OpenBao harness: the `svc-polaris` credentials, pulled at script
+time from the store using the settings in
+[its `connection.env`](../../openbao/compose-service/connection.env)
+(ADR-P1-004) — no credential field exists in this harness's `.env.template`
+and nothing is copied by hand. Each provider contributes exactly one
+hardcoded repository-path anchor in
+`scripts/lib/polaris-compose-common.sh`. No provider private key is ever
+mounted here.
 
 Published: the `polaris.stratus.local` alias on the shared network for the
 engine harnesses of later increments, and the loopback port

@@ -1,0 +1,21 @@
+# OpenBao developer harness (ADR-P1-004): the platform secret store in dev
+# mode — in-memory, auto-unsealed, disposable. Secrets vanish on restart and
+# are restored by re-running the Ceph service-identity provisioning step.
+services:
+  openbao:
+    image: ${OPENBAO_IMAGE:?Set OPENBAO_IMAGE in .env to the approved pinned release; never latest}
+    command: ["server", "-dev"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${OPENBAO_ROOT_TOKEN:?OPENBAO_ROOT_TOKEN is required; startup generates it}
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      # Loopback-only by default, matching every harness port convention.
+      - "${OPENBAO_BIND_ADDRESS:-127.0.0.1}:${OPENBAO_PORT:-8200}:8200"
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
