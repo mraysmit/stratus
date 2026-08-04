@@ -54,6 +54,7 @@
                         <excludedGroups>${test.excludedGroups}</excludedGroups>
                         <systemPropertyVariables>
                             <ceph.integration.required>${ceph.integration.required}</ceph.integration.required>
+                            <catalog.integration.required>${catalog.integration.required}</catalog.integration.required>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>

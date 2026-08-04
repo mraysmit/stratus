@@ -29,6 +29,36 @@ The current Apache Polaris documentation line lists Polaris 1.5.0. This incremen
 
 Polaris quickstart-style examples are developer bootstrap guidance, not the active Stratus deployment pattern. Increment 2 uses a production-ready catalog topology: external catalog metadata store, hardened credentials, TLS trusted by all engines, pinned artifacts, catalog audit logging, and a tested backup/restore path.
 
+### Known upstream incompatibilities (verified 2026-08-04)
+
+Live verification of Polaris 1.5.0 against Ceph Tentacle 20.2.2 surfaced
+these; re-test each on any upgrade of either product:
+
+- **Credential vending is blocked by an IAM dialect mismatch.** Polaris's
+  AssumeRole session policy includes `kms:DescribeKey`; RGW's policy parser
+  rejects any non-S3 action, failing STS with 400. RGW STS itself works
+  (enabled in the developer harness with per-identity roles, proven to
+  exactly this parse error). The developer catalog therefore uses Polaris's
+  S3-compatible `stsUnavailable: true` mode with scoped static credentials;
+  the production vending decision remains open until the dialects reconcile.
+- **Purge-drops are doubly gated.** `DROP TABLE ... PURGE` requires the
+  per-catalog property `polaris.config.drop-with-purge.enabled=true` and an
+  explicit `CATALOG_MANAGE_CONTENT` grant — the auto-created `catalog_admin`
+  role manages metadata only. The developer bootstrap applies both.
+- **Namespace locations are structured.** Custom namespace locations are
+  disabled by default; each namespace must live under
+  `<allowedLocation>/<namespace>/` (see section 7 — Stratus conforms rather
+  than disabling the check).
+- **JVM trust pitfalls.** A `javax.net.ssl.trustStore` override replaces the
+  default CA set (build tooling then loses Maven Central unless the override
+  extends a copy of `cacerts`), and modern `keytool` creates PKCS12 by
+  default, which yields zero trust anchors on a passwordless read — lab
+  truststores must be explicit JKS. The harness scripts encode both rules.
+
+The developer-harness README
+(`platform/polaris/compose-service/README.md`) carries the operator-facing
+version of this table.
+
 ---
 
 ## 3. Topology
@@ -374,10 +404,21 @@ Add to `pom.xml`:
     <version>1.11.0</version>
 </dependency>
 
-<!-- Iceberg REST catalog client — connects to Polaris -->
+<!-- The Iceberg REST catalog client (RESTCatalog) ships inside
+     iceberg-core; there is no separate client artifact (verified against
+     Iceberg 1.11.0 on Maven Central). Generic record reads and writes need
+     iceberg-data plus iceberg-orc (the generic readers dispatch on ORC even
+     for Parquet-only use), and parquet-java requires Hadoop's Configuration
+     class, supplied by the shaded hadoop-client-api/-runtime pair. All
+     versions are owned by build-support/stratus-bom. -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
-    <artifactId>iceberg-rest-catalog</artifactId>
+    <artifactId>iceberg-data</artifactId>
+    <version>1.11.0</version>
+</dependency>
+<dependency>
+    <groupId>org.apache.iceberg</groupId>
+    <artifactId>iceberg-orc</artifactId>
     <version>1.11.0</version>
 </dependency>
 
