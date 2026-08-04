@@ -96,11 +96,11 @@ final class ComposeClusterConformanceTest {
                 }
             } else if (isOnDemand(config)) {
                 if (!Boolean.TRUE.equals(config.get("read_only"))) {
-                    violations.add(name + ": verification services must be read_only");
+                    violations.add(name + ": on-demand services must be read_only");
                 }
                 List<?> securityOpt = (List<?>) config.getOrDefault("security_opt", List.of());
                 if (!securityOpt.contains("no-new-privileges:true")) {
-                    violations.add(name + ": verification services must set no-new-privileges");
+                    violations.add(name + ": on-demand services must set no-new-privileges");
                 }
             } else if (!Set.of("unless-stopped", "always").contains(String.valueOf(config.get("restart")))) {
                 violations.add(name + ": long-running services must declare a restart policy");
@@ -235,8 +235,10 @@ final class ComposeClusterConformanceTest {
         return entrypoint.contains("bootstrap.sh") || entrypoint.contains("configure.sh");
     }
 
+    // Any profile-gated service runs only on demand (verification runs, the
+    // s3admin policy tool) and must carry the same runtime hardening.
     private static boolean isOnDemand(Map<String, Object> config) {
         List<?> profiles = (List<?>) config.getOrDefault("profiles", List.of());
-        return profiles.contains("verification");
+        return !profiles.isEmpty();
     }
 }
