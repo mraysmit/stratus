@@ -17,6 +17,8 @@
 
     <properties>
         <aws.sdk.version>2.46.8</aws.sdk.version>
+        <hadoop.version>3.4.1</hadoop.version>
+        <iceberg.version>1.11.0</iceberg.version>
         <junit.version>6.1.0</junit.version>
         <slf4j.version>1.7.36</slf4j.version>
         <snakeyaml.version>2.4</snakeyaml.version>
@@ -37,6 +39,53 @@
                 <version>${junit.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Iceberg owns its Parquet and S3 SDK compatibility set through
+                 these modules and the bundle; transitive versions are never
+                 independently pinned (iceberg_polaris_catalog.md section 9). -->
+            <!-- Shaded Hadoop client API: parquet-java requires Hadoop's
+                 Configuration class on the classpath even on Iceberg's
+                 hadoop-free S3 path. The api artifact carries no server
+                 dependencies. -->
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-client-api</artifactId>
+                <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-client-runtime</artifactId>
+                <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-core</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-data</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-parquet</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-orc</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-aws</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-aws-bundle</artifactId>
+                <version>${iceberg.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.slf4j</groupId>

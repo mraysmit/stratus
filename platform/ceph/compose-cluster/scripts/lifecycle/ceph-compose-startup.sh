@@ -56,6 +56,7 @@ if [[ ! -f "$HARNESS_DIR/.env" ]]; then
     -e "s|^CEPH_DASHBOARD_PASSWORD=.*|CEPH_DASHBOARD_PASSWORD=$(rand_hex 20)|" \
     -e "s|^CEPH_ADMIN_OPS_ACCESS_KEY=.*|CEPH_ADMIN_OPS_ACCESS_KEY=stratus-adminops-$(rand_hex 6)|" \
     -e "s|^CEPH_ADMIN_OPS_SECRET_KEY=.*|CEPH_ADMIN_OPS_SECRET_KEY=$(rand_hex 20)|" \
+    -e "s|^CEPH_RGW_STS_KEY=.*|CEPH_RGW_STS_KEY=$(rand_hex 8)|" \
     "$HARNESS_DIR/.env.template" >"$HARNESS_DIR/.env"
   chmod 600 "$HARNESS_DIR/.env"
   harden_windows_acl "$HARNESS_DIR/.env"
@@ -93,6 +94,17 @@ case "$(credential_bundle_state CEPH_ADMIN_OPS_UID CEPH_ADMIN_OPS_ACCESS_KEY CEP
     ;;
   partial)
     fail "CEPH_ADMIN_OPS_UID, CEPH_ADMIN_OPS_ACCESS_KEY, and CEPH_ADMIN_OPS_SECRET_KEY must all be populated or all be absent"
+    ;;
+esac
+
+case "$(credential_bundle_state CEPH_RGW_STS_KEY)" in
+  missing)
+    {
+      echo ''
+      echo '# RGW STS signing key for credential vending (AssumeRole), added by startup.'
+      echo "CEPH_RGW_STS_KEY=$(rand_hex 8)"
+    } >>"$HARNESS_DIR/.env"
+    log "Added a generated RGW STS key to $HARNESS_DIR/.env"
     ;;
 esac
 
