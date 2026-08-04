@@ -126,6 +126,36 @@ for bucket in "${!bucket_grantees[@]}"; do
   log "POLICY bucket=$bucket grantees=$(trim "${bucket_grantees[$bucket]}")"
 done
 
+# Publish each identity's key pair to the developer secret store so
+# consumers pull instead of operators copying (ADR-P1-004). Publishing is
+# explicitly skipped when the OpenBao harness is not running: Ceph-only
+# workflows stay standalone, and absent secrets surface at the consumer
+# with a fail-fast remediation.
+OPENBAO_HARNESS_DIR="$REPO_DIR/platform/openbao/compose-service"
+if [[ -f "$OPENBAO_HARNESS_DIR/connection.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$OPENBAO_HARNESS_DIR/connection.env"
+  set +a
+  openbao_token_file="$OPENBAO_HARNESS_DIR/$OPENBAO_TOKEN_FILE"
+  if [[ -f "$openbao_token_file" ]] \
+      && curl --silent --output /dev/null --max-time 3 "$OPENBAO_ENDPOINT/v1/sys/health" 2>/dev/null; then
+    openbao_token="$(cat "$openbao_token_file")"
+    for uid in "${identities[@]}"; do
+      env_base="CEPH_$(printf '%s' "$uid" | tr 'a-z-' 'A-Z_')"
+      publish_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+        -H "X-Vault-Token: $openbao_token" -H 'Content-Type: application/json' \
+        -X POST "$OPENBAO_ENDPOINT/v1/$OPENBAO_KV_MOUNT/data/$OPENBAO_SERVICE_IDENTITY_PATH/$uid" \
+        -d "{\"data\":{\"access_key\":\"$(env_value_of "${env_base}_ACCESS_KEY")\",\"secret_key\":\"$(env_value_of "${env_base}_SECRET_KEY")\"}}")"
+      [[ "$publish_status" == 200 || "$publish_status" == 204 ]] \
+        || fail "Publishing $uid to OpenBao failed (HTTP $publish_status)"
+      log "PUBLISH openbao path=$OPENBAO_SERVICE_IDENTITY_PATH/$uid"
+    done
+  else
+    log "SKIP openbao-publish (OpenBao harness not running; consumers will fail fast with the remediation at read time)"
+  fi
+fi
+
 # Probes: each identity must succeed on its first granted bucket and fail
 # closed on the denied bucket, which never carries a service grant.
 for uid in "${identities[@]}"; do

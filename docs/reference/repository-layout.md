@@ -7,7 +7,7 @@ The repository is organized by stable capability, not implementation sequence. P
 | `applications/` | Stratus-owned long-running services | Placeholder — no application modules yet |
 | `jobs/` | Spark and Flink workloads | Placeholder — no job modules yet |
 | `verification/` | executable component conformance suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage conformance verifier, the current executable module |
-| `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster; `platform/ceph/tests/` runs one shared Ceph RGW conformance suite against any implementation and owns implementation-specific guardrails |
+| `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster and `platform/ceph/tests/` its conformance suite and guardrails; `platform/polaris/compose-service/` is the Polaris catalog harness; `platform/openbao/compose-service/` is the developer secret store (ADR-P1-004) |
 | `environments/` | environment inventory and overlays without secrets | `developer`, `acceptance`, and `production` |
 | `operations/` | cross-platform operational assets and runbooks | Placeholder — operational acceptance documents currently live in `docs/operations/` |
 | `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` contains only technology-neutral documentation and naming consistency checks |

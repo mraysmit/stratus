@@ -14,10 +14,11 @@
 
     <properties>
         <test.groups></test.groups>
-        <test.excludedGroups>ceph-integration | catalog-integration</test.excludedGroups>
+        <test.excludedGroups>ceph-integration | catalog-integration | secrets-integration</test.excludedGroups>
         <coverage.skip>false</coverage.skip>
         <ceph.integration.required>false</ceph.integration.required>
         <catalog.integration.required>false</catalog.integration.required>
+        <secrets.integration.required>false</secrets.integration.required>
     </properties>
 
     <modules>
@@ -25,6 +26,7 @@
         <module>build-support/stratus-build-parent</module>
         <module>verification/storage</module>
         <module>verification/catalog</module>
+        <module>verification/secrets</module>
         <module>platform/ceph/tests</module>
         <module>testing/repo-guardrails</module>
     </modules>
@@ -34,7 +36,7 @@
             <id>unit-tests</id>
             <properties>
                 <test.groups>unit</test.groups>
-                <test.excludedGroups>ceph-integration | catalog-integration</test.excludedGroups>
+                <test.excludedGroups>ceph-integration | catalog-integration | secrets-integration</test.excludedGroups>
                 <coverage.skip>true</coverage.skip>
             </properties>
         </profile>
@@ -57,6 +59,15 @@
             </properties>
         </profile>
         <profile>
+            <id>secrets-integration-tests</id>
+            <properties>
+                <test.groups>secrets-integration</test.groups>
+                <test.excludedGroups></test.excludedGroups>
+                <coverage.skip>true</coverage.skip>
+                <secrets.integration.required>true</secrets.integration.required>
+            </properties>
+        </profile>
+        <profile>
             <id>all-tests</id>
             <properties>
                 <test.groups></test.groups>
@@ -64,13 +75,14 @@
                 <coverage.skip>false</coverage.skip>
                 <ceph.integration.required>true</ceph.integration.required>
                 <catalog.integration.required>true</catalog.integration.required>
+                <secrets.integration.required>true</secrets.integration.required>
             </properties>
         </profile>
         <profile>
             <id>untagged-tests</id>
             <properties>
                 <test.groups></test.groups>
-                <test.excludedGroups>unit | ceph-integration | catalog-integration</test.excludedGroups>
+                <test.excludedGroups>unit | ceph-integration | catalog-integration | secrets-integration</test.excludedGroups>
                 <coverage.skip>true</coverage.skip>
             </properties>
         </profile>

@@ -85,6 +85,7 @@ final class IcebergRestCatalogConformanceTest {
         var config = CatalogVerifierConfig.from(System.getenv());
         catalog = new RESTCatalog();
         catalog.initialize(config.catalogName(), RestCatalogProperties.from(config));
+        CatalogVerificationLogging.catalogConnected(config);
         probeTable = TableIdentifier.of(PLATFORM, "conformance_probe_"
                 + UUID.randomUUID().toString().replace("-", ""));
     }
@@ -120,6 +121,19 @@ final class IcebergRestCatalogConformanceTest {
     }
 
     @Test
+    void zoneNamespacesCarryTheGovernedLocationAndZoneProperties() {
+        for (String zone : new String[] {"bronze", "silver", "gold", "platform"}) {
+            Map<String, String> metadata = catalog.loadNamespaceMetadata(Namespace.of(zone));
+
+            assertEquals("s3://stratus-" + zone + "/" + zone + "/", metadata.get("location"),
+                    "the " + zone + " namespace must sit inside its governed zone bucket");
+            assertEquals(zone, metadata.get("zone"),
+                    "the " + zone + " namespace must carry its zone property");
+            CatalogVerificationLogging.namespaceValidated(zone, metadata.get("location"));
+        }
+    }
+
+    @Test
     void createsWritesReadsAndDropsAProbeTableInTheGovernedZoneLocation() {
         var schema = new Schema(
                 Types.NestedField.required(1, "id", Types.LongType.get()),
@@ -128,6 +142,8 @@ final class IcebergRestCatalogConformanceTest {
         Table table = catalog.createTable(probeTable, schema);
         assertTrue(table.location().startsWith("s3://stratus-platform/platform/"),
                 "platform-zone tables must live inside the governed zone location, got: " + table.location());
+        CatalogVerificationLogging.tableEvent("create-confirmed", probeTable.toString(),
+                table.location(), null, 0, null);
 
         var dataPath = table.locationProvider().newDataLocation(
                 FileFormat.PARQUET.addExtension("conformance-probe-0"));
@@ -159,6 +175,10 @@ final class IcebergRestCatalogConformanceTest {
                 .build();
         table.newAppend().appendFile(dataFile).commit();
         assertNotNull(table.currentSnapshot(), "the append must produce a snapshot");
+        // The Parquet bytes stream directly to object storage, so there is no
+        // local payload to fingerprint; the snapshot id is the durable evidence.
+        CatalogVerificationLogging.tableEvent("append-confirmed", probeTable.toString(),
+                table.location(), table.currentSnapshot().snapshotId(), 3, null);
 
         var readBack = new ArrayList<Record>();
         try (var records = IcebergGenerics.read(table).build()) {
@@ -168,9 +188,13 @@ final class IcebergRestCatalogConformanceTest {
         }
         assertEquals(3, readBack.size(), "every appended row must read back through the catalog");
         assertEquals("probe-1", readBack.getFirst().getField("note"));
+        CatalogVerificationLogging.tableEvent("read-back-confirmed", probeTable.toString(),
+                table.location(), table.currentSnapshot().snapshotId(), readBack.size(), null);
 
         assertTrue(catalog.dropTable(probeTable, true), "the probe table must drop with purge");
         assertFalse(catalog.tableExists(probeTable), "the dropped probe table must be gone");
+        CatalogVerificationLogging.tableEvent("purge-drop-confirmed", probeTable.toString(),
+                table.location(), null, 0, null);
     }
 
     @Test
@@ -189,6 +213,8 @@ final class IcebergRestCatalogConformanceTest {
                     "a forged principal credential must be refused");
             assertFalse(String.valueOf(failure.getMessage()).contains(System.getenv("STRATUS_POLARIS_CLIENT_SECRET")),
                     "the failure must not echo the real credential");
+            CatalogVerificationLogging.negativeConfirmed("forged-principal-credential",
+                    "refused with " + failure.getClass().getSimpleName());
         } catch (IOException exception) {
             throw new UncheckedIOException("Failed to release the forged catalog client", exception);
         }
