@@ -52,11 +52,14 @@ else
         \"properties\": {
           \"default-base-location\": \"s3://stratus-bronze\",
           \"s3.endpoint\": \"$CEPH_RGW_ENDPOINT\",
-          \"s3.path-style-access\": \"true\"
+          \"s3.path-style-access\": \"true\",
+          \"polaris.config.drop-with-purge.enabled\": \"true\"
         },
         \"storageConfigInfo\": {
           \"storageType\": \"S3\",
           \"endpoint\": \"$CEPH_RGW_ENDPOINT\",
+          \"stsUnavailable\": true,
+          \"region\": \"default\",
           \"pathStyleAccess\": true,
           \"allowedLocations\": [
             \"s3://stratus-landing\",
@@ -74,6 +77,17 @@ else
     || fail "Catalog creation did not converge (HTTP $verify_status): ${create_response:0:300}"
   log "READY catalog=stratus (created)"
 fi
+
+# The per-catalog catalog_admin role manages metadata but does not carry
+# content privileges; purge-drops delete data files, so manage-content is
+# granted explicitly (idempotent: re-granting converges).
+grant_status="$(curl_api -o /dev/null -w '%{http_code}' \
+  -X PUT "$api/management/v1/catalogs/stratus/catalog-roles/catalog_admin/grants" \
+  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  -d '{"grant": {"type": "catalog", "privilege": "CATALOG_MANAGE_CONTENT"}}')"
+[[ "$grant_status" == 201 || "$grant_status" == 200 ]] \
+  || fail "Granting CATALOG_MANAGE_CONTENT to catalog_admin failed (HTTP $grant_status)"
+log "GRANT catalog-role=catalog_admin privilege=CATALOG_MANAGE_CONTENT"
 
 # Namespaces: POST returns 409 when present; both outcomes converge.
 # Polaris (verified against 1.5.0) disables custom namespace locations by

@@ -10,6 +10,16 @@ services:
       # From the provider's connection.env, exported by the harness
       # scripts. Never literal here: the provider owns these values.
       CEPH_RGW_ENDPOINT: ${CEPH_RGW_ENDPOINT:?Ceph connection settings not loaded; invoke through the harness scripts}
+      # Server-side S3 access for Iceberg metadata writes: the svc-polaris
+      # identity under the AWS SDK's standard variable names, plus the RGW
+      # region label and lab-CA trust for the JVM.
+      AWS_ACCESS_KEY_ID: ${CEPH_RGW_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${CEPH_RGW_SECRET_KEY:-}
+      AWS_REGION: ${CEPH_RGW_REGION:-default}
+      # Lab-CA trust for the JVM: Polaris both writes Iceberg metadata to
+      # RGW and vends subscoped credentials by AssumeRole against RGW STS,
+      # so every TLS path terminates at the harness proxy certificate.
+      JAVA_OPTS_APPEND: "-Djavax.net.ssl.trustStore=/etc/stratus/certs/stratus-truststore.jks"
     ports:
       # Loopback-only by default, matching every harness port convention.
       - "${POLARIS_BIND_ADDRESS:-127.0.0.1}:${POLARIS_PORT:-8181}:8181"
@@ -18,6 +28,7 @@ services:
       # consumed read-only; no private key crosses the harness boundary. The
       # path is exported by the harness scripts from the Ceph connection.env.
       - ${CEPH_HARNESS_CA_FILE:?Ceph connection settings not loaded; invoke through the harness scripts}:/etc/stratus/certs/stratus-ca.crt:ro
+      - ./certs/stratus-truststore.jks:/etc/stratus/certs/stratus-truststore.jks:ro
       - polaris-data:/data/polaris
     networks:
       ceph:

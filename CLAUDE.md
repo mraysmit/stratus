@@ -28,9 +28,11 @@ never a global Maven).
 - Coverage is reported, never gated — a coverage gate rewards simulation.
   Never introduce a stand-in to raise coverage.
 - Tests select by JUnit tag: `unit` (offline: pure logic and real
-  environmental failures) and `ceph-integration` (live cluster, excluded by
-  default; run with `-Pceph-integration-tests` or `-Pall-tests` while the
-  harness is up). Profiles are defined in the root pom.
+  environmental failures), `ceph-integration` (live Ceph cluster), and
+  `catalog-integration` (live Polaris + Ceph harnesses). Live tags are
+  excluded by default; run with `-Pceph-integration-tests`,
+  `-Pcatalog-integration-tests`, or `-Pall-tests` while the harnesses are
+  up. Profiles are defined in the root pom.
 - A change is complete only when the §12 completion gate passes, including
   `git diff --check` and tested INFO/DEBUG logging behavior; storage-affecting
   changes must additionally pass the live suite.

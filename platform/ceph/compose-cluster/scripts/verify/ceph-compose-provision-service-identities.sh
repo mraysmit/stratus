@@ -76,6 +76,30 @@ for uid in "${identities[@]}"; do
   fi
 done
 
+# IAM roles for credential vending: each identity gets a same-named RGW role
+# only its own user may assume (the catalog vends subscoped credentials by
+# AssumeRole via RGW STS). The role's permission policy carries exactly the
+# identity's declared bucket grants; role-policy put overwrites, so
+# re-applying converges.
+for uid in "${identities[@]}"; do
+  if ! compose exec -T mon1 radosgw-admin role get --role-name "$uid" >/dev/null 2>&1; then
+    compose exec -T mon1 radosgw-admin role create --role-name "$uid" \
+      --assume-role-policy-doc "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"arn:aws:iam:::user/$uid\"]},\"Action\":[\"sts:AssumeRole\"]}]}" >/dev/null
+    log "READY rgw-role=$uid (created)"
+  else
+    log "READY rgw-role=$uid (already exists)"
+  fi
+  role_resources=""
+  for grant in ${grants_of[$uid]}; do
+    bucket="${grant%%:*}"
+    role_resources="${role_resources:+$role_resources,}\"arn:aws:s3:::$bucket\",\"arn:aws:s3:::$bucket/*\""
+  done
+  compose exec -T mon1 radosgw-admin role-policy put --role-name "$uid" \
+    --policy-name "$uid-access" \
+    --policy-doc "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:ListBucket\",\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\",\"s3:AbortMultipartUpload\",\"s3:ListBucketMultipartUploads\",\"s3:ListMultipartUploadParts\"],\"Resource\":[$role_resources]}]}" >/dev/null
+  log "POLICY role=$uid buckets=$(printf '%s' "${grants_of[$uid]}" | tr ' ' ',')"
+done
+
 # One merged policy per bucket: put-bucket-policy replaces the whole policy,
 # so every identity granted on a bucket must appear in a single document.
 declare -A bucket_grantees

@@ -12,6 +12,7 @@ set -euo pipefail
 : "${CEPH_ADMIN_OPS_UID:?CEPH_ADMIN_OPS_UID is required}"
 : "${CEPH_ADMIN_OPS_ACCESS_KEY:?CEPH_ADMIN_OPS_ACCESS_KEY is required}"
 : "${CEPH_ADMIN_OPS_SECRET_KEY:?CEPH_ADMIN_OPS_SECRET_KEY is required}"
+: "${CEPH_RGW_STS_KEY:?CEPH_RGW_STS_KEY is required}"
 
 attempts=0
 until ceph osd stat --format json | jq -e '.num_up_osds == 3 and .num_in_osds == 3' >/dev/null; do
@@ -52,6 +53,12 @@ if ! radosgw-admin user info --uid "$CEPH_ADMIN_OPS_UID" >/dev/null 2>&1; then
     --secret-key "$CEPH_ADMIN_OPS_SECRET_KEY" >/dev/null
 fi
 radosgw-admin caps add --uid "$CEPH_ADMIN_OPS_UID" --caps "buckets=read;usage=read" >/dev/null
+
+# Enable RGW STS so the catalog's credential vending can AssumeRole against
+# this harness (Increment 2). The STS key is a disposable per-machine secret
+# and must be set before the RGW daemons start.
+ceph config set global rgw_sts_key "$CEPH_RGW_STS_KEY"
+ceph config set global rgw_s3_auth_use_sts true
 
 # Platform service identities (svc-polaris and successors) are provisioned
 # after startup by verify/ceph-compose-provision-service-identities.sh from

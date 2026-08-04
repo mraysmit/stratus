@@ -25,7 +25,25 @@ fi
 
 require_ceph_harness_network
 load_environment
-mkdir -p "$HARNESS_DIR/evidence" "$HARNESS_DIR/logs"
+mkdir -p "$HARNESS_DIR/evidence" "$HARNESS_DIR/logs" "$HARNESS_DIR/certs"
+
+# Polaris writes Iceberg table metadata to RGW server-side, so its JVM must
+# trust the disposable lab CA. The truststore holds only that public
+# certificate and is rebuilt whenever the CA changes; JKS reads need no
+# password, so none reaches the container command line.
+truststore="$HARNESS_DIR/certs/stratus-truststore.jks"
+if [[ ! -f "$truststore" || "$CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT" -nt "$truststore" ]]; then
+  : "${JAVA_HOME:?JAVA_HOME is required to build the Polaris JVM truststore}"
+  rm -f "$truststore"
+  # Explicit JKS: certificate entries in JKS are readable without a
+  # password, so none ever reaches the container command line. Modern
+  # keytool would otherwise default to PKCS12, which yields no trust
+  # anchors on a passwordless read.
+  "$JAVA_HOME/bin/keytool" -importcert -noprompt -alias stratus-lab-ca \
+    -storetype JKS \
+    -file "$CEPH_HARNESS_CA_FILE" -keystore "$truststore" -storepass changeit >/dev/null 2>&1
+  log "Built the Polaris JVM truststore from the Ceph harness CA"
+fi
 
 # Validate interpolation before touching container state so a broken .env
 # fails here with a compose diagnostic rather than mid-startup.

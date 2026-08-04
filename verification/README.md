@@ -9,7 +9,7 @@ Current modules:
 | Module | Platform layer | Status |
 |---|---|---|
 | `storage` | Object storage — Ceph RGW S3 operations | Active |
-| `catalog` | Table catalog — Apache Iceberg + Apache Polaris | Placeholder |
+| `catalog` | Table catalog — Apache Iceberg + Apache Polaris | Active |
 | `compute` | Batch compute — Apache Spark pipeline | Placeholder |
 | `orchestration` | Workflow orchestration — Apache Airflow | Placeholder |
 | `query` | Interactive query — Trino | Placeholder |
