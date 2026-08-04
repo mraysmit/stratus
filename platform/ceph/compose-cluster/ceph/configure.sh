@@ -53,6 +53,11 @@ if ! radosgw-admin user info --uid "$CEPH_ADMIN_OPS_UID" >/dev/null 2>&1; then
 fi
 radosgw-admin caps add --uid "$CEPH_ADMIN_OPS_UID" --caps "buckets=read;usage=read" >/dev/null
 
+# Platform service identities (svc-polaris and successors) are provisioned
+# after startup by verify/ceph-compose-provision-service-identities.sh from
+# the declarative service-identities.conf; only harness-core identities are
+# created here.
+
 for pool in $(ceph osd pool ls); do
   ceph osd pool set "$pool" size 2 >/dev/null
   ceph osd pool set "$pool" min_size 1 >/dev/null

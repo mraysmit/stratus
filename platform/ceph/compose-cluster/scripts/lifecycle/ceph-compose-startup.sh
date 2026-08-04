@@ -96,6 +96,10 @@ case "$(credential_bundle_state CEPH_ADMIN_OPS_UID CEPH_ADMIN_OPS_ACCESS_KEY CEP
     ;;
 esac
 
+# Platform service identities (svc-polaris and successors) are NOT generated
+# here: verify/ceph-compose-provision-service-identities.sh provisions them
+# from the declarative service-identities.conf after the cluster is up.
+
 # Backfilled separately from the credentials above: this is a non-secret URL and
 # an .env generated before the dashboard REST conformance test existed will not have it.
 if ! env_key_exists CEPH_DASHBOARD_ENDPOINT; then

@@ -21,3 +21,7 @@ done
 # prove the primary verifier cannot cross an identity boundary.
 compose exec -T s3client rclone --ca-cert /certs/stratus-ca.crt mkdir "deniedowner:${CEPH_RGW_DENIED_BUCKET}"
 log "READY isolated-policy-bucket=$CEPH_RGW_DENIED_BUCKET owner=$CEPH_DENIED_UID"
+
+# Platform service identities and their bucket-policy grants are provisioned
+# by the declarative step that follows in the sequence:
+# verify/ceph-compose-provision-service-identities.sh

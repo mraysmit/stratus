@@ -58,6 +58,7 @@ validate() {
       || fail "The cluster is not running. Start it with lifecycle/ceph-compose-startup.sh or rerun with --full"
   fi
   step bootstrap-buckets verify/ceph-compose-bootstrap-buckets.sh
+  step provision-service-identities verify/ceph-compose-provision-service-identities.sh
   step verify-buckets verify/ceph-compose-verify-buckets.sh
   step verify-storage verify/ceph-compose-verify-storage.sh
   step verify-security verify/ceph-compose-verify-security.sh
