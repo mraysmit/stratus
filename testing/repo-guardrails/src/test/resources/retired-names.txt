@@ -11,3 +11,13 @@ storage-contract
 # <product>-<implementation>-<action>-<object> scheme. Historical entry-point
 # names remain supported as compatibility wrappers and are therefore not
 # retired names. ComposeClusterScriptTest verifies both interfaces.
+
+# Renamed to connection.env in August 2026: the file is provider-owned shared
+# configuration, and plain naming was preferred over "contract" jargon.
+attachment-contract
+
+# Test classes renamed *ContractTest to *ConformanceTest in August 2026: the
+# suites verify conformance to Stratus requirements; "contract" implied an
+# agreement that was never the mechanism. Covers every historical variant
+# (CephRgwContractTest, HarnessContractTest, and so on).
+contracttest

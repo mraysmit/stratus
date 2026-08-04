@@ -19,16 +19,16 @@ owned by
 | `image/` | Verifier/image build assets (reserved; owned by `P1-2.2-S1`) | Not created |
 | `config/` | Catalog bootstrap: namespaces, Ceph locations, scoped credentials (reserved; owned by `P1-2.3-D1`) | Not created |
 | `database/` | Production external metadata store assets (reserved; production track) | Not created |
-| `tests/` | Product-owned live contract tests, mirroring `platform/ceph/tests` (reserved) | Not created |
+| `tests/` | Product-owned live conformance tests, mirroring `platform/ceph/tests` (reserved) | Not created |
 
 ## Related locations
 
-- Product-neutral catalog capability contract: [verification/catalog/](../../verification/catalog/README.md) (placeholder)
+- Product-neutral catalog capability conformance suite: [verification/catalog/](../../verification/catalog/README.md) (placeholder)
 - Developer environment profile: [environments/developer/polaris/](../../environments/developer/polaris/README.md)
-- Storage attachment contract this harness consumes:
-  [Ceph Compose cluster README — Attachment contract](../ceph/compose-cluster/README.md#attachment-contract)
+- Ceph connection settings this harness consumes:
+  [Ceph Compose cluster README — Connection settings](../ceph/compose-cluster/README.md#connection-settings-for-other-harnesses)
 
-## Attachment contract published by this harness
+## What this harness publishes for other harnesses
 
 When the harness is running, engine harnesses attached to the shared
 `stratus-ceph-local_ceph` network resolve the catalog as

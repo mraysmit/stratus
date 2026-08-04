@@ -90,7 +90,7 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 
 ### 7.1 Test-driven implementation
 
-- New behavior and defect fixes MUST begin with an executable failing test or contract reproduction whenever practical.
+- New behavior and defect fixes MUST begin with an executable failing test or reproduction of the violated requirement whenever practical.
 - Tests MUST assert externally observable state, output, protocol traffic, persistence, or failure semantics.
 - Tests MUST be deterministic, isolated, and repeatable.
 - Time-dependent code MUST use an injected `Clock` or equivalent controllable time source.
@@ -114,7 +114,7 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Coverage proves execution, not correctness. Assertions and integration evidence remain mandatory.
 - Unit tests SHOULD cover pure validation, transformations, reports, orchestration decisions, and real environmental failures.
 - Integration tests MUST exercise the selected product release with its real security and network configuration — for Ceph, the `ceph-integration` tag against the local cluster.
-- End-to-end and operational tests MUST prove cross-component contracts, recovery, observability, and cleanup.
+- End-to-end and operational tests MUST prove cross-component behavior, recovery, observability, and cleanup.
 - Test output MUST make failures diagnosable without exposing secrets.
 
 ## 8. Maven and Dependency Management

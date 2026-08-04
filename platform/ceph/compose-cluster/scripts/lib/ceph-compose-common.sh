@@ -6,6 +6,11 @@ set -euo pipefail
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_DIR="$(cd "$HARNESS_DIR/../../.." && pwd)"
 
+# Single definition of this harness's compose project identity. Must match
+# the 'name:' field in compose.yaml and connection.env; the
+# guardrails in platform/ceph/tests enforce the agreement.
+CEPH_COMPOSE_PROJECT="stratus-ceph-local"
+
 # All harness status output carries an ISO-8601 UTC timestamp.
 log_timestamp() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
 log() { printf '%s %s\n' "$(log_timestamp)" "$*"; }
@@ -65,9 +70,9 @@ compose() {
 # missing and the compose file's required variables cannot be interpolated.
 compose_teardown() {
   if [[ -n "${MSYSTEM:-}" ]]; then
-    MSYS_NO_PATHCONV=1 "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
+    MSYS_NO_PATHCONV=1 "$(compose_runtime)" compose --project-name "$CEPH_COMPOSE_PROJECT" "$@"
   else
-    "$(compose_runtime)" compose --project-name stratus-ceph-local "$@"
+    "$(compose_runtime)" compose --project-name "$CEPH_COMPOSE_PROJECT" "$@"
   fi
 }
 
@@ -94,7 +99,7 @@ require_free_harness_subnet() {
   local runtime conflict
   runtime="$(compose_runtime)"
   conflict="$("$runtime" network ls --format '{{.Name}}' | while read -r net; do
-    if [[ "$net" == stratus-ceph-local_* ]]; then continue; fi
+    if [[ "$net" == "${CEPH_COMPOSE_PROJECT}_"* ]]; then continue; fi
     if "$runtime" network inspect "$net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | grep -q '172\.28\.0\.0/24'; then
       printf '%s' "$net"
       break

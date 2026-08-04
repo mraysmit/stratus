@@ -668,7 +668,7 @@ Add to `pom.xml` if they are not already present:
 
 ### Verification test class
 
-Place in `verification/governance-contract/src/test/java/dev/stratus/verification/governance/GovernanceVerificationTest.java`:
+Place in `verification/governance/src/test/java/dev/stratus/verification/governance/GovernanceVerificationTest.java`:
 
 ```java
 package dev.stratus.verification.governance;

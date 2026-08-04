@@ -5,13 +5,35 @@ set -euo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_DIR="$(cd "$HARNESS_DIR/../../.." && pwd)"
-CEPH_HARNESS_DIR="$REPO_DIR/platform/ceph/compose-cluster"
-CEPH_HARNESS_NETWORK="stratus-ceph-local_ceph"
 
 # All harness status output carries an ISO-8601 UTC timestamp.
 log_timestamp() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
 log() { printf '%s %s\n' "$(log_timestamp)" "$*"; }
 fail() { printf '%s ERROR: %s\n' "$(log_timestamp)" "$*" >&2; exit 1; }
+
+# The single hardcoded provider value: the Ceph harness directory, stable under
+# the guardrail-enforced repository layout. Every other provider value —
+# network name, endpoints, CA location — comes from the provider's published
+# connection.env (ADR-P1-003) and must never be copied here or into
+# any other consumer file.
+CEPH_HARNESS_DIR="$REPO_DIR/platform/ceph/compose-cluster"
+[[ -f "$CEPH_HARNESS_DIR/connection.env" ]] \
+  || fail "Missing $CEPH_HARNESS_DIR/connection.env; the Ceph harness must publish its connection settings"
+set -a
+# shellcheck disable=SC1091
+source "$CEPH_HARNESS_DIR/connection.env"
+set +a
+: "${CEPH_HARNESS_NETWORK:?connection.env must define CEPH_HARNESS_NETWORK}"
+: "${CEPH_RGW_ENDPOINT:?connection.env must define CEPH_RGW_ENDPOINT}"
+: "${CEPH_HARNESS_CA_CERT:?connection.env must define CEPH_HARNESS_CA_CERT}"
+
+# Absolute CA path for Compose volume mounts and curl. Mixed form (C:/...)
+# under Git Bash so Docker receives a Windows path while Linux is unaffected.
+CEPH_HARNESS_CA_FILE="$CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT"
+if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  CEPH_HARNESS_CA_FILE="$(cygpath -m "$CEPH_HARNESS_CA_FILE")"
+fi
+export CEPH_HARNESS_CA_FILE
 
 # Loads .env without validation. Teardown paths use this so a half-configured
 # harness can still be shut down.
@@ -27,8 +49,8 @@ load_environment() {
   load_environment_file
   : "${POLARIS_IMAGE:?POLARIS_IMAGE is required}"
   [[ "$POLARIS_IMAGE" != *latest* ]] || fail "POLARIS_IMAGE must be a pinned release, never latest"
-  [[ -f "$CEPH_HARNESS_DIR/certs/stratus-ca.crt" ]] \
-    || fail "Missing $CEPH_HARNESS_DIR/certs/stratus-ca.crt; start the Ceph harness once to generate it"
+  [[ -f "$CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT" ]] \
+    || fail "Missing $CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT; start the Ceph harness once to generate it"
 }
 
 compose_runtime() {

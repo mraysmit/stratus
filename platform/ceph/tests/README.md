@@ -3,11 +3,11 @@
 This directory owns tests of the Stratus Ceph integration. The Maven module is
 `stratus-ceph-tests`.
 
-## Shared live contract
+## Shared live conformance test
 
-`CephRgwContractTest` is deployment-neutral. It connects to the endpoint and
+`CephRgwConformanceTest` is deployment-neutral. It connects to the endpoint and
 credentials supplied through its environment and tests observable Ceph RGW
-behavior: the S3 contract, required buckets, credential isolation, TLS,
+behavior: the S3 conformance, required buckets, credential isolation, TLS,
 read/list consistency, pagination, multipart-abort cleanup, and evidence
 sanitization. It does not start, inspect, or otherwise depend on Compose,
 cephadm, or a particular infrastructure layout.
@@ -33,7 +33,7 @@ CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
 ```
 
-Run only the live shared contract from the repository root:
+Run only the live shared conformance suite from the repository root:
 
 ```bash
 ./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am
@@ -61,7 +61,7 @@ name, and wrapper exit code. Operators may archive or remove these logs accordin
 to their local retention policy.
 
 Selecting the live profile without `CEPH_RGW_INTEGRATION=true` fails instead of
-silently skipping the contract.
+silently skipping the conformance suite.
 
 These tests run in the Maven JVM on your workstation, not inside a container, so
 requirements 3 and 4 are theirs alone. A Ceph implementation whose own
@@ -75,26 +75,26 @@ and verify it later with that command's `--check` option. You can also confirm i
 because without it every test here fails on connection rather than on Ceph
 behavior.
 
-## REST API contracts
+## REST API conformance tests
 
-Three further live contracts prove REST surfaces that the SDK-based contract
+Three further live conformance tests prove REST surfaces that the SDK-based contract
 above does not reach. All are deployment-neutral and driven by the same
 environment.
 
 | Class | Surface | Why it exists |
 | --- | --- | --- |
-| `CephS3RestContractTest` | S3 data API over raw AWS Signature Version 4 REST | The AWS SDK absorbs wire-level defects. Signing, payload hashing, path-style routing, and TLS are asserted directly, with no SDK in the call path. |
-| `CephAdminOpsRestContractTest` | RGW Admin Operations API (`/admin/...`) | Bucket inventory and usage administration, plus proof that the caps boundary holds in both directions. |
-| `CephDashboardRestContractTest` | Ceph Dashboard REST API (`/api/auth`, `/api/rgw/...`) | Token authentication and real bucket create, read, and delete through the management API. |
+| `CephS3RestConformanceTest` | S3 data API over raw AWS Signature Version 4 REST | The AWS SDK absorbs wire-level defects. Signing, payload hashing, path-style routing, and TLS are asserted directly, with no SDK in the call path. |
+| `CephAdminOpsRestConformanceTest` | RGW Admin Operations API (`/admin/...`) | Bucket inventory and usage administration, plus proof that the caps boundary holds in both directions. |
+| `CephDashboardRestConformanceTest` | Ceph Dashboard REST API (`/api/auth`, `/api/rgw/...`) | Token authentication and real bucket create, read, and delete through the management API. |
 
-`CephS3RestContractTest` requires path-style addressing. Virtual-host
+`CephS3RestConformanceTest` requires path-style addressing. Virtual-host
 addressing needs wildcard DNS for the endpoint domain, which an on-premises
 deployment does not necessarily publish, so `S3_PATH_STYLE_ACCESS=false` fails
 with that reason rather than skipping.
 
 ### SignatureV4RestClient
 
-The S3 and Admin Operations contracts share `SignatureV4RestClient`, which signs
+The S3 and Admin Operations conformance tests share `SignatureV4RestClient`, which signs
 requests with AWS Signature Version 4 — the scheme Ceph RGW implements for both
 APIs — over the JDK HTTP client.
 
@@ -113,7 +113,7 @@ instead of Ceph is not.
 
 ### Additional environment
 
-Beyond the variables listed above, the REST contracts require:
+Beyond the variables listed above, the REST conformance tests require:
 
 ```dotenv
 CEPH_ADMIN_OPS_ACCESS_KEY=<scoped Admin Operations reader access key>
@@ -135,7 +135,7 @@ healthy, and logs a warning if it cannot.
 
 ### REST logging
 
-The REST contracts use SLF4J with the repository-standard JDK logging backend.
+The REST conformance tests use SLF4J with the repository-standard JDK logging backend.
 `STRATUS_LOG_LEVEL=INFO` records the semantic operation and resource, HTTP
 method and status, byte counts, elapsed time, and SHA-256 fingerprints of
 non-sensitive test data. A PUT request fingerprint matching the later GET
@@ -149,7 +149,7 @@ cookies, and passwords are never logged.
 
 ### Business dataset lifecycle
 
-The raw S3 contract uses a versioned, synthetic customer-master dataset rather
+The raw S3 conformance uses a versioned, synthetic customer-master dataset rather
 than an opaque probe string. It reflects the Stratus landing-to-bronze customer
 flow and contains business keys, names, synthetic email addresses under
 `example.test`, countries, customer segments, account states, revenue and
@@ -179,8 +179,8 @@ are not written to the log.
 
 ## Implementation guardrails
 
-`ComposeClusterContractTest` and `ComposeClusterScriptTest` are deliberately
+`ComposeClusterConformanceTest` and `ComposeClusterScriptTest` are deliberately
 implementation-specific static tests for `../compose-cluster`. They run under
 the `unit` tag in the normal regression. Other Ceph implementations may add
 their own clearly named structural tests here without changing or duplicating
-`CephRgwContractTest`.
+`CephRgwConformanceTest`.

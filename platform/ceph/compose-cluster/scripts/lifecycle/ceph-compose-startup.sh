@@ -97,7 +97,7 @@ case "$(credential_bundle_state CEPH_ADMIN_OPS_UID CEPH_ADMIN_OPS_ACCESS_KEY CEP
 esac
 
 # Backfilled separately from the credentials above: this is a non-secret URL and
-# an .env generated before the dashboard REST contract existed will not have it.
+# an .env generated before the dashboard REST conformance test existed will not have it.
 if ! env_key_exists CEPH_DASHBOARD_ENDPOINT; then
   dashboard_port="$(env_value CEPH_DASHBOARD_PORT)"
   dashboard_port="${dashboard_port:-8444}"

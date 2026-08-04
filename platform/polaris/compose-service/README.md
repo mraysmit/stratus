@@ -44,16 +44,18 @@ bash scripts/lifecycle/polaris-compose-shutdown.sh
 | Script | What it does |
 |---|---|
 | `lifecycle/polaris-compose-startup.sh` | Generates `.env` from the template once (disposable bootstrap credential), requires the Ceph harness network, validates Compose interpolation, starts the service |
-| `verify/polaris-compose-verify-endpoint.sh` | Liveness smoke check: the Polaris API answers on the loopback port (an unauthenticated 401/403 counts as listening). Not a catalog contract test |
+| `verify/polaris-compose-verify-endpoint.sh` | Liveness smoke check: the Polaris API answers on the loopback port (an unauthenticated 401/403 counts as listening). Not a catalog conformance test |
 | `lifecycle/polaris-compose-shutdown.sh` | Idempotent stop; preserves the `polaris-data` volume and `.env`; never removes the external Ceph network |
 | `lifecycle/polaris-compose-reset.sh` | Destroys the disposable catalog state (containers and data volume) for a fresh catalog next startup; prompts unless `--force` |
 
 ## What this harness consumes and publishes
 
-Consumed (Ceph attachment contract): the `stratus-ceph-local_ceph` network,
-the `https://object-store.stratus.local:8443` S3 endpoint over Docker DNS,
-and the CA certificate `platform/ceph/compose-cluster/certs/stratus-ca.crt`
-mounted read-only. No Ceph private key is ever mounted here.
+Consumed from the Ceph harness: its network, S3 endpoint, and CA
+certificate, all sourced by the harness scripts from
+[`connection.env`](../../ceph/compose-cluster/connection.env) — the only
+provider value written into this harness is the Ceph harness's repository
+path (one line in `scripts/lib/polaris-compose-common.sh`). No Ceph private
+key is ever mounted here.
 
 Published: the `polaris.stratus.local` alias on the shared network for the
 engine harnesses of later increments, and the loopback port

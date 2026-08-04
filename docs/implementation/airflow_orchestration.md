@@ -910,7 +910,7 @@ The Spark and Iceberg dependencies from Increment 3 remain in place for table as
 
 ### Shared Airflow REST client
 
-Place in `verification/orchestration-contract/src/test/java/dev/stratus/verification/orchestration/AirflowTestClient.java`:
+Place in `verification/orchestration/src/test/java/dev/stratus/verification/orchestration/AirflowTestClient.java`:
 
 ```java
 package dev.stratus.verification.orchestration;
@@ -1010,7 +1010,7 @@ public class AirflowTestClient {
 
 ### Verification test class
 
-Place in `verification/orchestration-contract/src/test/java/dev/stratus/verification/orchestration/AirflowOrchestrationVerificationTest.java`:
+Place in `verification/orchestration/src/test/java/dev/stratus/verification/orchestration/AirflowOrchestrationVerificationTest.java`:
 
 ```java
 package dev.stratus.verification.orchestration;

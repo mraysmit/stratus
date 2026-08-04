@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  * Version 4 REST against a live Ceph RGW endpoint, with no AWS SDK in the call
  * path.
  *
- * <p>{@code CephRgwContractTest} proves the same storage semantics through the
+ * <p>{@code CephRgwConformanceTest} proves the same storage semantics through the
  * SDK. This class exists because the SDK can mask a wire-level defect: a
  * signing, header, payload-hash, or path-style routing change in RGW would be
  * absorbed by the SDK's own compatibility handling and never surface. Here the
@@ -47,7 +47,7 @@ import org.junit.jupiter.api.Test;
  * @version 1.0.0
  */
 @Tag("ceph-integration")
-final class CephS3RestContractTest {
+final class CephS3RestConformanceTest {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
@@ -80,7 +80,7 @@ final class CephS3RestContractTest {
             // an on-premises deployment does not necessarily publish. Fail with the
             // reason rather than skipping a selected live profile.
             assertFalse("false".equalsIgnoreCase(String.valueOf(System.getenv("S3_PATH_STYLE_ACCESS"))),
-                "S3_PATH_STYLE_ACCESS=false is unsupported by the raw REST contract: "
+                "S3_PATH_STYLE_ACCESS=false is unsupported by the raw REST conformance test: "
                     + "virtual-host addressing requires wildcard DNS for the endpoint domain");
         }
         assumeTrue(Boolean.parseBoolean(System.getenv("CEPH_RGW_INTEGRATION")),
@@ -240,7 +240,7 @@ final class CephS3RestContractTest {
     }
 
     private static byte[] fixture(String name) {
-        try (var input = CephS3RestContractTest.class.getResourceAsStream("/datasets/" + name)) {
+        try (var input = CephS3RestConformanceTest.class.getResourceAsStream("/datasets/" + name)) {
             if (input == null) {
                 throw new IllegalStateException("Missing business dataset fixture /datasets/" + name);
             }

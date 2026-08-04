@@ -44,7 +44,7 @@ import dev.stratus.verification.storage.StorageVerifierConfig;
 import dev.stratus.verification.storage.StorageVerifierMain;
 
 /**
- * The Stratus storage contract proven against any live Ceph RGW service
+ * The Stratus storage conformance proven against any live Ceph RGW service
  * implementation supplied through the environment. The test has no dependency
  * on Compose, cephadm, or another deployment mechanism.
  *
@@ -55,7 +55,7 @@ import dev.stratus.verification.storage.StorageVerifierMain;
  * @version 1.0.0
  */
 @Tag("ceph-integration")
-class CephRgwContractTest {
+class CephRgwConformanceTest {
 
     @BeforeEach
     void requireLiveCluster() {
@@ -80,7 +80,7 @@ class CephRgwContractTest {
 
     @Test
     void verifiesLiveCephRgwContractAndWritesEvidence() throws java.io.IOException {
-        var evidenceFile = Path.of("target", "live-evidence", "live-contract-report.json");
+        var evidenceFile = Path.of("target", "live-evidence", "live-conformance-report.json");
         Files.deleteIfExists(evidenceFile);
         var environment = liveEnvironment();
         var logFile = Path.of(environment.get("STRATUS_LOG_FILE").replace("%g", "0"));
@@ -103,7 +103,7 @@ class CephRgwContractTest {
         assertFalse(evidence.contains(secret), "evidence must never contain the secret key");
         assertFalse(output.toString().contains(secret), "report output must never contain the secret key");
         var completion = Files.readAllLines(logFile).stream()
-                .filter(line -> line.contains("Storage contract verification completed"))
+                .filter(line -> line.contains("Storage conformance verification completed"))
                 .reduce((first, second) -> second)
                 .orElseThrow();
         assertTrue(completion.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}[+-]\\d{4} INFO \\S.*"),

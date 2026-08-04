@@ -192,6 +192,57 @@ final class ComposeClusterScriptTest {
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }
 
+    @Test
+    void connectionSettingsArePublishedOnceAndConsistently() {
+        Map<String, String> settings = new LinkedHashMap<>();
+        for (String line : Repo.read(HARNESS.resolve("connection.env")).lines().toList()) {
+            String trimmed = line.strip();
+            int separator = trimmed.indexOf('=');
+            if (!trimmed.isEmpty() && !trimmed.startsWith("#") && separator > 0) {
+                settings.put(trimmed.substring(0, separator), trimmed.substring(separator + 1));
+            }
+        }
+        List<String> violations = new ArrayList<>();
+        for (String key : List.of("CEPH_COMPOSE_PROJECT", "CEPH_HARNESS_NETWORK",
+                "CEPH_RGW_ENDPOINT", "CEPH_DASHBOARD_ENDPOINT", "CEPH_HARNESS_CA_CERT")) {
+            if (settings.getOrDefault(key, "").isBlank()) {
+                violations.add("connection.env must define " + key);
+            }
+        }
+        String project = settings.getOrDefault("CEPH_COMPOSE_PROJECT", "");
+        String composeFile = Repo.read(HARNESS.resolve("compose.yaml"));
+        if (!composeFile.startsWith("name: " + project)) {
+            violations.add("compose.yaml project name must match connection.env CEPH_COMPOSE_PROJECT");
+        }
+        if (!settings.getOrDefault("CEPH_HARNESS_NETWORK", "").equals(project + "_ceph")) {
+            violations.add("CEPH_HARNESS_NETWORK must be the compose project name plus the 'ceph' network key");
+        }
+        for (String endpointKey : List.of("CEPH_RGW_ENDPOINT", "CEPH_DASHBOARD_ENDPOINT")) {
+            String endpoint = settings.getOrDefault(endpointKey, "");
+            if (!endpoint.startsWith("https://object-store.stratus.local:")) {
+                violations.add(endpointKey + " must be the TLS proxy endpoint published as a network alias");
+            }
+        }
+        String common = Repo.read(SCRIPTS.resolve(Path.of("lib", "ceph-compose-common.sh")));
+        if (!common.contains("CEPH_COMPOSE_PROJECT=\"" + project + "\"")) {
+            violations.add("ceph-compose-common.sh must define CEPH_COMPOSE_PROJECT once, matching connection.env");
+        }
+        // The definition above is the only permitted literal: every other use
+        // must reference the variable so a rename is a one-line change.
+        long commonLiterals = common.lines().filter(line -> line.contains(project)).count();
+        if (commonLiterals > 1) {
+            violations.add("ceph-compose-common.sh must contain the project name literal exactly once (the definition), found " + commonLiterals + " lines");
+        }
+        String harnessSelfTest = Repo.read(SCRIPTS.resolve(Path.of("verify", "ceph-compose-verify-harness.sh")));
+        if (harnessSelfTest.contains(project)) {
+            violations.add("ceph-compose-verify-harness.sh must reference $CEPH_COMPOSE_PROJECT, not the literal project name");
+        }
+        if (!Repo.read(HARNESS.resolve("README.md")).contains("connection.env")) {
+            violations.add("the harness README must reference connection.env");
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
     private static List<Path> scriptFiles() {
         return Repo.trackedFiles().stream()
             .filter(file -> file.startsWith(SCRIPTS))
