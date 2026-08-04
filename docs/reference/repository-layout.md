@@ -6,8 +6,8 @@ The repository is organized by stable capability, not implementation sequence. P
 |---|---|---|
 | `applications/` | Stratus-owned long-running services | Placeholder — no application modules yet |
 | `jobs/` | Spark and Flink workloads | Placeholder — no job modules yet |
-| `verification/` | executable component contract suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage contract verifier, the current executable module |
-| `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster; `platform/ceph/tests/` runs one shared Ceph RGW contract against any implementation and owns implementation-specific guardrails |
+| `verification/` | executable component conformance suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage conformance verifier, the current executable module |
+| `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster; `platform/ceph/tests/` runs one shared Ceph RGW conformance suite against any implementation and owns implementation-specific guardrails |
 | `environments/` | environment inventory and overlays without secrets | `developer`, `acceptance`, and `production` |
 | `operations/` | cross-platform operational assets and runbooks | Placeholder — operational acceptance documents currently live in `docs/operations/` |
 | `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` contains only technology-neutral documentation and naming consistency checks |
@@ -30,7 +30,7 @@ The table describes what each directory is; this section is the placement rule f
 |---|---|---|
 | Third-party product integration: images, configuration templates, Compose harnesses, bootstrap automation | `platform/<product>/` | `platform/ceph/compose-cluster/` |
 | Tests owned by a specific product or its harness | `platform/<product>/tests/` | `platform/ceph/tests/` |
-| Product-neutral capability contract suites | `verification/<capability>/` | `verification/storage/` |
+| Product-neutral capability conformance suites | `verification/<capability>/` | `verification/storage/` |
 | Stratus-authored Spark or Flink workload code | `jobs/` | — |
 | Stratus-authored long-running services | `applications/` | — |
 | Cross-component end-to-end and non-functional suites | `testing/` | `testing/repo-guardrails/` |

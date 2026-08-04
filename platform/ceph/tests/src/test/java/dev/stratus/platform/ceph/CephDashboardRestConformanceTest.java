@@ -32,8 +32,8 @@ import org.yaml.snakeyaml.Yaml;
  * {@code /api/rgw} endpoints that create, read, and delete buckets.
  *
  * <p>This is the management REST surface, distinct from the S3 data API proven
- * by {@code CephS3RestContractTest} and the Admin Operations API proven by
- * {@code CephAdminOpsRestContractTest}. Bucket creation and deletion here are
+ * by {@code CephS3RestConformanceTest} and the Admin Operations API proven by
+ * {@code CephAdminOpsRestConformanceTest}. Bucket creation and deletion here are
  * real writes against the live cluster, not metadata reads.
  *
  * <p>The {@code /api/rgw} endpoints require the dashboard to hold RGW
@@ -48,7 +48,7 @@ import org.yaml.snakeyaml.Yaml;
  * @version 1.0.0
  */
 @Tag("ceph-integration")
-final class CephDashboardRestContractTest {
+final class CephDashboardRestConformanceTest {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);

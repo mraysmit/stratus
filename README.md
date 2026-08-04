@@ -88,7 +88,7 @@ The monorepo is organized by stable capability, not implementation sequence:
 |---|---|
 | `applications/` | Stratus-owned long-running services |
 | `jobs/` | Spark and Flink workloads |
-| `verification/` | executable platform contract suites |
+| `verification/` | executable platform conformance suites |
 | `platform/` | open-source product integration and deployment assets |
 | `environments/` | developer, acceptance, and production inventory and overlays without secrets |
 | `operations/` | monitoring, alerting, backup/restore, security, drills, and runbooks |
@@ -102,7 +102,7 @@ The monorepo is organized by stable capability, not implementation sequence:
 
 The authoritative layout table — including the placement rules for new artifacts and the guardrail test that enforces the directory set — is [repository-layout.md](docs/reference/repository-layout.md).
 
-The current executable module is the [storage contract verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph Compose cluster](platform/ceph/compose-cluster/).
+The current executable module is the [storage conformance verifier](verification/storage/). The corresponding Docker/Podman environment is the [Ceph Compose cluster](platform/ceph/compose-cluster/).
 
 Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versions are owned by `build-support/stratus-build-parent`. Child module POMs do not pin dependency or plugin versions.
 
@@ -179,4 +179,4 @@ The platform is Linux-only with no Windows dependencies.
 
 ## Status
 
-The Ceph storage capability developer track is complete and was accepted on 2026-08-03. The Java 25 Ceph RGW storage contract verifier, the Docker/Podman Compose cluster harness, the live JVM contract suites (SDK S3, raw Signature V4 REST with a business dataset lifecycle, Admin Operations, and Dashboard), bucket bootstrap, certificate helpers, failure drills, and the one-command `ceph-compose-validate-cluster` verification sequence are implemented and verified against the live local cluster with retained transcripts. Quantitative performance benchmarks and immutable verifier-image publication are deferred into the production track, which has not started (see [ceph_storage.md](docs/implementation/ceph_storage.md)). Third-party component runtimes follow their selected release's documented Java support matrix.
+The Ceph storage capability developer track is complete and was accepted on 2026-08-03. The Java 25 Ceph RGW storage conformance verifier, the Docker/Podman Compose cluster harness, the live JVM conformance suites (SDK S3, raw Signature V4 REST with a business dataset lifecycle, Admin Operations, and Dashboard), bucket bootstrap, certificate helpers, failure drills, and the one-command `ceph-compose-validate-cluster` verification sequence are implemented and verified against the live local cluster with retained transcripts. Quantitative performance benchmarks and immutable verifier-image publication are deferred into the production track, which has not started (see [ceph_storage.md](docs/implementation/ceph_storage.md)). Third-party component runtimes follow their selected release's documented Java support matrix.

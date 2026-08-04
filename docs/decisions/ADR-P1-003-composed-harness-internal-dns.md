@@ -10,7 +10,7 @@
 
 Increment 1 could be verified standalone: the Ceph Compose harness is
 self-contained. Every subsequent product is a consumer of at least one other
-running harness — Polaris's contract is "catalog over Ceph-backed Iceberg
+running harness — Polaris must prove "catalog over Ceph-backed Iceberg
 tables", Spark's is "writes Iceberg to Ceph via Polaris", and so on. The
 repository layout already fixes harness ownership (each product ships its own
 harness under `platform/<product>/`; `environments/` holds inventory and
@@ -36,8 +36,10 @@ exactly this path.
 Consumer harnesses attach to a provider harness's Docker network and address
 the provider by internal DNS through its TLS proxy.
 
-Each provider harness publishes an explicit **attachment contract**, documented
-in its component README. For the Ceph Compose harness the contract is:
+Each provider harness publishes the connection settings consumers may rely
+on — as a sourceable `connection.env` file in the harness directory,
+described in its component README. For the Ceph Compose harness the
+published values are:
 
 - network: `stratus-ceph-local_ceph` (subnet `172.28.0.0/24`)
 - endpoint: `https://object-store.stratus.local:8443` (S3) and `:8444`
@@ -45,7 +47,8 @@ in its component README. For the Ceph Compose harness the contract is:
 - trust material: the disposable CA certificate at
   `platform/ceph/compose-cluster/certs/stratus-ca.crt`, mounted read-only by
   consumers; private keys are never shared
-- The consumer depends only on this contract. Backend container names,
+- The consumer depends only on these published values and takes them by
+  sourcing `connection.env`, never by copying. Backend container names,
   internal addresses, and daemon topology remain private to the provider and
   may change without notice.
 
@@ -58,7 +61,7 @@ The published host endpoint option is rejected for container-to-container use:
 it routes service traffic through a host-gateway indirection that exists only
 on developer workstations, weakening fidelity to the production topology where
 services reach each other over a network by DNS name. Loopback publication is
-unaffected — it remains how workstation processes (the live Maven contracts, a
+unaffected — it remains how workstation processes (the live Maven conformance tests, a
 desktop S3 client) reach the harness.
 
 ## Consequences
@@ -68,11 +71,11 @@ desktop S3 client) reach the harness.
   containers resolve it through Docker DNS to the proxy. Product configuration
   templates need no per-context endpoint variants.
 - The network name, subnet, proxy aliases, and CA location are now published
-  contract values. Renaming any of them is a breaking change requiring a
-  coordinated update across consumer harnesses; the pool-overlap guard in
-  `ceph-compose-common.sh` already protects the subnet.
+  values consumers rely on. Renaming any of them is a breaking change
+  requiring a coordinated update across consumer harnesses; the pool-overlap
+  guard in `ceph-compose-common.sh` already protects the subnet.
 - Each new provider product (Polaris, Kafka, and so on) must publish its own
-  attachment contract in the same form before its first consumer appears.
+  `connection.env` in the same form before its first consumer appears.
 - Cross-product end-to-end suites exercising several attached harnesses belong
   in `testing/`, per the repository layout.
 - TLS is preserved end to end on the container path: consumers validate the

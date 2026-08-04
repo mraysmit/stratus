@@ -57,7 +57,7 @@ final class RepositoryLayoutTest {
         assertTrue(undocumented.isEmpty(), () ->
             "Tracked top-level directories missing from the layout table in " + LAYOUT_DOCUMENT
                 + ": " + undocumented + ". Either the content belongs inside an existing directory"
-                + " (product integration under platform/<product>/, contract suites under"
+                + " (product integration under platform/<product>/, conformance suites under"
                 + " verification/<capability>/), or the new directory needs a row in the table.");
     }
 

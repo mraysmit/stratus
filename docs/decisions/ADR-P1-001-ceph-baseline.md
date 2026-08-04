@@ -90,7 +90,7 @@ Re-open this decision when:
 - a newer approved Tentacle patch is selected
 - a security advisory requires an image change
 - Docker Desktop cannot run the pinned image on a supported developer architecture
-- RGW fails a required S3, policy, encryption, or verifier contract
+- RGW fails a required S3, policy, encryption, or verifier check
 - the production support or topology decision changes
 
 ## Authoritative references

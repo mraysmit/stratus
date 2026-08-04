@@ -16,10 +16,10 @@ runtime="$(compose_runtime)"
 ceph_image='quay.io/ceph/ceph:v20.2.2@sha256:6b4b5ae33acd3d736eb26d2a19238bce71a22f9cfb99cca887ba6312d0957644'
 fake_image='stratus/harness-check-vacuous-verifier'
 
-if [[ -n "$("$runtime" ps -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
+if [[ -n "$("$runtime" ps -q --filter "label=com.docker.compose.project=$CEPH_COMPOSE_PROJECT")" ]]; then
   fail "Stop the harness before running the self-test (scripts/lifecycle/ceph-compose-shutdown.sh)"
 fi
-if [[ -n "$("$runtime" volume ls -q --filter label=com.docker.compose.project=stratus-ceph-local)" ]]; then
+if [[ -n "$("$runtime" volume ls -q --filter "label=com.docker.compose.project=$CEPH_COMPOSE_PROJECT")" ]]; then
   fail "Cluster volumes exist and the self-test exercises destructive reset. Run scripts/lifecycle/ceph-compose-reset.sh --force first if losing them is intended."
 fi
 require_free_harness_subnet

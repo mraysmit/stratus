@@ -430,7 +430,7 @@ the local mapping once from this directory:
 
 This entry is **not only for the browser**. Everything that runs on the
 workstation rather than inside a container needs it, including the live Maven
-contract tests (`-Pceph-integration-tests` and `-Pall-tests`). Those tests reach
+conformance tests (`-Pceph-integration-tests` and `-Pall-tests`). Those tests reach
 RGW on port 8443 from the host JVM, so without this mapping they fail on
 connection rather than on Ceph behavior — even though the harness verification
 scripts, which run inside containers, pass. See
@@ -703,7 +703,7 @@ Expected result: HTTP `204`. A subsequent `GET` should return HTTP `404`.
 
 ### Configuration for another S3-compatible client
 
-Use this client contract in Cyberduck, S3 Browser, an SDK, or another tool that
+Use these client connection settings in Cyberduck, S3 Browser, an SDK, or another tool that
 supports custom S3 endpoints:
 
 | Setting | Stratus value |

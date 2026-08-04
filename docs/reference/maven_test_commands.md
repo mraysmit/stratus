@@ -55,7 +55,7 @@ CEPH_RGW_DENIED_BUCKET=stratus-denied
 S3_PATH_STYLE_ACCESS=true
 ```
 
-The REST API contracts (`CephS3RestContractTest`, `CephAdminOpsRestContractTest`, `CephDashboardRestContractTest`) additionally require:
+The REST API conformance tests (`CephS3RestConformanceTest`, `CephAdminOpsRestConformanceTest`, `CephDashboardRestConformanceTest`) additionally require:
 
 ```dotenv
 CEPH_ADMIN_OPS_ACCESS_KEY=<scoped Admin Operations reader access key>
@@ -65,7 +65,7 @@ CEPH_DASHBOARD_USER=<dashboard sign-in user>
 CEPH_DASHBOARD_PASSWORD=<matching password>
 ```
 
-The Admin Operations identity is scoped to `buckets=read` and `usage=read` caps and MUST NOT be granted `users` or `metadata` read caps, which would expose other identities' keys. See [platform/ceph/tests/README.md](../../platform/ceph/tests/README.md) for the full REST contract.
+The Admin Operations identity is scoped to `buckets=read` and `usage=read` caps and MUST NOT be granted `users` or `metadata` read caps, which would expose other identities' keys. See [platform/ceph/tests/README.md](../../platform/ceph/tests/README.md) for the full REST conformance test.
 
 The endpoint hostname must resolve on the machine executing Maven, and the endpoint CA must be trusted by the JVM executing Maven. Both are the caller's responsibility: these tests run in the Maven JVM on the workstation, not inside a container, so a Ceph harness whose own verification scripts pass from inside containers satisfies neither. For the Compose cluster this means a one-time hosts-file entry; see [platform/ceph/compose-cluster/README.md](../../platform/ceph/compose-cluster/README.md).
 
@@ -77,7 +77,7 @@ bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 ```
 
 To run the complete harness verification sequence — including the live Maven
-contracts — as one command with a per-step transcript, use
+conformance tests — as one command with a per-step transcript, use
 `verify/ceph-compose-validate-cluster.sh` (add `--full` to wrap the run in
 startup and shutdown).
 
@@ -117,7 +117,7 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
 
 ```powershell
 .\mvnw.cmd test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 |
-    Tee-Object -FilePath "logs\ceph-contract-$timestamp.txt"
+    Tee-Object -FilePath "logs\ceph-conformance-$timestamp.txt"
 ```
 
 ### Resume after a known reactor failure
@@ -173,7 +173,7 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
   | tee "logs/storage-verifier-unit-${timestamp}.txt"
 
 ./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 \
-  | tee "logs/ceph-contract-${timestamp}.txt"
+  | tee "logs/ceph-conformance-${timestamp}.txt"
 
 ./mvnw test -Puntagged-tests 2>&1 \
   | tee "logs/untagged-audit-${timestamp}.txt"
@@ -254,8 +254,8 @@ Expected output: none.
 - `stratus-storage-verifier` owns the executable verifier and its offline unit
   tests: pure logic and real environmental failures only.
 - `stratus-ceph-tests` under `platform/ceph/tests` owns
-  `CephRgwContractTest`, the implementation-neutral product-compatibility
-  boundary. It runs the full S3 contract, missing-bucket detection, both
+  `CephRgwConformanceTest`, the implementation-neutral product-compatibility
+  boundary. It runs the full S3 conformance, missing-bucket detection, both
   security negatives, consistency, pagination, multipart cleanup, evidence
   writing, and exit semantics against whichever live Ceph RGW implementation
   the environment supplies. It is not selected by the default local regression.
@@ -273,7 +273,7 @@ Expected output: none.
 - [ ] The saved Maven log contains no build, logging-binding, packaging, or test-fixture warnings.
 - [ ] INFO and DEBUG logging assertions passed.
 - [ ] The untagged audit executes zero tests after adding or moving test classes.
-- [ ] `-Pall-tests` passed when the change affects the live Ceph contract.
+- [ ] `-Pall-tests` passed when the change affects the live Ceph conformance suite.
 - [ ] No test was silently skipped by a selected profile.
 - [ ] No module POM contains a test-selection profile.
 - [ ] No child POM pins dependency or plugin versions.

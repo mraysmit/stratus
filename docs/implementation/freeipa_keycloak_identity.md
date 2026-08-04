@@ -760,7 +760,7 @@ Add to `pom.xml` if they are not already present:
 
 ### Verification test class
 
-Place in `verification/identity-contract/src/test/java/dev/stratus/verification/identity/IdentitySecurityVerificationTest.java`:
+Place in `verification/identity/src/test/java/dev/stratus/verification/identity/IdentitySecurityVerificationTest.java`:
 
 ```java
 package dev.stratus.verification.identity;

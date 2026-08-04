@@ -404,7 +404,7 @@ The verification suite reads all connection details from environment variables:
 
 ### Shared catalog client helper
 
-Place in `verification/catalog-contract/src/test/java/dev/stratus/verification/catalog/PolarisTestClient.java`:
+Place in `verification/catalog/src/test/java/dev/stratus/verification/catalog/PolarisTestClient.java`:
 
 ```java
 package dev.stratus.verification.catalog;
@@ -446,7 +446,7 @@ public class PolarisTestClient {
 
 ### Verification test class
 
-Place in `verification/catalog-contract/src/test/java/dev/stratus/verification/catalog/IcebergPolarisVerificationTest.java`:
+Place in `verification/catalog/src/test/java/dev/stratus/verification/catalog/IcebergPolarisVerificationTest.java`:
 
 ```java
 package dev.stratus.verification.catalog;
@@ -822,7 +822,7 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
 | `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. TLS for `polaris.stratus.local` remains open ahead of any shared or representative use; digest pin belongs to `P1-2.2-S1` | Verified |
-| `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches contract. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/config/`; `environments/developer/polaris/`; bootstrap module | Namespace/location inventory and access tests | D1 | Security owner | Credential leakage | Not started |
+| `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/config/`; `environments/developer/polaris/`; bootstrap module | Namespace/location inventory and access tests | D1 | Security owner | Credential leakage | Not started |
 | `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | None recorded | Not started |
 | `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `platform/polaris/database/`; `environments/production/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
 | `P1-2.2-P1` | `P1-2.2` | Production | Deploy redundant production Polaris services with trusted TLS, health routing, immutable image, and managed config. | Platform owner | `P1-2.1-P1` | `platform/polaris/`; `environments/production/polaris/` | Endpoint failover, config snapshot, digest check | P1-P5 | Operations owner | Load-balancer ownership | Not started |
@@ -836,7 +836,7 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 
 ### Developer gate
 
-- [ ] **D1** - Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier contracts pass.
+- [ ] **D1** - Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier conformance checks pass.
 - [ ] **D2** - H2, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
 
 ### Production gate

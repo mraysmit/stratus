@@ -98,7 +98,7 @@ of it, or exercise it as a client:
 | `rgw1`-`rgw2` | The two S3 gateways (see above) |
 | `rgw-proxy` | An nginx reverse proxy that provides the HTTPS endpoint `https://object-store.stratus.local:8443`: it holds the TLS certificate, decrypts incoming requests, and forwards them to whichever RGW is available. It also fronts the Ceph admin console (Ceph Dashboard) on port `8444`, forwarding to whichever manager is active |
 | `s3client` | A container with rclone, a command-line S3 client, used by the scripts to run bucket and object operations against the cluster |
-| `verifier` | The prebuilt Stratus Java verifier: runs the automated S3 contract checks against the cluster and writes the evidence reports |
+| `verifier` | The prebuilt Stratus Java verifier: runs the automated S3 conformance checks against the cluster and writes the evidence reports |
 | `verifier-untrusted` | The same verifier image but deliberately missing the Compose CA certificate — its only job is to prove that TLS connections are rejected when the server's certificate cannot be verified |
 
 Compose never builds the verifier or runs Maven. The build system produces the verifier image before it is deployed here.
@@ -141,7 +141,7 @@ Desktop using both supported Windows command surfaces:
 
 | Host command surface | Container runtime | Result | Scope exercised |
 |---|---|---|---|
-| PowerShell | Docker Desktop | Passed | startup, bucket bootstrap/check, Java contract, security negatives, failure drill, shutdown, reset, and harness self-test |
+| PowerShell | Docker Desktop | Passed | startup, bucket bootstrap/check, Java conformance suite, security negatives, failure drill, shutdown, reset, and harness self-test |
 | Git for Windows Bash | Docker Desktop | Passed | the same complete lifecycle, including destructive reset and shell self-test |
 
 The live Java report passed all twelve S3 checks. Invalid credentials,
@@ -201,7 +201,7 @@ The local CA, server certificate, and private key are generated into ignored `ce
 On Windows, certificate generation uses host OpenSSL when available and otherwise uses the already-pinned Ceph image. On Linux, install OpenSSL with `scripts/lifecycle/ceph-compose-install-prerequisites.sh` when necessary.
 
 `ceph-compose-verify-storage` also waits for the RGW hostname to resolve from a newly created
-verifier container before launching the contract. This closes the short Docker
+verifier container before launching the conformance run. This closes the short Docker
 DNS registration window that can occur immediately after creating the Compose
 network; an unresolved name after the bounded wait is treated as a real startup
 failure.
@@ -214,7 +214,7 @@ Client](CEPH_COMPOSE_CLUSTER_QUICK_START_GUIDE.md#appendix-b-optional-access-cep
 
 For a complete, self-contained guide to every test and validation process for
 this module — the static and JVM tests, this live harness, the live Maven
-contract test, and the harness self-test, each with how to run it, what it does,
+conformance test, and the harness self-test, each with how to run it, what it does,
 and the expected results — see the [Ceph Compose Cluster Testing and Validation
 Guide](ceph_compose_cluster_validation_and_test_approach.md).
 
@@ -251,11 +251,11 @@ In the order you meet them:
 | `verify/ceph-compose-verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
 | `verify/ceph-compose-verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
 | `verify/ceph-compose-verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
-| `verify/ceph-compose-run-live-tests` | Runs the live Maven contracts in [../tests](../tests/README.md) against this cluster, supplying the environment, the live opt-in switch, and a CA truststore the workstation JVM needs. Arguments pass through to Maven | Verifying Java changes against the live cluster |
+| `verify/ceph-compose-run-live-tests` | Runs the live Maven conformance tests in [../tests](../tests/README.md) against this cluster, supplying the environment, the live opt-in switch, and a CA truststore the workstation JVM needs. Arguments pass through to Maven | Verifying Java changes against the live cluster |
 | `verify/ceph-compose-validate-cluster` | Runs the whole verification sequence above in order — `bootstrap-buckets` through `run-live-tests` — with per-step results and a timestamped transcript in `logs/`. With `--full` it also wraps the run in `startup` and `shutdown`; after any failed step the cluster is left running for diagnosis | One-command comprehensive validation |
 | `lifecycle/ceph-compose-shutdown` | Removes containers and the network; preserves cluster volumes for restart | Last, every session |
 | `lifecycle/ceph-compose-reset` | Destroys the cluster volumes for a fresh cluster next startup; prompts unless forced | When you want a clean slate |
-| `verify/ceph-compose-failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 contract continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
+| `verify/ceph-compose-failure-drill` | Stops real daemons (an RGW, a monitor, an OSD) one at a time, proves the S3 conformance continues through each outage, and requires recovery to `HEALTH_OK` with all placement groups `active+clean` (see "Failure drills") | After changes affecting resilience; cluster must be running |
 | `verify/ceph-compose-verify-harness` | Verifies the harness scripts' own runtime behavior (see "Harness self-test") | After changing the scripts |
 | `lib/ceph-compose-generate-certificates` | Creates or renews the disposable Compose CA and server certificate | Called by startup; rarely run directly |
 | `lib/ceph-compose-common` | Shared helpers sourced by the other scripts | Never directly |
@@ -278,7 +278,7 @@ Windows):
 
 `shutdown` removes containers and the project network but preserves Ceph volumes so the environment can restart.
 
-The same sequence — plus the live Maven contracts — runs as one command that
+The same sequence — plus the live Maven conformance tests — runs as one command that
 writes its own transcript to `logs/validate-cluster-<timestamp>.txt`:
 
 ```bash
@@ -287,12 +287,12 @@ writes its own transcript to `logs/validate-cluster-<timestamp>.txt`:
 
 Without `--full` it validates an already-running cluster and leaves it up.
 
-## Attachment contract
+## Connection settings for other harnesses
 
 Other product harnesses compose with this cluster over internal DNS
 (ADR-P1-003): a consumer joins this harness's Docker network and addresses RGW
-through the TLS proxy, never a backend daemon directly. The published contract
-is:
+through the TLS proxy, never a backend daemon directly. The published values
+are:
 
 | Value | Meaning |
 |---|---|
@@ -300,6 +300,13 @@ is:
 | `https://object-store.stratus.local:8443` | S3 endpoint; resolves via Docker DNS to the TLS proxy inside the network, and via the hosts file to loopback on the workstation |
 | `https://object-store.stratus.local:8444` | Ceph Dashboard endpoint, same resolution behavior |
 | `certs/stratus-ca.crt` | Disposable CA certificate, mounted read-only by consumers; private keys are never shared |
+
+These values live in [`connection.env`](connection.env). Consumer harness
+scripts source that file and must never copy its values into their own
+scripts, Compose files, or templates — each consumer hardcodes exactly one
+value (this harness's repository path) and takes everything else from the
+file. The guardrails in `platform/ceph/tests` enforce agreement between
+`connection.env`, `compose.yaml`, and the harness scripts.
 
 Everything else — backend container names, internal addresses, daemon
 topology — is private to this harness and may change without notice. Consumer
@@ -362,11 +369,11 @@ and healthy, the drill executes three scenarios in sequence, each bracketed by
 1. **RGW failover** — stops `rgw1`; the bucket smoke check must pass through
    the surviving gateway behind the TLS proxy.
 2. **Monitor quorum loss** — stops `mon3`; asserts a two-monitor quorum forms
-   and the S3 contract still passes; restores and waits for a three-monitor
+   and the S3 conformance still passes; restores and waits for a three-monitor
    quorum.
 3. **OSD degraded writes and recovery** — stops `osd1`; asserts the cluster
    reports two OSDs up, runs the bucket check *and* the full Java verifier
-   contract against the degraded cluster, restarts the OSD, and waits (up to
+   conformance suite against the degraded cluster, restarts the OSD, and waits (up to
    ten minutes) for every placement group to return to `active+clean`.
 
 Each scenario ends with a recovery gate: the drill fails unless the cluster
@@ -423,7 +430,7 @@ To open it from the host machine:
    to overwrite a conflicting mapping. Verify it later with the same command
    plus `--check`.
 
-   The same entry is required by the live Maven contract tests in
+   The same entry is required by the live Maven conformance tests in
    [../tests](../tests/README.md), which run on the workstation JVM rather than
    inside a container. The harness verification scripts run inside containers
    and resolve the name through Compose DNS, so they pass whether or not this
@@ -457,8 +464,8 @@ grace period before the standby takes over).
 The dashboard is a convenience for local development. Its account has
 administrator rights, so it can change the cluster — acceptable here because
 the whole environment is disposable, but keep in mind that anything it
-changes is invisible to the scripts. It is not part of the verification
-contract: scripted checks and recorded evidence always come from the CLI,
+changes is invisible to the scripts. It plays no part in verification:
+scripted checks and recorded evidence always come from the CLI,
 the verifier, and the transcripts.
 
 ## Direct inspection

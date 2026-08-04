@@ -4,7 +4,7 @@ set -euo pipefail
 # Date: 2026-07-22
 source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
-# Read-only liveness check of the bucket contract over the live S3 endpoint.
+# Read-only liveness check of the bucket requirements over the live S3 endpoint.
 # Safe to run repeatedly, including during failure drills while daemons are
 # deliberately down. Listing output is discarded: the assertion is that the
 # authenticated, TLS-verified request succeeds, not what the bucket contains.

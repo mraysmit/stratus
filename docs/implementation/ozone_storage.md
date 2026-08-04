@@ -510,7 +510,7 @@ The suite must verify:
 The test class should be product-neutral and named:
 
 ```text
-platform/ceph/tests/src/test/java/dev/stratus/platform/ceph/CephRgwContractTest.java
+platform/ceph/tests/src/test/java/dev/stratus/platform/ceph/CephRgwConformanceTest.java
 ```
 
 ### Running the suite

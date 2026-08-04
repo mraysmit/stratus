@@ -31,7 +31,7 @@ import java.util.concurrent.Executors;
  */
 public final class StorageVerifier {
     static final String CONTRACT_DESCRIPTION =
-            "Stratus storage contract verification evidence: success=true means every S3 contract check against Ceph RGW passed";
+            "Stratus storage conformance verification evidence: success=true means every S3 conformance check against Ceph RGW passed";
 
     // ISO-8601 timestamp with offset, single line per record: the standard JUL
     // SimpleFormatter format property, applied before any formatter exists.
@@ -95,7 +95,7 @@ public final class StorageVerifier {
 
     public VerificationReport verify(Set<String> requiredBuckets, String probeBucket) {
         var timestamp = Instant.now(clock);
-        LOGGER.info(() -> "Starting storage contract verification against probe bucket " + probeBucket);
+        LOGGER.info(() -> "Starting storage conformance verification against probe bucket " + probeBucket);
         LOGGER.fine(() -> "Required buckets: " + requiredBuckets.stream().sorted().toList());
         var checks = new ArrayList<VerificationCheck>();
         try {
@@ -211,16 +211,16 @@ public final class StorageVerifier {
                 : new VerificationCheck("probe-cleanup", false, String.join("; ", cleanupFailures)));
         var report = new VerificationReport(CONTRACT_DESCRIPTION, timestamp,
                 checks.stream().allMatch(VerificationCheck::passed), checks);
-        LOGGER.info(() -> "Storage contract verification completed with success=" + report.success());
+        LOGGER.info(() -> "Storage conformance verification completed with success=" + report.success());
         return report;
     }
 
     private static void runCheck(ArrayList<VerificationCheck> checks, String name, String successDetail, Runnable action) {
-        LOGGER.fine(() -> "Starting storage contract check " + name);
+        LOGGER.fine(() -> "Starting storage conformance check " + name);
         try {
             action.run();
             checks.add(VerificationCheck.passed(name, successDetail));
-            LOGGER.fine(() -> "Storage contract check " + name + " passed");
+            LOGGER.fine(() -> "Storage conformance check " + name + " passed");
         } catch (RuntimeException exception) {
             recordFailure(checks, name, exception);
         }
@@ -228,7 +228,7 @@ public final class StorageVerifier {
 
     private static void recordFailure(ArrayList<VerificationCheck> checks, String name, RuntimeException exception) {
         checks.add(VerificationCheck.failed(name, exception));
-        LOGGER.log(Level.WARNING, "Storage contract check " + name + " failed: "
+        LOGGER.log(Level.WARNING, "Storage conformance check " + name + " failed: "
                 + VerificationCheck.describe(exception), exception);
     }
 

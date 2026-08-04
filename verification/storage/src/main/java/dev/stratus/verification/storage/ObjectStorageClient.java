@@ -6,7 +6,7 @@ package dev.stratus.verification.storage;
 import java.util.Set;
 
 /**
- * Interface defining contracts for ObjectStorageClient functionality.
+ * Interface defining the object-storage operations the verifier exercises.
  *
  * This interface is part of the Stratus on-premises data fabric platform.
  *
