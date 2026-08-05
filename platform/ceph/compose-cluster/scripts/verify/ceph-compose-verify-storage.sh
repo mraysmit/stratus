@@ -11,6 +11,37 @@ source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 # run can never be mistaken for it.
 
 load_environment
+
+# The verifier runs from a prebuilt image; this script must never build one
+# (P1-0.1). That leaves a hole on the developer track, where the image is a
+# hand-built tag: it can silently fall behind the sources it is supposed to
+# prove, and a green run then attests to code nobody is running. Found on
+# 2026-08-05 with a stratus/storage-verifier:dev image 16 days older than the
+# verifier sources. Detect it and stop; rebuilding stays the operator's step.
+#
+# Only applies when the sources are present and the image carries no digest.
+# A digest-pinned image published by the build system is immutable and
+# authoritative, and a verification host legitimately has no source tree.
+assert_verifier_image_not_stale() {
+  local sources="$REPO_DIR/verification/storage"
+  [[ -d "$sources/src/main" ]] || return 0
+  [[ "${VERIFIER_IMAGE:-}" != *@sha256:* ]] || return 0
+  local created marker newer
+  created="$("$(compose_runtime)" image inspect --format '{{.Created}}' "$VERIFIER_IMAGE" 2>/dev/null)" || return 0
+  [[ -n "$created" ]] || return 0
+  marker="$(mktemp)"
+  if ! touch -d "$created" "$marker" 2>/dev/null; then
+    rm -f "$marker"
+    return 0
+  fi
+  newer="$(find "$sources/src/main" "$sources/pom.xml" -newer "$marker" -print -quit 2>/dev/null || true)"
+  rm -f "$marker"
+  [[ -z "$newer" ]] || fail "$VERIFIER_IMAGE was built $created, which is older than $newer. The verification would attest to superseded code. Rebuild it:
+  ./mvnw -pl :stratus-storage-verifier -am package
+  $(compose_runtime) build -f verification/storage/image/Dockerfile -t $VERIFIER_IMAGE ."
+}
+assert_verifier_image_not_stale
+
 mkdir -p "$HARNESS_DIR/evidence"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence="$HARNESS_DIR/evidence/storage-verification-${timestamp}.json"
