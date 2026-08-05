@@ -11,15 +11,25 @@ source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 # dashboard credentials and the CA travel over stdin: they must never appear
 # on a command line, in the process table, or in the evidence.
 #
-# Six checks: authentication issues a token, an unauthenticated request is
+# Seven checks: authentication issues a token, an unauthenticated request is
 # rejected with 401 (real product behavior, not a simulation), cluster health
 # is HEALTH_OK, the daemon inventory matches the Compose topology, the
-# reported version identifies Ceph, and logout revokes the session.
+# reported version identifies Ceph, the dashboard's own RGW identity can write,
+# and logout revokes the session.
+#
+# The RGW write check exists because login and listing are not evidence that
+# the dashboard's RGW integration works. A dashboard whose RGW client can no
+# longer write still authenticates operators and still lists buckets, while
+# every write answers 403 — observed after secret rotation on 2026-08-05, where
+# the live conformance suite failed on exactly this while the read-only checks
+# here all passed. A read-only check reports a healthy dashboard over a broken
+# one, so the write path has to be exercised.
 
 load_environment
 : "${CEPH_DASHBOARD_USER:?CEPH_DASHBOARD_USER is required; run ceph-compose-startup.sh to generate it}"
 : "${CEPH_DASHBOARD_PASSWORD:?CEPH_DASHBOARD_PASSWORD is required; run ceph-compose-startup.sh to generate it}"
 : "${CEPH_DASHBOARD_ENDPOINT:?CEPH_DASHBOARD_ENDPOINT is required; update .env from .env.template}"
+: "${CEPH_DEMO_UID:?CEPH_DEMO_UID is required; it owns the bucket the RGW write check creates}"
 
 evidence_dir="${HARNESS_DIR}/evidence"
 mkdir -p "$evidence_dir"
@@ -30,11 +40,12 @@ log "Verifying the Ceph Dashboard REST API at $CEPH_DASHBOARD_ENDPOINT from insi
 
 set +e
 {
-  printf '%s\n%s\n%s\n' "$CEPH_DASHBOARD_USER" "$CEPH_DASHBOARD_PASSWORD" "$CEPH_DASHBOARD_ENDPOINT"
+  printf '%s\n%s\n%s\n%s\n' "$CEPH_DASHBOARD_USER" "$CEPH_DASHBOARD_PASSWORD" \
+    "$CEPH_DASHBOARD_ENDPOINT" "$CEPH_DEMO_UID"
   cat "$HARNESS_DIR/certs/stratus-ca.crt"
 } | compose exec -T mon1 bash -c '
 set -euo pipefail
-IFS= read -r user; IFS= read -r pass; IFS= read -r base
+IFS= read -r user; IFS= read -r pass; IFS= read -r base; IFS= read -r uid
 work=$(mktemp -d); trap "rm -rf $work" EXIT
 cat > "$work/ca.crt"
 
@@ -58,8 +69,9 @@ unauth_pass=false
 [ "$unauth_code" = 401 ] && unauth_pass=true
 echo "unauthenticated request: http=$unauth_code (401 expected)" >&2
 
-# Checks 3-5 need the token; they report unavailable when authentication failed.
+# Checks 3-6 need the token; they report unavailable when authentication failed.
 health_status=unavailable; mon_count=0; osd_up_in=0; version=unavailable; logout_code=000
+rgw_write_pass=false; rgw_write_detail="not attempted: authentication failed"
 if $auth_pass; then
   if curl -sS --cacert "$work/ca.crt" -H "$accept" -H "Authorization: Bearer $token" \
        -o "$work/health.json" "$base/api/health/minimal"; then
@@ -69,11 +81,55 @@ if $auth_pass; then
   fi
   version=$(curl -sS --cacert "$work/ca.crt" -H "$accept" -H "Authorization: Bearer $token" \
     "$base/api/summary" | jq -r ".version // \"unavailable\"")
-  # Check 6: logout must revoke the session we created (cleanup is asserted).
-  # The empty --data body makes curl send Content-Length: 0, which the
-  # dashboard requires on POST (it answers 411 otherwise).
+
+  # Check 6: the dashboard RGW identity must complete a real write. The bucket
+  # is created and removed again, so the check leaves no residue on the cluster.
+  #
+  # Retried to a deadline rather than asserted on one attempt. Once the S3 keys
+  # of the owning user are rotated, RGW answers 403 AccessDenied on writes for
+  # that owner until the change propagates; measured at roughly 90 seconds on
+  # 2026-08-05, after which it clears with no intervention. The deadline is set
+  # well clear of that so the check reports the settled state rather than the
+  # transient, while a dashboard that genuinely cannot manage RGW, which never
+  # clears, still fails.
+  #
+  # This runs inside a single-quoted bash -c block: no apostrophe may appear
+  # anywhere in it, comments included, because one silently ends the quoted
+  # string and hands the rest of the script to the outer shell.
+  rgw_bucket="stratus-dashboard-verify-$(date -u +%s)-$$"
+  rgw_timeout=300
+  rgw_deadline=$(( SECONDS + rgw_timeout ))
+  rgw_attempts=0
+  while :; do
+    rgw_attempts=$(( rgw_attempts + 1 ))
+    rgw_create=$(curl -sS --cacert "$work/ca.crt" -o "$work/rgw-create.json" -w "%{http_code}" \
+      -H "$accept" -H "Content-Type: application/json" -H "Authorization: Bearer $token" \
+      -X POST --data "{\"bucket\": \"$rgw_bucket\", \"uid\": \"$uid\"}" \
+      "$base/api/rgw/bucket" || printf 000)
+    [ "$rgw_create" = 201 ] && break
+    [ "$SECONDS" -ge "$rgw_deadline" ] && break
+    sleep 3
+  done
+  if [ "$rgw_create" = 201 ]; then
+    rgw_delete=$(curl -sS --cacert "$work/ca.crt" -o /dev/null -w "%{http_code}" \
+      -H "$accept" -H "Authorization: Bearer $token" \
+      -X DELETE "$base/api/rgw/bucket/$rgw_bucket" || printf 000)
+    [ "$rgw_delete" = 204 ] && rgw_write_pass=true
+    rgw_write_detail="POST /api/rgw/bucket answered HTTP $rgw_create after $rgw_attempts attempt(s) and DELETE answered HTTP $rgw_delete"
+  else
+    rgw_write_detail="POST /api/rgw/bucket still answered HTTP $rgw_create after $rgw_attempts attempt(s) over ${rgw_timeout}s; the dashboard cannot manage RGW (detail: $(head -c 200 "$work/rgw-create.json" 2>/dev/null))"
+  fi
+  echo "dashboard RGW write: $rgw_write_detail" >&2
+
+  # Check 7: logout must revoke the session we created (cleanup is asserted).
+  # Logout takes no parameters but is still a JSON POST, and the dashboard is
+  # strict about the envelope: an absent body answers 411, an empty string 400,
+  # and a body without a content type 415. The only accepted form is an empty
+  # JSON document with the JSON content type, which is what
+  # CephDashboardRestConformanceTest sends.
   logout_code=$(curl -sS --cacert "$work/ca.crt" -o /dev/null -w "%{http_code}" \
-    -H "$accept" -H "Authorization: Bearer $token" -X POST --data "" "$base/api/auth/logout" || printf 000)
+    -H "$accept" -H "Content-Type: application/json" -H "Authorization: Bearer $token" \
+    -X POST --data "{}" "$base/api/auth/logout" || printf 000)
 fi
 health_pass=false; [ "$health_status" = HEALTH_OK ] && health_pass=true
 inventory_pass=false; [ "$mon_count" = 3 ] && [ "$osd_up_in" = 3 ] && inventory_pass=true
@@ -84,7 +140,8 @@ echo "reported version: $version" >&2
 echo "session logout: http=$logout_code" >&2
 
 overall=false
-$auth_pass && $unauth_pass && $health_pass && $inventory_pass && $version_pass && $logout_pass && overall=true
+$auth_pass && $unauth_pass && $health_pass && $inventory_pass && $version_pass \
+  && $rgw_write_pass && $logout_pass && overall=true
 
 jq -n \
   --arg ts "$started" \
@@ -94,6 +151,7 @@ jq -n \
   --argjson health "$health_pass" --arg health_status "$health_status" \
   --argjson inventory "$inventory_pass" --arg mons "$mon_count" --arg osds "$osd_up_in" \
   --argjson ver "$version_pass" --arg version "$version" \
+  --argjson rgw_write "$rgw_write_pass" --arg rgw_write_detail "$rgw_write_detail" \
   --argjson logout "$logout_pass" --arg logout_code "$logout_code" \
   "{
     description: \"Stratus Ceph Dashboard REST API verification evidence: success=true means every management API check against the live cluster passed\",
@@ -105,6 +163,7 @@ jq -n \
       {name: \"cluster-health\", passed: \$health, detail: (\"GET /api/health/minimal reported \" + \$health_status)},
       {name: \"daemon-inventory\", passed: \$inventory, detail: (\$mons + \" monitors in the map and \" + \$osds + \" OSDs up and in\")},
       {name: \"reported-version\", passed: \$ver, detail: (\"GET /api/summary reported \" + \$version)},
+      {name: \"rgw-write-through-dashboard\", passed: \$rgw_write, detail: \$rgw_write_detail},
       {name: \"session-logout\", passed: \$logout, detail: (\"POST /api/auth/logout answered HTTP \" + \$logout_code)}
     ]
   }"
