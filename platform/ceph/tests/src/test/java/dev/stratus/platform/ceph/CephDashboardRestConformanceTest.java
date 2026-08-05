@@ -145,18 +145,27 @@ final class CephDashboardRestConformanceTest {
         String bucket = "stratus-dashboard-probe-" + java.util.UUID.randomUUID().toString().substring(0, 8);
         HttpResponse<String> created = send("POST", "/api/rgw/bucket",
             "{\"bucket\":\"" + bucket + "\",\"uid\":\"" + ownerUid + "\"}");
-        try {
-            assertEquals(201, created.statusCode(), () -> rgwFailure("bucket creation", created));
+        // Asserted before the try: a creation that did not answer 201 left
+        // nothing to clean up, so the test reports the call that actually
+        // failed. No assertion below may move into a finally block — a failing
+        // cleanup assertion replaces the real one and sends the reader after
+        // the wrong call.
+        assertEquals(201, created.statusCode(), () -> rgwFailure("bucket creation", created));
 
+        HttpResponse<String> deleted;
+        try {
             HttpResponse<String> read = send("GET", "/api/rgw/bucket/" + bucket, null);
             assertEquals(200, read.statusCode(), () -> rgwFailure("bucket read-back", read));
             Map<?, ?> detail = asMap(new Yaml().load(read.body()));
             assertEquals(bucket, detail.get("bucket"), () -> "unexpected bucket in the response: " + detail);
             assertEquals(ownerUid, detail.get("owner"), () -> "unexpected owner in the response: " + detail);
         } finally {
-            HttpResponse<String> deleted = send("DELETE", "/api/rgw/bucket/" + bucket, null);
-            assertEquals(204, deleted.statusCode(), () -> rgwFailure("bucket deletion", deleted));
+            // Cleanup only. The bucket is removed even when a check above
+            // failed, and the deletion contract is asserted after the try so it
+            // can never mask that failure.
+            deleted = send("DELETE", "/api/rgw/bucket/" + bucket, null);
         }
+        assertEquals(204, deleted.statusCode(), () -> rgwFailure("bucket deletion", deleted));
 
         // Deletion is asserted through the listing rather than by reading the
         // deleted bucket back. Reading one is not a stable signal: observed runs

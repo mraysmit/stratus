@@ -3,6 +3,7 @@
 
 package dev.stratus.testing.guardrails;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -66,6 +67,28 @@ final class Repo {
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read " + file, e);
         }
+    }
+
+    /** The Bash the harness scripts are written for; on Windows that is Git for Windows Bash. */
+    static String bashExecutable() {
+        if (!System.getProperty("os.name").toLowerCase().contains("win")) {
+            return "bash";
+        }
+        Path programFiles = Path.of(System.getenv().getOrDefault("ProgramFiles", "C:\\Program Files"));
+        Path gitBash = programFiles.resolve(Path.of("Git", "bin", "bash.exe"));
+        if (Files.isExecutable(gitBash)) {
+            return gitBash.toString();
+        }
+        for (String entry : System.getenv().getOrDefault("PATH", "").split(File.pathSeparator)) {
+            Path directory = Path.of(entry);
+            for (Path candidate : List.of(directory.resolve("bash.exe"),
+                    directory.resolveSibling("bin").resolve("bash.exe"))) {
+                if (Files.isExecutable(candidate)) {
+                    return candidate.toString();
+                }
+            }
+        }
+        throw new IllegalStateException("Git for Windows Bash is required to test the harness scripts");
     }
 
     /** File content, or null when the file is binary (contains a NUL byte). */
