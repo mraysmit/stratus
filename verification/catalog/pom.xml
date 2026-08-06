@@ -46,6 +46,13 @@
             <artifactId>iceberg-aws-bundle</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Required by Iceberg's Parquet$WriteBuilder constructor itself
+             (verified 2026-08-06: removing the pair fails every write with
+             NoClassDefFoundError at Parquet.java:182, before codec or
+             compression settings are reached). Not removable at this layer:
+             apache/iceberg#10180 (write path without Hadoop Configuration)
+             is closed as not planned, and the codec-layer coupling
+             apache/parquet-java#2818 is open with no fix version. -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client-api</artifactId>

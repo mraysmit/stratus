@@ -51,6 +51,11 @@ final class RestCatalogPropertiesTest {
         assertEquals("true", properties.get("s3.path-style-access"));
         assertEquals("none", properties.get("header.X-Iceberg-Access-Delegation"),
                 "the verifier supplies its own storage credentials and must decline vended-credential delegation");
+        assertEquals("oauth2", properties.get("rest.auth.type"),
+                "the auth type must be explicit; relying on inference logs a warning on every connection");
+        assertEquals("https://polaris.stratus.local:8181/api/catalog/v1/oauth/tokens",
+                properties.get("oauth2-server-uri"),
+                "the token endpoint must be explicit; Iceberg's automatic fallback is deprecated for removal");
     }
 
     @Test

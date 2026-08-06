@@ -121,6 +121,83 @@ final class CatalogVerificationLoggingTest {
     }
 
     @Test
+    void tableDefinitionRecordsIdentifyTheValidatedAspectAtInfo() {
+        CatalogVerificationLogging.configure("INFO");
+
+        CatalogVerificationLogging.tableDefinitionValidated("platform.quality_check_results",
+                "partitioning", "[zone, checked_at_day]");
+
+        assertEquals(1, capture.records.size(), "the definition record is a single INFO line");
+        assertTrue(capturedText().contains("Table definition validated"
+                + " table=platform.quality_check_results aspect=partitioning detail=[zone, checked_at_day]"));
+    }
+
+    @Test
+    void tableAttributeRecordsCarryTheFullSchemaAndPropertiesAtDebug() {
+        CatalogVerificationLogging.configure("DEBUG");
+
+        CatalogVerificationLogging.tableAttributesInspected(
+                "platform.quality_check_results",
+                "s3://stratus-platform/platform/quality_check_results",
+                42L,
+                List.of("run_id string required", "checked_at timestamp required"),
+                "[zone identity, checked_at_day day]",
+                Map.of("stratus.append-only", "true"));
+
+        String text = capturedText();
+        assertTrue(text.contains("Table attributes inspected table=platform.quality_check_results"
+                        + " currentSnapshotId=42 columnCount=2"),
+                "INFO must carry the stable identifiers and counts");
+        assertTrue(text.contains("partitionSpec=[zone identity, checked_at_day day]"));
+        assertTrue(text.contains("columns=[run_id string required, checked_at timestamp required]"),
+                "DEBUG must carry the full column list");
+        assertTrue(text.contains("properties={stratus.append-only=true}"),
+                "DEBUG must carry the table properties");
+        assertTrue(text.contains("location=s3://stratus-platform/platform/quality_check_results"));
+    }
+
+    @Test
+    void tableAttributeDebugDetailIsSuppressedAtInfo() {
+        CatalogVerificationLogging.configure("INFO");
+
+        CatalogVerificationLogging.tableAttributesInspected("platform.t", "s3://x", null,
+                List.of("id long required"), "[]", Map.of());
+
+        assertEquals(1, capture.records.size(), "INFO configuration must suppress the DEBUG detail");
+        assertTrue(capturedText().contains("currentSnapshotId=none"));
+    }
+
+    @Test
+    void rendersDiagnosticRecordsWithTheDebugLevelNameNotTheJulName() {
+        var formatter = new CatalogVerificationLogging.OperationalLevelFormatter();
+
+        var diagnostic = new LogRecord(Level.FINE, "Table lifecycle detail action=x");
+        diagnostic.setLoggerName(CatalogVerificationLogging.LOGGER_NAME);
+        var operational = new LogRecord(Level.INFO, "Table lifecycle action=x");
+        operational.setLoggerName(CatalogVerificationLogging.LOGGER_NAME);
+
+        assertTrue(formatter.format(diagnostic).contains(" DEBUG "),
+                "operators configure DEBUG, so transcripts must say DEBUG, not JUL's FINE");
+        assertFalse(formatter.format(diagnostic).contains("FINE"),
+                "the JUL level name must not leak into the rendered line");
+        assertTrue(formatter.format(operational).contains(" INFO "));
+    }
+
+    @Test
+    void rendersARecordThrowableSoFailureContextIsNotLost() {
+        var formatter = new CatalogVerificationLogging.OperationalLevelFormatter();
+        var failing = new LogRecord(Level.INFO, "Cleanup reported a failure");
+        failing.setLoggerName(CatalogVerificationLogging.LOGGER_NAME);
+        failing.setThrown(new IllegalStateException("probe-cleanup-detail"));
+
+        String rendered = formatter.format(failing);
+        assertTrue(rendered.contains("IllegalStateException"),
+                "a record's attached exception must render");
+        assertTrue(rendered.contains("probe-cleanup-detail"),
+                "the exception message must render");
+    }
+
+    @Test
     void rejectsAnUnknownConfiguredLevel() {
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                 () -> CatalogVerificationLogging.configure("TRACE"));

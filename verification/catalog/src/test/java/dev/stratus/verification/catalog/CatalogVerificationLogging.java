@@ -3,10 +3,19 @@
 
 package dev.stratus.verification.catalog;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.logging.Formatter;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,11 +36,6 @@ import org.slf4j.LoggerFactory;
 final class CatalogVerificationLogging {
 
     static final String LOGGER_NAME = "dev.stratus.verification.catalog";
-    private static final String LOG_FORMAT = "%1$tFT%1$tT.%1$tL%1$tz %4$s %2$s %5$s%6$s%n";
-
-    static {
-        System.setProperty("java.util.logging.SimpleFormatter.format", LOG_FORMAT);
-    }
 
     private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(LOGGER_NAME);
 
@@ -66,6 +70,29 @@ final class CatalogVerificationLogging {
                 snapshotId == null ? "none" : snapshotId);
     }
 
+    /**
+     * Records the deployed table's own attributes: INFO carries the stable
+     * identifiers and counts; DEBUG carries the full column list, table
+     * properties, and storage location. Table metadata is catalog content,
+     * not secret material, so it may cross this boundary in full.
+     */
+    static void tableAttributesInspected(String table, String location, Long currentSnapshotId,
+                                         List<String> columns, String partitionSpec,
+                                         Map<String, String> properties) {
+        LOGGER.info("Table attributes inspected table={} currentSnapshotId={} columnCount={} partitionSpec={}",
+                safeToken(table), currentSnapshotId == null ? "none" : currentSnapshotId,
+                columns.size(), safeToken(partitionSpec));
+        LOGGER.debug("Table attributes detail table={} location={} columns={} properties={}",
+                safeToken(table), safeToken(location),
+                safeToken(columns.toString(), 1024),
+                safeToken(new TreeMap<>(properties).toString(), 1024));
+    }
+
+    static void tableDefinitionValidated(String table, String aspect, String detail) {
+        LOGGER.info("Table definition validated table={} aspect={} detail={}",
+                safeToken(table), safeToken(aspect), safeToken(detail));
+    }
+
     static void negativeConfirmed(String check, String detail) {
         LOGGER.info("Negative check confirmed check={} detail={}", safeToken(check), safeToken(detail));
     }
@@ -79,6 +106,36 @@ final class CatalogVerificationLogging {
         Logger.getLogger(LOGGER_NAME).setLevel(level);
         for (var handler : Logger.getLogger("").getHandlers()) {
             handler.setLevel(level);
+            handler.setFormatter(new OperationalLevelFormatter());
+        }
+    }
+
+    /**
+     * Renders console records in the operational level vocabulary: the JDK
+     * backend names the diagnostic level FINE, but operators configure
+     * DEBUG, so transcripts say DEBUG. One line per record with a UTC
+     * timestamp; an attached exception renders in full so failure context
+     * is never lost.
+     */
+    static final class OperationalLevelFormatter extends Formatter {
+
+        @Override
+        public String format(LogRecord logRecord) {
+            String level = Level.FINE.equals(logRecord.getLevel())
+                    ? "DEBUG" : logRecord.getLevel().getName();
+            var line = new StringBuilder()
+                    .append(DateTimeFormatter.ISO_INSTANT.format(
+                            logRecord.getInstant().truncatedTo(ChronoUnit.MILLIS)))
+                    .append(' ').append(level)
+                    .append(' ').append(logRecord.getLoggerName())
+                    .append(' ').append(formatMessage(logRecord))
+                    .append(System.lineSeparator());
+            if (logRecord.getThrown() != null) {
+                var stackTrace = new StringWriter();
+                logRecord.getThrown().printStackTrace(new PrintWriter(stackTrace));
+                line.append(stackTrace);
+            }
+            return line.toString();
         }
     }
 
@@ -99,7 +156,11 @@ final class CatalogVerificationLogging {
     }
 
     private static String safeToken(String value) {
+        return safeToken(value, 256);
+    }
+
+    private static String safeToken(String value, int maxLength) {
         String singleLine = value.replace('\r', '_').replace('\n', '_').replace('\t', '_');
-        return singleLine.length() <= 256 ? singleLine : singleLine.substring(0, 256);
+        return singleLine.length() <= maxLength ? singleLine : singleLine.substring(0, maxLength);
     }
 }

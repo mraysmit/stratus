@@ -75,6 +75,12 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
+                                        <!-- An uber jar is not a JPMS module; the
+                                             slf4j-api and slf4j-jdk14 multi-release
+                                             descriptors otherwise overlap and the
+                                             shade build warns on every package. -->
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/versions/*/module-info.class</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

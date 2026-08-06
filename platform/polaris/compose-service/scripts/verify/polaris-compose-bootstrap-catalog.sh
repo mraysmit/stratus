@@ -5,11 +5,16 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/polaris-compose-common.sh"
 
 # Bootstraps the Stratus catalog structure in a running Polaris service
-# (Increment 2, P1-2.3): the "stratus" catalog bound to the five Ceph
-# buckets through the svc-polaris identity, and the bronze, silver, gold,
-# and platform namespaces. Idempotent: existing catalog and namespaces are
-# left untouched. Ends with a positive listing check and a negative
-# invalid-token check.
+# (Increment 2, P1-2.3/P1-2.4): the "stratus" catalog bound to the five
+# Ceph buckets through the svc-polaris identity, the bronze, silver, gold,
+# and platform namespaces, and the permanent platform.quality_check_results
+# table (architecture §5.3). Idempotent: existing catalog, namespaces, and
+# table are left untouched. Ends with positive listing checks and a
+# negative invalid-token check.
+#
+# The table is provisioned here, not by a one-off client run, because the
+# developer harness's Polaris 1.5.0 in-memory metastore loses all catalog
+# state on restart; this script is the re-runnable provisioning path.
 
 load_environment
 
@@ -105,6 +110,64 @@ for zone in bronze silver gold platform; do
 done
 rm -f /tmp/polaris-ns-response.json
 
+# platform.quality_check_results (P1-2.4): the permanent quality result
+# store from architecture §5.3 — fourteen columns, partitioned by zone and
+# by checked_at day, append-only by contract (recorded as a table property;
+# Iceberg does not enforce it). Field ids follow the documented column
+# order; partition source-ids 4 and 13 are zone and checked_at.
+# POST returns 409 when the table exists; both outcomes converge.
+quality_table_request='{
+  "name": "quality_check_results",
+  "schema": {
+    "type": "struct",
+    "fields": [
+      {"id": 1,  "name": "run_id",              "required": true,  "type": "string"},
+      {"id": 2,  "name": "dataset_namespace",   "required": true,  "type": "string"},
+      {"id": 3,  "name": "dataset_name",        "required": true,  "type": "string"},
+      {"id": 4,  "name": "zone",                "required": true,  "type": "string"},
+      {"id": 5,  "name": "check_type",          "required": true,  "type": "string"},
+      {"id": 6,  "name": "check_name",          "required": true,  "type": "string"},
+      {"id": 7,  "name": "severity",            "required": true,  "type": "string"},
+      {"id": 8,  "name": "status",              "required": true,  "type": "string"},
+      {"id": 9,  "name": "metric_value",        "required": false, "type": "double"},
+      {"id": 10, "name": "threshold",           "required": false, "type": "double"},
+      {"id": 11, "name": "failure_detail",      "required": false, "type": "string"},
+      {"id": 12, "name": "pipeline_run_id",     "required": false, "type": "string"},
+      {"id": 13, "name": "checked_at",          "required": true,  "type": "timestamp"},
+      {"id": 14, "name": "iceberg_snapshot_id", "required": false, "type": "long"}
+    ]
+  },
+  "partition-spec": {
+    "spec-id": 0,
+    "fields": [
+      {"source-id": 4,  "field-id": 1000, "transform": "identity", "name": "zone"},
+      {"source-id": 13, "field-id": 1001, "transform": "day",      "name": "checked_at_day"}
+    ]
+  },
+  "properties": {
+    "stratus.append-only": "true",
+    "write.format.default": "parquet"
+  }
+}'
+table_status="$(curl_api -o /tmp/polaris-table-response.json -w '%{http_code}' \
+  -X POST "$api/catalog/v1/stratus/namespaces/platform/tables" \
+  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  -d "$quality_table_request")"
+case "$table_status" in
+  200) log "READY table=platform.quality_check_results (created)" ;;
+  409) log "READY table=platform.quality_check_results (already exists)" ;;
+  *) fail "Table platform.quality_check_results failed (HTTP $table_status): $(cat /tmp/polaris-table-response.json 2>/dev/null | head -c 300)" ;;
+esac
+rm -f /tmp/polaris-table-response.json
+
+# Positive check: the table loads through the catalog API.
+table_load_status="$(curl_api -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $token" \
+  "$api/catalog/v1/stratus/namespaces/platform/tables/quality_check_results")"
+[[ "$table_load_status" == 200 ]] \
+  || fail "platform.quality_check_results did not load after bootstrap (HTTP $table_load_status)"
+log "PASS table-load table=platform.quality_check_results"
+
 # Positive check: all four namespaces are listed.
 listing="$(curl_api -H "Authorization: Bearer $token" "$api/catalog/v1/stratus/namespaces")"
 for zone in bronze silver gold platform; do
@@ -120,4 +183,4 @@ forged_status="$(curl_api -o /dev/null -w '%{http_code}' \
   || fail "A forged token must be refused, got HTTP $forged_status"
 log "PASS forged-token-refused httpStatus=$forged_status"
 
-log "Catalog bootstrap complete: catalog=stratus namespaces=4 storage=$CEPH_RGW_ENDPOINT"
+log "Catalog bootstrap complete: catalog=stratus namespaces=4 tables=1 storage=$CEPH_RGW_ENDPOINT"

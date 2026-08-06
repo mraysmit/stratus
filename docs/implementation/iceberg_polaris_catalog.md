@@ -364,7 +364,7 @@ With Polaris configured, create the initial platform Iceberg tables. These table
 
 ### `platform.quality_check_results`
 
-This table is defined in the architecture document (§5.3). Create it via the Iceberg Java API in the verification module (§9) or via a setup script using the Iceberg REST client.
+This table is defined in the architecture document (§5.3). In the developer harness it is provisioned idempotently by `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh` through the Iceberg REST create-table endpoint — provisioning lives in the re-runnable bootstrap path because the harness's Polaris 1.5.0 in-memory metastore loses all catalog state on restart. The documented shape is also pinned in Java (`QualityCheckResultsTableDefinition` in `stratus-catalog-verifier`), and the live conformance suite compares the deployed table against it (§9).
 
 Schema:
 
@@ -411,9 +411,11 @@ Add to `pom.xml`:
      iceberg-core; there is no separate client artifact (verified against
      Iceberg 1.11.0 on Maven Central). Generic record reads and writes need
      iceberg-data plus iceberg-orc (the generic readers dispatch on ORC even
-     for Parquet-only use), and parquet-java requires Hadoop's Configuration
-     class, supplied by the shaded hadoop-client-api/-runtime pair. All
-     versions are owned by build-support/stratus-bom. -->
+     for Parquet-only use), and Iceberg's Parquet$WriteBuilder constructor
+     requires Hadoop's Configuration class (verified by removal: every write
+     fails at Parquet.java:182 without it), supplied by the shaded
+     hadoop-client-api/-runtime pair. All versions are owned by
+     build-support/stratus-bom. -->
 <dependency>
     <groupId>org.apache.iceberg</groupId>
     <artifactId>iceberg-data</artifactId>
@@ -881,7 +883,7 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 | `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
 | `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. TLS for `polaris.stratus.local` remains open ahead of any shared or representative use; digest pin belongs to `P1-2.2-S1` | Verified |
 | `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh`; Ceph harness svc-polaris identity and bucket policies; `environments/developer/polaris/` | Namespace/location inventory and access tests | D1 | Security owner | Verified 2026-08-04: scoped `svc-polaris` RGW identity created by the Ceph harness with bucket policies on the five Stratus buckets only (positive write/list/delete probe passed; denied-bucket listing failed closed); `stratus` catalog and four zone namespaces bootstrapped idempotently over the live API with a forged-token 401 negative. Transcripts in both harness `logs/` directories. Engine principals (svc-spark, svc-trino) belong to their increments; Polaris-to-RGW TLS trust for table IO is wired under `P1-2.4` | Verified |
-| `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | None recorded | Not started |
+| `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | Verified 2026-08-06: `platform.quality_check_results` provisioned idempotently by the catalog bootstrap (14 columns, identity(zone)+day(checked_at) partitioning, append-only marker); live catalog conformance 9/9 including schema evolution and the quality-table schema/partition/write/read-back checks, proven red (4 failures with the table absent) then green after bootstrap; object inventory confirmed Parquet under `data/zone=platform/checked_at_day=.../` with Iceberg metadata in `stratus-platform`. Transcripts in `platform/polaris/compose-service/logs/` | Verified |
 | `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `platform/polaris/database/`; `environments/production/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
 | `P1-2.2-P1` | `P1-2.2` | Production | Deploy redundant production Polaris services with trusted TLS, health routing, immutable image, and managed config. | Platform owner | `P1-2.1-P1` | `platform/polaris/`; `environments/production/polaris/` | Endpoint failover, config snapshot, digest check | P1-P5 | Operations owner | Load-balancer ownership | Not started |
 | `P1-2.3-P1` | `P1-2.3` | Production | Apply service identities, least-privilege catalog roles, Ceph bindings, secret injection, and rotation. | Security owner | `P1-2.2-P1`, Increment 7 controls | `platform/polaris/config/`; `environments/production/polaris/`; policy records | Positive/negative authorization and rotation tests | P4-P7 | Data-platform owner | Final identity integration | Not started |
