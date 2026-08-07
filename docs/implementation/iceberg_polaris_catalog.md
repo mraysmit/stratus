@@ -450,363 +450,87 @@ Do not independently pin older Parquet or S3 SDK transitive dependencies in this
 
 ### Configuration
 
-The verification suite reads all connection details from environment variables:
+The verification suite reads all connection details from environment variables. `CatalogVerifierConfig` validates them by name and fails before any network operation, so a missing or malformed value is reported as configuration rather than as a connection error.
 
-| Variable | Description |
-|---|---|
-| `STRATUS_POLARIS_URI` | e.g. `https://polaris.stratus.local:8181/api/catalog` |
-| `STRATUS_POLARIS_CLIENT_ID` | Polaris principal client id |
-| `STRATUS_POLARIS_CLIENT_SECRET` | Polaris principal client secret |
-| `STRATUS_POLARIS_CATALOG` | Catalog name — `stratus` |
-| `CEPH_RGW_ENDPOINT` | e.g. `https://object-store.stratus.local` |
-| `CEPH_RGW_ACCESS_KEY` | `svc-polaris` access key |
-| `CEPH_RGW_SECRET_KEY` | `svc-polaris` secret key |
+| Variable | Required | Description |
+|---|---|---|
+| `STRATUS_CATALOG_INTEGRATION` | yes | `true` opts the live tests in. Without it the `catalog-integration` tests skip; under the `catalog-integration-tests` profile a missing value fails instead of skipping, so the profile can never pass silently |
+| `STRATUS_POLARIS_URI` | yes | e.g. `https://polaris.stratus.local:8181/api/catalog`. Must be absolute HTTPS with no credentials, query, or fragment |
+| `STRATUS_POLARIS_CLIENT_ID` | yes | Polaris principal client id |
+| `STRATUS_POLARIS_CLIENT_SECRET` | yes | Polaris principal client secret |
+| `STRATUS_POLARIS_CATALOG` | yes | Catalog name — `stratus`. Sent as the Iceberg `warehouse` property, which for a Polaris catalog carries the catalog name rather than a storage location |
+| `CEPH_RGW_ENDPOINT` | yes | e.g. `https://object-store.stratus.local`. Must be an origin URL with no path, credentials, query, or fragment |
+| `CEPH_RGW_ACCESS_KEY` | yes | `svc-polaris` access key |
+| `CEPH_RGW_SECRET_KEY` | yes | `svc-polaris` secret key |
+| `S3_PATH_STYLE_ACCESS` | no | Defaults to `true`, which Ceph RGW requires without per-bucket DNS |
+| `STRATUS_POLARIS_ALLOW_HTTP` | no | Defaults to `false`. Set `true` only for a disposable development endpoint; HTTPS is otherwise mandatory |
+| `CEPH_RGW_ALLOW_HTTP` | no | Defaults to `false`, with the same disposable-development meaning for the object-store endpoint |
 
-### Shared catalog client helper
+`RestCatalogProperties` maps this configuration onto the Iceberg REST client. Two auth properties are set explicitly rather than inferred — `rest.auth.type=oauth2` and `oauth2-server-uri` — because inference logs a warning per connection and Iceberg's automatic token-endpoint fallback is deprecated for removal (apache/iceberg#10537). The client also sends `X-Iceberg-Access-Delegation: none`: the verifier supplies its own storage credentials and declines credential vending rather than asking the catalog to subscope.
 
-Place in `verification/catalog/src/test/java/dev/stratus/verification/catalog/PolarisTestClient.java`:
+### Suite structure
 
-```java
-package dev.stratus.verification.catalog;
+The suite is the `stratus-catalog-verifier` Maven module at `verification/catalog/`. Source is not reproduced here: the module is the authoritative form, and a copy in this document would drift from it. See [verification/catalog/README.md](../../verification/catalog/README.md) for the classpath findings behind the dependency set above.
 
-import org.apache.iceberg.CatalogProperties;
-import org.apache.iceberg.rest.RESTCatalog;
+| Class | Tree | Role |
+|---|---|---|
+| `CatalogVerifierConfig` | main | Immutable configuration record. Validates the environment by name and rejects non-HTTPS endpoints, embedded credentials, and malformed URLs before any network call. Redacts secrets in `toString` |
+| `RestCatalogProperties` | main | Maps the configuration onto Iceberg REST client properties. Keeps Iceberg property keys as literals so the main tree carries no Iceberg dependency |
+| `QualityCheckResultsTableDefinition` | main | The documented shape of `platform.quality_check_results` — columns, partition fields, and properties — in plain Java with no Iceberg dependency, pinned offline by a unit test and compared against the deployed table live |
+| `LiveCatalog` | test | Shared entry point for the live tests. Enforces the opt-in switch, asserts the required environment under the profile, and connects the real `RESTCatalog` |
+| `IcebergRestCatalogConformanceTest` | test | The ten live catalog conformance checks listed below |
+| `QualityCheckResultsConformanceTest` | test | The four live checks against the permanent quality-results table |
+| `CatalogVerificationLogging` | test | Verification-event logging, itself covered by an offline test so INFO/DEBUG behavior is proven rather than assumed |
 
-import java.util.HashMap;
-import java.util.Map;
+There is no hand-written test double anywhere in the module. Every live check runs against the real Polaris service and the real Ceph RGW endpoint; the offline tests cover configuration, property mapping, the table definition, and logging only.
 
-public class PolarisTestClient {
+### Live conformance coverage
 
-    public static RESTCatalog connect() {
-        String uri          = System.getenv("STRATUS_POLARIS_URI");
-        String clientId     = System.getenv("STRATUS_POLARIS_CLIENT_ID");
-        String clientSecret = System.getenv("STRATUS_POLARIS_CLIENT_SECRET");
-        String catalog      = System.getenv("STRATUS_POLARIS_CATALOG");
-        String s3Endpoint   = System.getenv("CEPH_RGW_ENDPOINT");
-        String accessKey    = System.getenv("CEPH_RGW_ACCESS_KEY");
-        String secretKey    = System.getenv("CEPH_RGW_SECRET_KEY");
+`IcebergRestCatalogConformanceTest` — eleven checks, tagged `catalog-integration`:
 
-        Map<String, String> properties = new HashMap<>();
-        properties.put(CatalogProperties.URI, uri);
-        properties.put("credential", clientId + ":" + clientSecret);
-        properties.put("scope", "PRINCIPAL_ROLE:ALL");
-        properties.put(CatalogProperties.WAREHOUSE_LOCATION, "s3://stratus-bronze");
-        properties.put(CatalogProperties.FILE_IO_IMPL, "org.apache.iceberg.aws.s3.S3FileIO");
-        properties.put("s3.endpoint", s3Endpoint);
-        properties.put("s3.access-key-id", accessKey);
-        properties.put("s3.secret-access-key", secretKey);
-        properties.put("s3.path-style-access", "true");
+1. the four zone namespaces resolve through the catalog
+2. zone namespaces carry the governed location and zone properties
+3. a probe table is created, written, read back, and dropped inside the governed zone location
+4. schema evolution adds a column in place without disturbing existing rows
+5. a row leaving a required column null is rejected, and the rejected write neither advances the snapshot nor adds rows
+6. the create/write/read/drop cycle holds in every data zone, not only bronze
+7. a table with a complete attribute set reloads from the catalog unchanged
+8. each partition writes to its own governed storage path
+9. sort order survives the catalog round trip
+10. superseded snapshots expire while the current snapshot stays readable
+11. a forged principal credential is refused
 
-        RESTCatalog restCatalog = new RESTCatalog();
-        restCatalog.initialize(catalog, properties);
-        return restCatalog;
-    }
-}
-```
+`QualityCheckResultsConformanceTest` — four checks against the table the catalog bootstrap provisions:
 
-### Verification test class
+1. the table exists with the documented fourteen-column schema in the governed platform location
+2. it is partitioned by `zone` and by `checked_at` day
+3. it declares the append-only marker in its table properties
+4. it accepts a quality result record and serves it back through the catalog
 
-Place in `verification/catalog/src/test/java/dev/stratus/verification/catalog/IcebergPolarisVerificationTest.java`:
-
-```java
-package dev.stratus.verification.catalog;
-
-import org.apache.iceberg.*;
-import org.apache.iceberg.actions.RewriteDataFiles;
-import org.apache.iceberg.catalog.Namespace;
-import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.IcebergGenerics;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.data.parquet.GenericParquetWriter;
-import org.apache.iceberg.io.CloseableIterable;
-import org.apache.iceberg.io.DataWriter;
-import org.apache.iceberg.io.OutputFile;
-import org.apache.iceberg.parquet.Parquet;
-import org.apache.iceberg.rest.RESTCatalog;
-import org.apache.iceberg.types.Types;
-import org.junit.jupiter.api.*;
-
-import java.util.List;
-import java.util.UUID;
-
-import static org.assertj.core.api.Assertions.*;
-
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class IcebergPolarisVerificationTest {
-
-    static RESTCatalog catalog;
-
-    static final Schema TEST_SCHEMA = new Schema(
-        Types.NestedField.required(1, "id", Types.StringType.get()),
-        Types.NestedField.required(2, "name", Types.StringType.get()),
-        Types.NestedField.optional(3, "value", Types.DoubleType.get())
-    );
-
-    static final PartitionSpec UNPARTITIONED = PartitionSpec.unpartitioned();
-
-    static final TableIdentifier BRONZE_TABLE =
-        TableIdentifier.of(Namespace.of("bronze"), "verification_test");
-
-    static final TableIdentifier QUALITY_TABLE =
-        TableIdentifier.of(Namespace.of("platform"), "quality_check_results");
-
-    @BeforeAll
-    static void connect() {
-        assertThat(System.getenv("STRATUS_POLARIS_URI"))
-            .as("STRATUS_POLARIS_URI must be set").isNotBlank();
-        catalog = PolarisTestClient.connect();
-    }
-
-    @Test
-    @Order(1)
-    void polarisReachableAndCatalogExists() {
-        assertThatNoException()
-            .as("Polaris must be reachable and the stratus catalog must exist")
-            .isThrownBy(() -> catalog.listNamespaces());
-    }
-
-    @Test
-    @Order(2)
-    void allNamespacesExist() {
-        List<Namespace> namespaces = catalog.listNamespaces();
-        List<String> names = namespaces.stream()
-            .map(ns -> ns.level(0))
-            .toList();
-
-        assertThat(names)
-            .as("All four platform namespaces must exist in Polaris")
-            .contains("bronze", "silver", "gold", "platform");
-    }
-
-    @Test
-    @Order(3)
-    void canCreateTableInBronzeNamespace() {
-        if (catalog.tableExists(BRONZE_TABLE)) {
-            catalog.dropTable(BRONZE_TABLE, true);
-        }
-
-        Table table = catalog.createTable(BRONZE_TABLE, TEST_SCHEMA, UNPARTITIONED);
-
-        assertThat(table).isNotNull();
-        assertThat(table.schema().columns()).hasSize(3);
-        assertThat(catalog.tableExists(BRONZE_TABLE)).isTrue();
-    }
-
-    @Test
-    @Order(4)
-    void canWriteDataToTable() throws Exception {
-        Table table = catalog.loadTable(BRONZE_TABLE);
-
-        // Write a parquet data file directly via the Iceberg Java API
-        String filePath = table.location() + "/data/" + UUID.randomUUID() + ".parquet";
-        OutputFile outputFile = table.io().newOutputFile(filePath);
-
-        GenericRecord record1 = GenericRecord.create(TEST_SCHEMA);
-        record1.setField("id", "1");
-        record1.setField("name", "alpha");
-        record1.setField("value", 1.0);
-
-        GenericRecord record2 = GenericRecord.create(TEST_SCHEMA);
-        record2.setField("id", "2");
-        record2.setField("name", "beta");
-        record2.setField("value", 2.0);
-
-        DataWriter<Record> writer = Parquet.writeData(outputFile)
-            .schema(TEST_SCHEMA)
-            .createWriterFunc(GenericParquetWriter::buildWriter)
-            .overwrite()
-            .withSpec(UNPARTITIONED)
-            .build();
-
-        try (writer) {
-            writer.write(record1);
-            writer.write(record2);
-        }
-
-        // Commit the written file as a new snapshot
-        table.newAppend()
-            .appendFile(writer.toDataFile())
-            .commit();
-
-        assertThat(table.currentSnapshot()).isNotNull();
-        assertThat(table.currentSnapshot().addedDataFiles(table.io()))
-            .as("Snapshot must reference the written data file")
-            .isNotEmpty();
-    }
-
-    @Test
-    @Order(5)
-    void canReadDataBackFromTable() {
-        Table table = catalog.loadTable(BRONZE_TABLE);
-
-        try (CloseableIterable<Record> records = IcebergGenerics.read(table).build()) {
-            List<Record> rows = org.apache.iceberg.util.StructLikeSet.of(
-                TEST_SCHEMA.asStruct()).stream().toList();
-
-            // Collect into list
-            java.util.List<Record> result = new java.util.ArrayList<>();
-            records.forEach(result::add);
-
-            assertThat(result)
-                .as("Table must contain the two written records")
-                .hasSize(2);
-
-            assertThat(result.stream().map(r -> r.getField("id")).toList())
-                .containsExactlyInAnyOrder("1", "2");
-        } catch (Exception e) {
-            fail("Failed to read records from table: " + e.getMessage());
-        }
-    }
-
-    @Test
-    @Order(6)
-    void schemaEvolutionWorks() {
-        Table table = catalog.loadTable(BRONZE_TABLE);
-        int originalColumnCount = table.schema().columns().size();
-
-        // Add a new optional column — Iceberg schema evolution
-        table.updateSchema()
-            .addColumn("source_system", Types.StringType.get())
-            .commit();
-
-        Table reloaded = catalog.loadTable(BRONZE_TABLE);
-        assertThat(reloaded.schema().columns())
-            .as("Schema must contain the new column after evolution")
-            .hasSize(originalColumnCount + 1);
-    }
-
-    @Test
-    @Order(7)
-    void snapshotExpiryWorks() {
-        Table table = catalog.loadTable(BRONZE_TABLE);
-        long snapshotCountBefore = snapshotCount(table);
-
-        // Expire all snapshots older than now (retaining the current snapshot)
-        table.expireSnapshots()
-            .expireOlderThan(System.currentTimeMillis())
-            .retainLast(1)
-            .commit();
-
-        Table reloaded = catalog.loadTable(BRONZE_TABLE);
-        long snapshotCountAfter = snapshotCount(reloaded);
-
-        assertThat(snapshotCountAfter)
-            .as("Snapshot expiry must reduce snapshot count")
-            .isLessThanOrEqualTo(snapshotCountBefore);
-        assertThat(reloaded.currentSnapshot())
-            .as("Current snapshot must still exist after expiry")
-            .isNotNull();
-    }
-
-    @Test
-    @Order(8)
-    void qualityResultsTableExistsWithCorrectSchema() {
-        assertThat(catalog.tableExists(QUALITY_TABLE))
-            .as("platform.quality_check_results must exist in Polaris")
-            .isTrue();
-
-        Table table = catalog.loadTable(QUALITY_TABLE);
-        List<String> columnNames = table.schema().columns().stream()
-            .map(Types.NestedField::name)
-            .toList();
-
-        assertThat(columnNames).contains(
-            "run_id", "dataset_namespace", "dataset_name", "zone",
-            "check_type", "check_name", "severity", "status",
-            "metric_value", "threshold", "failure_detail",
-            "pipeline_run_id", "checked_at", "iceberg_snapshot_id"
-        );
-    }
-
-    @Test
-    @Order(9)
-    void qualityResultsTableAcceptsWrite() throws Exception {
-        Table table = catalog.loadTable(QUALITY_TABLE);
-        Schema schema = table.schema();
-
-        String filePath = table.location() + "/data/" + UUID.randomUUID() + ".parquet";
-        OutputFile outputFile = table.io().newOutputFile(filePath);
-
-        GenericRecord record = GenericRecord.create(schema);
-        record.setField("run_id", UUID.randomUUID().toString());
-        record.setField("dataset_namespace", "bronze");
-        record.setField("dataset_name", "verification_test");
-        record.setField("zone", "bronze");
-        record.setField("check_type", "completeness");
-        record.setField("check_name", "mandatory_fields_not_null");
-        record.setField("severity", "blocking");
-        record.setField("status", "passed");
-        record.setField("metric_value", 1.0);
-        record.setField("threshold", 1.0);
-        record.setField("failure_detail", null);
-        record.setField("pipeline_run_id", "verification-run-001");
-        record.setField("checked_at",
-            java.time.OffsetDateTime.now().toEpochSecond() * 1_000_000L);
-        record.setField("iceberg_snapshot_id",
-            catalog.loadTable(BRONZE_TABLE).currentSnapshot().snapshotId());
-
-        DataWriter<Record> writer = Parquet.writeData(outputFile)
-            .schema(schema)
-            .createWriterFunc(GenericParquetWriter::buildWriter)
-            .overwrite()
-            .withSpec(table.spec())
-            .build();
-
-        try (writer) { writer.write(record); }
-
-        table.newAppend().appendFile(writer.toDataFile()).commit();
-
-        assertThat(table.currentSnapshot())
-            .as("Quality results table must have a snapshot after write")
-            .isNotNull();
-    }
-
-    @Test
-    @Order(10)
-    void tableDropAndCleanup() {
-        // Clean up the verification test table from the bronze namespace
-        if (catalog.tableExists(BRONZE_TABLE)) {
-            boolean dropped = catalog.dropTable(BRONZE_TABLE, true);
-            assertThat(dropped).as("Verification table must be droppable").isTrue();
-            assertThat(catalog.tableExists(BRONZE_TABLE))
-                .as("Table must no longer exist after drop").isFalse();
-        }
-    }
-
-    @AfterAll
-    static void close() {
-        if (catalog != null) {
-            try { catalog.close(); } catch (Exception ignored) { }
-        }
-    }
-
-    private long snapshotCount(Table table) {
-        long count = 0;
-        for (Snapshot ignored : table.snapshots()) count++;
-        return count;
-    }
-}
-```
+The record written by check 4 is a genuine quality result of the conformance run and is retained — the table is an append-only audit trail, so the suite does not clean up after itself there. Probe tables created by the other suite are purge-dropped.
 
 ### Running the verification suite
 
-```bash
-export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
-export STRATUS_POLARIS_CLIENT_ID=svc-spark
-export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
-export STRATUS_POLARIS_CATALOG=stratus
-export CEPH_RGW_ENDPOINT=https://object-store.stratus.local
-export CEPH_RGW_ACCESS_KEY=svc-polaris
-export CEPH_RGW_SECRET_KEY=<svc-polaris secret>
+Against the developer harnesses, use the wrapper. It supplies the environment, the live opt-in switch, and the CA truststore, so no manual export is required:
 
+```bash
+bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh
+```
+
+The wrapper selects the `catalog-integration-tests` profile, under which a missing opt-in switch or environment variable fails the run instead of skipping it. The offline tests run in the default build (`./mvnw clean verify`) and never touch a live endpoint.
+
+For the production profile the same suite runs from the pinned verifier image, built and published by the approved build system. Operators execute the image and do not build on the verification host:
+
+```bash
 export STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE=registry.stratus.local/stratus/iceberg-polaris-verifier:<version>@sha256:<digest>
 podman run --rm --env-file /etc/stratus/verifiers/iceberg-polaris.env \
   -v /data/stratus/evidence/increment2:/evidence:z \
   ${STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE}
 ```
 
-All ten tests must pass before Increment 2 is considered complete.
+Image publication is deferred under `P1-0.1` by owner direction, so the developer track currently runs the suite from the workstation build. That exception is recorded in the Phase 1 plan and does not extend to production acceptance.
+
+All fifteen live checks must pass before Increment 2 is considered complete.
 
 ---
 
@@ -883,21 +607,49 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 | `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
 | `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. TLS for `polaris.stratus.local` remains open ahead of any shared or representative use; digest pin belongs to `P1-2.2-S1` | Verified |
 | `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh`; Ceph harness svc-polaris identity and bucket policies; `environments/developer/polaris/` | Namespace/location inventory and access tests | D1 | Security owner | Verified 2026-08-04: scoped `svc-polaris` RGW identity created by the Ceph harness with bucket policies on the five Stratus buckets only (positive write/list/delete probe passed; denied-bucket listing failed closed); `stratus` catalog and four zone namespaces bootstrapped idempotently over the live API with a forged-token 401 negative. Transcripts in both harness `logs/` directories. Engine principals (svc-spark, svc-trino) belong to their increments; Polaris-to-RGW TLS trust for table IO is wired under `P1-2.4` | Verified |
-| `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | Verified 2026-08-06: `platform.quality_check_results` provisioned idempotently by the catalog bootstrap (14 columns, identity(zone)+day(checked_at) partitioning, append-only marker); live catalog conformance 9/9 including schema evolution and the quality-table schema/partition/write/read-back checks, proven red (4 failures with the table absent) then green after bootstrap; object inventory confirmed Parquet under `data/zone=platform/checked_at_day=.../` with Iceberg metadata in `stratus-platform`. Transcripts in `platform/polaris/compose-service/logs/` | Verified |
+| `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | Verified 2026-08-06: `platform.quality_check_results` provisioned idempotently by the catalog bootstrap (14 columns, identity(zone)+day(checked_at) partitioning, append-only marker); live catalog conformance 9/9 including schema evolution and the quality-table schema/partition/write/read-back checks, proven red (4 failures with the table absent) then green after bootstrap; object inventory confirmed Parquet under `data/zone=platform/checked_at_day=.../` with Iceberg metadata in `stratus-platform`. Transcripts in `platform/polaris/compose-service/logs/`. **Addendum 2026-08-07:** a fifteenth check (`rejectsARowThatLeavesARequiredColumnNull`) was added to close the schema-enforcement row in the Phase 1 plan §5 verification table, which no existing check covered. It compiles but has not run live — the harnesses are down — so re-run `polaris-compose-run-catalog-tests.sh` and attach the transcript before `P1-2.G-D` is accepted | Verified |
 | `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `platform/polaris/database/`; `environments/production/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
 | `P1-2.2-P1` | `P1-2.2` | Production | Deploy redundant production Polaris services with trusted TLS, health routing, immutable image, and managed config. | Platform owner | `P1-2.1-P1` | `platform/polaris/`; `environments/production/polaris/` | Endpoint failover, config snapshot, digest check | P1-P5 | Operations owner | Load-balancer ownership | Not started |
 | `P1-2.3-P1` | `P1-2.3` | Production | Apply service identities, least-privilege catalog roles, Ceph bindings, secret injection, and rotation. | Security owner | `P1-2.2-P1`, Increment 7 controls | `platform/polaris/config/`; `environments/production/polaris/`; policy records | Positive/negative authorization and rotation tests | P4-P7 | Data-platform owner | Final identity integration | Not started |
-| `P1-2.5-P1` | `P1-2.5` | Production | Verify metadata-driven maintenance thresholds and safe snapshot/orphan behavior. | Data-platform owner | `P1-2.3-P1` | maintenance queries/runbook | Metadata queries, dry-run and applied-action evidence | P8-P9 | Data-engineering owner | Unsafe retention setting | Not started |
+| `P1-2.5-D1` | `P1-2.5` | Developer | Verify metadata-driven maintenance decisions against the live catalog; done when the files, snapshots, manifests, delete-files, and orphan-file metadata tables are queried and a threshold decision is proven for each. | Data-platform owner | `P1-2.4-V1` | `verification/catalog/src/test/`; maintenance decision rules | Metadata-table query output, threshold decision per category, before/after object inventory | D1 | Data-engineering owner | Snapshot expiry is already covered by `P1-2.4-V1`; compaction, manifest rewrite, delete-file, and orphan-file decisions remain. Orphan-file detection must not delete live data — the decision is proven before any destructive action is wired | Not started |
+| `P1-2.5-P1` | `P1-2.5` | Production | Verify metadata-driven maintenance thresholds and safe snapshot/orphan behavior. | Data-platform owner | `P1-2.3-P1`, `P1-2.5-D1` | maintenance queries/runbook | Metadata queries, dry-run and applied-action evidence | P8-P9 | Data-engineering owner | Unsafe retention setting | Not started |
 | `P1-2.6-R1` | `P1-2.6` | Production | Execute catalog/database/object consistency backup and restore; done when restored tables resolve to valid Ceph objects. | Operations owner | `P1-2.5-P1` | restore runbook and evidence | Timed restore, consistency queries, audit events | P10-P12 | Platform owner | Restore point mismatch | Not started |
 | `P1-2.G-D` | `P1-2` | Developer | Accept developer gate after D1-D2 have accepted producing tasks. | Platform owner | `P1-2.4-V1` | developer gate record | Gate matrix and evidence index | D1-D2 | Data-platform owner | Open functional defect | Not started |
 | `P1-2.G-P` | `P1-2` | Production | Run production regression and accept P1-P13 with no developer-only setting remaining. | Platform owner | `P1-2.6-R1`, Increment 7 controls | production gate/promotion record | Full verifier, resilience, observability and readiness evidence | P1-P13 | Architecture and operations owners | Open production defect | Not started |
+
+### Developer-to-production promotion controls
+
+This table is the promotion manifest that gate **D2** requires. Every developer-only condition in the Increment 2 harness is named here with the production task that replaces it and the condition under which promotion stops. A developer condition that is not listed has not been assessed and blocks the developer gate.
+
+| Developer condition | Production replacement task | Rollback or stop condition |
+|---|---|---|
+| In-memory Polaris metastore (`POLARIS_PERSISTENCE_TYPE=in-memory`), which loses all catalog state on restart and is flagged by the server's own production-readiness check | `P1-2.1-P1`, then `P1-2.2-P1`; the persistent backend for this release line is `relational-jdbc` over PostgreSQL | no in-memory result may satisfy the production gate, backup/restore, HA, or recovery evidence; every result produced in this mode is labelled `developer-only` in the evidence record |
+| Plain HTTP on the loopback port (`POLARIS_ALLOW_HTTP=true`), TLS wiring still open under `P1-2.2-D1` | `P1-2.2-P1` terminates trusted TLS for `polaris.stratus.local`; `P1-7.4` replaces the certificate with FreeIPA Dogtag-issued material | no shared or representative use until trusted TLS terminates; never satisfy a TLS check by relaxing client verification |
+| Single Polaris container with no redundancy or health routing | `P1-2.2-P1` | do not claim an RTO/RPO or failover posture from a single-container topology; the production gate stays open until endpoint failover passes |
+| Disposable bootstrap credential generated into `.env` (`stratus-root`, `polaris.bootstrap.credentials`) | `P1-2.3-P1` with Increment 7 controls | rotate after any real catalog bootstrap; never promote a harness credential, and never echo it to stdout |
+| `svc-polaris` storage credentials pulled from dev-mode OpenBao, whose secrets are discarded on shutdown | `P1-2.3-P1` against the approved secret store (ADR-P1-004) with rotation | restore the prior approved credential reference if a policy regression appears; never copy a credential by hand into `.env` |
+| Local lab CA material trusted by the verifier and the catalog for the Ceph RGW chain | `P1-7.4` | never fall back to an insecure client or a disabled trust check to make a run pass |
+| Catalog and namespaces re-bootstrapped by script after every restart, because the metastore is not persistent | `P1-2.1-P1` supplies a persistent metastore; `P1-2.6-R1` supplies the restore path | a production catalog is never re-bootstrapped to recover state — that is a restore, and re-bootstrapping instead of restoring is a stop condition |
+| Polaris pinned by tag `apache/polaris:1.5.0` with the observed digest recorded but not enforced | `P1-2.2-S1` publishes the immutable digest with scan, SBOM, and provenance | production runs by digest only; this clause shares the `P1-0.1` publication deferral and cannot be closed from a tag pin |
+| Catalog verifier executed from the workstation build rather than a published image | `P1-2.2-S1` under `P1-0.1` | production acceptance requires the digest-qualified verifier image; workstation runs support developer evidence only |
+| Engine principals `svc-spark` and `svc-trino` not yet created in Polaris | `P1-2.3-P1`, with each engine's own increment creating its principal | production gate P7 stays open until both exist with least-privilege catalog roles; no engine shares the root principal |
+
+### Gate traceability rule
+
+The gate identifiers below are normative. A gate checkbox may be marked complete only when every mapped task is `Accepted` and its evidence index resolves. `P1-2.G-D` and `P1-2.G-P` own the final checks; they do not create missing evidence on behalf of implementation tasks.
 
 ## 13. Completion Gates
 
 ### Developer gate
 
-- [ ] **D1** - Disposable H2 mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier conformance checks pass.
-- [ ] **D2** - H2, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
+- [ ] **D1** - Disposable in-memory persistence mode starts/stops idempotently and the namespace, table, Iceberg metadata, Ceph RGW, and verifier conformance checks pass.
+- [ ] **D2** - In-memory persistence, plain-HTTP loopback, local credentials, local CA material, and reduced topology are labelled developer-only in the promotion manifest.
+
+The Polaris 1.5.0 release line has no embedded H2 backend; its test-only metastore is `in-memory` and its persistent backend is `relational-jdbc`. D1 and D2 name that mode directly — an H2 reading of either gate is not satisfiable against this release.
+
+**Readiness.** Both gates have their producing evidence: `P1-2.2-D1` (two start/verify/stop cycles, 2026-08-03), `P1-2.3-D1` (catalog, namespaces, scoped `svc-polaris` identity with a forged-token negative, 2026-08-04), and `P1-2.4-V1` (fourteen live conformance checks including `platform.quality_check_results`, 2026-08-06) are all `Verified`, and the promotion manifest above satisfies D2.
+
+Two things stand between that evidence and a tick. Per the gate traceability rule the three producing tasks must reach `Accepted`, which is the platform owner's action under `P1-2.G-D`; and the fifteenth check — the schema-enforcement negative added 2026-08-07 to close the §5 verification row in the Phase 1 plan — has been written and compiles but has not yet run against a live catalog, because the harnesses are down. Re-run `polaris-compose-run-catalog-tests.sh` against a running stack before accepting. One clause also remains open — TLS for `polaris.stratus.local` — which the owner either accepts as a recorded deferral, as Increment 1 did for `P1-0.1`, or closes first.
 
 ### Production gate
 
@@ -905,13 +657,13 @@ Increment 2 is accepted when all of the following are true:
 
 - [ ] **P1** - Polaris container running and managed by systemd on `polaris.stratus.local`
 - [ ] **P2** - Polaris REST API responding at `https://polaris.stratus.local:8181` with TLS
-- [ ] **P3** - Polaris uses the approved external metadata store; embedded H2 is not used for completion evidence
+- [ ] **P3** - Polaris uses the approved external metadata store (`relational-jdbc` over PostgreSQL); the test-only `in-memory` metastore is not used for completion evidence
 - [ ] **P4** - Metadata-store backup, restore, monitoring, and HA/failover posture are documented and tested
 - [ ] **P5** - `stratus` catalog created in Polaris
 - [ ] **P6** - Four namespaces exist: `bronze`, `silver`, `gold`, `platform`
 - [ ] **P7** - `svc-spark` and `svc-trino` principals created in Polaris with correct roles
 - [ ] **P8** - `platform.quality_check_results` Iceberg table created with correct schema
-- [ ] **P9** - `IcebergPolarisVerificationTest` — all ten tests pass against the live cluster
+- [ ] **P9** - `stratus-catalog-verifier` — all fifteen live checks (`IcebergRestCatalogConformanceTest` and `QualityCheckResultsConformanceTest`) pass against the production cluster from the published verifier image
 - [ ] **P10** - Iceberg metadata files visible in Ceph RGW buckets through the approved S3 client
 - [ ] **P11** - Restored Polaris resolves table identifiers to the same expected Iceberg metadata locations in Ceph RGW
 - [ ] **P12** - Catalog audit logging and catalog/metadata-store alerts are configured
@@ -955,7 +707,7 @@ Common causes:
 ### Verification test runs but parquet read returns zero rows
 
 - The Iceberg snapshot may not have been committed — ensure `.commit()` was called after `newAppend()`
-- Confirm the FileIO properties (Ceph RGW endpoint, credentials) are correctly set in `PolarisTestClient`
+- Confirm the FileIO properties (Ceph RGW endpoint, credentials) are correctly set — they are built by `RestCatalogProperties` from `CatalogVerifierConfig`, so check the environment variables listed in §9 first
 
 ---
 

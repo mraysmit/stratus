@@ -47,7 +47,7 @@ final class NamingConventionTest {
             .toList();
         assertTrue(offenders.isEmpty(), () ->
             "Implementation documents must be named for the capability they describe, not the increment number "
-                + "(see docs/README.md Naming Conventions): " + offenders);
+                + "(see README.md Naming Conventions): " + offenders);
     }
 
     @Test

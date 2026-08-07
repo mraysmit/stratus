@@ -13,7 +13,7 @@ The repository is organized by stable capability, not implementation sequence. P
 | `testing/` | cross-component non-functional and end-to-end suites | `testing/repo-guardrails` contains only technology-neutral documentation and naming consistency checks |
 | `schemas/` | shared governed contracts | Placeholder — no schemas yet |
 | `build-support/` | dependency and build policy | `stratus-bom` owns dependency versions; `stratus-build-parent` owns build-plugin versions. Child module POMs pin neither |
-| `docs/` | architecture, decisions, implementation, operations, and reference documentation | See the [documentation guide](../README.md) |
+| `docs/` | architecture, decisions, implementation, operations, and reference documentation, plus the image assets they reference in `docs/images/` | See the [documentation map](../../README.md#documentation) |
 | `scripts/` | repository maintenance tooling that operates on the source tree itself, not on any running harness | License- and copyright-header maintenance scripts. Harness lifecycle and verification scripts do not belong here; they live with their product under `platform/<product>/` |
 | `evidence/` | verification and acceptance evidence output | Kept in git as an empty anchor; generated evidence is not committed |
 | `logs/` | local command logs (for example Maven `Tee-Object` captures) | Git-ignored; created per workstation |

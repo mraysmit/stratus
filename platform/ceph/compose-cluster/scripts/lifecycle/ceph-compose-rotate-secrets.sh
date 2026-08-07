@@ -11,15 +11,21 @@ source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
 usage() {
   cat <<'EOF'
-Usage: ceph-compose-rotate-secrets.sh [--preflight | --force]
+Usage: ceph-compose-rotate-secrets.sh [--preflight | --force | --repair-keys]
 
-  --preflight  Validate that the live cluster is ready for rotation; change nothing.
-  --force      Rotate without the interactive "rotate" confirmation.
+  --preflight    Validate that the live cluster is ready for rotation; change nothing.
+  --force        Rotate without the interactive "rotate" confirmation.
+  --repair-keys  Reconcile RGW with .env after an interrupted or rolled-back
+                 rotation: reattach each .env key pair to its identity and remove
+                 any other key left on those identities. Rotates nothing else.
 
 With no option the script displays the impact and requires the word "rotate".
 The rotation preserves all Ceph data but replaces the local CA, so browsers and
 desktop clients must remove the old "Stratus Disposable Compose CA" trust entry
 and import certs/stratus-ca.crt after completion.
+
+If a rotation is killed outright, the lock directory it holds is reclaimed
+automatically on the next run once its owning process is confirmed gone.
 EOF
 }
 
@@ -28,6 +34,7 @@ case "${1:-}" in
   "") ;;
   --preflight) mode=preflight ;;
   --force) mode=force ;;
+  --repair-keys) mode=repair-keys ;;
   -h|--help) usage; exit 0 ;;
   *) usage >&2; fail "Unknown argument: $1" ;;
 esac
@@ -75,7 +82,79 @@ rgw_key_exists() {
   '
 }
 
-preflight() {
+# Every s3-type access key currently attached to an identity, one per line.
+rgw_access_keys() {
+  local uid="$1"
+  printf '%s\n' "$uid" | compose exec -T mon1 bash -c '
+    set -euo pipefail
+    IFS= read -r uid
+    radosgw-admin user info --uid "$uid" --format json |
+      jq -r ".keys[].access_key"
+  ' | tr -d '\r'
+}
+
+set_rgw_key() {
+  local operation="$1" uid="$2" access_key="$3" secret_key="${4:-}"
+  {
+    printf '%s\n' "$uid"
+    printf '%s\n' "$access_key"
+    printf '%s\n' "$secret_key"
+  } | compose exec -T mon1 bash -c '
+    set -euo pipefail
+    IFS= read -r uid
+    IFS= read -r access_key
+    IFS= read -r secret_key
+    case "$1" in
+      create)
+        radosgw-admin key create --uid "$uid" --key-type s3 \
+          --access-key "$access_key" --secret-key "$secret_key" >/dev/null
+        ;;
+      remove)
+        radosgw-admin key rm --uid "$uid" --key-type s3 \
+          --access-key "$access_key" >/dev/null
+        ;;
+      *) exit 64 ;;
+    esac
+  ' _ "$operation"
+}
+
+# Makes RGW agree with .env for one identity: attaches the .env key pair if it
+# is missing, then removes every other key on that identity. A key left behind
+# by a rolled-back rotation is an un-revoked credential, so removing it is the
+# point of the repair, not a side effect.
+repair_identity_keys() {
+  local uid="$1" access_key="$2" secret_key="$3" existing changed=false
+  if rgw_key_exists "$uid" "$access_key"; then
+    log "REPAIR: the .env key for $uid is already attached"
+  else
+    log "REPAIR: attaching the .env key to $uid"
+    set_rgw_key create "$uid" "$access_key" "$secret_key"
+    rgw_key_exists "$uid" "$access_key" \
+      || fail "Failed to attach the .env key to $uid"
+    changed=true
+  fi
+  while IFS= read -r existing; do
+    [[ -n "$existing" && "$existing" != "$access_key" ]] || continue
+    log "REPAIR: removing key '$existing' from $uid — not the key held in .env"
+    set_rgw_key remove "$uid" "$existing"
+    changed=true
+  done < <(rgw_access_keys "$uid")
+  [[ "$changed" == true ]] || log "REPAIR: $uid already matched .env; nothing changed"
+}
+
+repair_keys() {
+  # Repair writes these .env values into RGW, so a blank one would attach an
+  # empty credential rather than fail. The rotation path never reads them
+  # before generating replacements, which is why the guard lives here.
+  : "${CEPH_RGW_ACCESS_KEY:?CEPH_RGW_ACCESS_KEY must be set in .env to repair keys}"
+  : "${CEPH_RGW_SECRET_KEY:?CEPH_RGW_SECRET_KEY must be set in .env to repair keys}"
+  log "Reconciling RGW keys with $HARNESS_DIR/.env; no credential is rotated"
+  repair_identity_keys "$CEPH_DEMO_UID" "$CEPH_RGW_ACCESS_KEY" "$CEPH_RGW_SECRET_KEY"
+  repair_identity_keys "$CEPH_DENIED_UID" "$CEPH_DENIED_ACCESS_KEY" "$CEPH_DENIED_SECRET_KEY"
+  log "REPAIR PASS: RGW now holds exactly the two key pairs recorded in .env"
+}
+
+preflight_cluster() {
   local service
   for service in mon1 rgw1 rgw2 rgw-proxy s3client; do
     require_running_service "$service"
@@ -83,15 +162,25 @@ preflight() {
   compose exec -T mon1 ceph health --format json |
     grep -Eq '"status"[[:space:]]*:[[:space:]]*"HEALTH_OK"' \
     || fail "Ceph must report HEALTH_OK before secret rotation"
+}
+
+preflight() {
+  preflight_cluster
   rgw_key_exists "$CEPH_DEMO_UID" "$CEPH_RGW_ACCESS_KEY" \
-    || fail "The primary access key in .env is not attached to $CEPH_DEMO_UID"
+    || fail "The primary access key in .env is not attached to $CEPH_DEMO_UID; run --repair-keys to reconcile RGW with .env"
   rgw_key_exists "$CEPH_DENIED_UID" "$CEPH_DENIED_ACCESS_KEY" \
-    || fail "The denied-owner access key in .env is not attached to $CEPH_DENIED_UID"
+    || fail "The denied-owner access key in .env is not attached to $CEPH_DENIED_UID; run --repair-keys to reconcile RGW with .env"
   compose exec -T mon1 ceph dashboard ac-user-show "$CEPH_DASHBOARD_USER" >/dev/null \
     || fail "Dashboard user '$CEPH_DASHBOARD_USER' does not exist"
   compose exec -T rgw-proxy nginx -t >/dev/null
   log "PREFLIGHT PASS: cluster health, RGW identities, Dashboard user, and TLS proxy are ready"
 }
+
+if [[ "$mode" == repair-keys ]]; then
+  preflight_cluster
+  repair_keys
+  exit 0
+fi
 
 preflight
 [[ "$mode" != preflight ]] || exit 0
@@ -139,31 +228,6 @@ files_swapped=false
 revocation_started=false
 rotation_complete=false
 lock_acquired=false
-
-set_rgw_key() {
-  local operation="$1" uid="$2" access_key="$3" secret_key="${4:-}"
-  {
-    printf '%s\n' "$uid"
-    printf '%s\n' "$access_key"
-    printf '%s\n' "$secret_key"
-  } | compose exec -T mon1 bash -c '
-    set -euo pipefail
-    IFS= read -r uid
-    IFS= read -r access_key
-    IFS= read -r secret_key
-    case "$1" in
-      create)
-        radosgw-admin key create --uid "$uid" --key-type s3 \
-          --access-key "$access_key" --secret-key "$secret_key" >/dev/null
-        ;;
-      remove)
-        radosgw-admin key rm --uid "$uid" --key-type s3 \
-          --access-key "$access_key" >/dev/null
-        ;;
-      *) exit 64 ;;
-    esac
-  ' _ "$operation"
-}
 
 set_dashboard_password() {
   local password="$1"
@@ -328,6 +392,7 @@ cleanup_stage() {
     *) log "Refusing to remove unexpected rotation stage path: $stage" ;;
   esac
   if [[ "$lock_acquired" == true ]]; then
+    rm -f "$lock_dir/owner.pid"
     rmdir "$lock_dir" 2>/dev/null \
       || log "Unable to remove rotation lock directory: $lock_dir"
   fi
@@ -361,10 +426,40 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# The lock is released by the EXIT trap, which SIGKILL does not run, so a
+# killed rotation used to block every later run until an operator removed the
+# directory by hand. The owning PID is recorded inside it; when that process is
+# gone the lock is stale and this run reclaims it, along with the stage
+# directories the dead run left behind.
+reclaim_stale_lock() {
+  local owner_pid
+  owner_pid="$(cat "$lock_dir/owner.pid" 2>/dev/null || true)"
+  if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
+    return 1
+  fi
+  if [[ -z "$owner_pid" ]]; then
+    log "Rotation lock records no owning process; treating it as stale"
+  else
+    log "Rotation lock is owned by process $owner_pid, which is no longer running; reclaiming it"
+  fi
+  local orphan
+  for orphan in "$rotation_root"/rotate.*; do
+    [[ -d "$orphan" && "$orphan" != "$stage" ]] || continue
+    log "Removing orphaned rotation stage directory: ${orphan#"$HARNESS_DIR/"}"
+    rm -rf "$orphan"
+  done
+  rm -f "$lock_dir/owner.pid"
+  rmdir "$lock_dir" 2>/dev/null || return 1
+  return 0
+}
+
 if ! mkdir "$lock_dir" 2>/dev/null; then
-  fail "Another secret rotation appears to be active: $lock_dir"
+  if ! reclaim_stale_lock || ! mkdir "$lock_dir" 2>/dev/null; then
+    fail "Another secret rotation appears to be active: $lock_dir"
+  fi
 fi
 lock_acquired=true
+printf '%s\n' "$$" >"$lock_dir/owner.pid"
 
 write_rotated_environment
 STRATUS_CERTIFICATE_ROOT="$stage_relative/new" \

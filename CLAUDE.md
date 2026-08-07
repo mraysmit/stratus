@@ -10,7 +10,7 @@ never a global Maven).
   Java or tests.
 - [docs/reference/maven_test_commands.md](docs/reference/maven_test_commands.md) —
   test selection profiles and the review checklist.
-- [docs/README.md](docs/README.md) — documentation index and naming
+- [README.md](README.md) — project overview, documentation map, and naming
   conventions.
 
 ## Non-negotiable testing rules (from code_style_rules.md §7.2, §7.3)
