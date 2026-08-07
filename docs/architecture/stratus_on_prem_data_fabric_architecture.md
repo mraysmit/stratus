@@ -1,7 +1,9 @@
 # On-Prem Data Fabric Architecture
 
-- Author: Mark Raysmith
-- Created: 2026-03-20
+<img src="../images/stratus-logo.png" alt="Stratus logo: an iceberg beneath a waterline, capped by a cloud and mountain peak" width="220">
+
+- Author: Mark Raysmith Cityline Ltd
+- Created: 2025-10-20
 - Last updated: 2026-07-22
 
 ## 1. Executive Summary
@@ -49,9 +51,11 @@ Ceph RGW provides S3-compatible object storage for files. It is **not** the sema
 
 ### 2.3 Streaming and batch are separate compute concerns
 - **Flink** handles continuous, stateful, event-driven, near-real-time processing
-- **Spark** handles scheduled, bounded, heavy compute and historical reshaping
+- **Spark** handles scheduled, bounded, heavy compute and historical reshaping, including micro-batch execution where a freshness requirement is measured in minutes rather than seconds
 
 Trying to force one engine to do both jobs badly is poor architecture.
+
+This separation is about compute. It does not decide how data lands in a table: both engines commit to the same Iceberg tables through the same commit protocol, and the write mode is a separate per-table decision defined in §6.4.
 
 ### 2.4 Governance is a first-class platform capability
 A data fabric without cataloguing, ownership, lineage, classification, and enforceable policy is just storage plus processing. Governance must be built in from day one via **Apache Atlas**, **Apache Ranger**, and enforced naming, ownership, metadata publication, and classification conventions.
@@ -387,6 +391,9 @@ Spark remains the best fit for:
 - Spark writes to and reads from Iceberg tables rather than unmanaged file paths
 - Spark jobs should be orchestrated by Airflow for batch workflows
 - large maintenance jobs should be isolated from business-critical serving windows
+- a Spark Structured Streaming job is a long-running service, not a scheduled task, and is operated as one even though it shares the batch cluster
+
+Spark is also one of three runtimes that can write an event topic into an Iceberg table, alongside Flink and the Iceberg Kafka Connect sink. Because Spark is delivered in the foundation stage while the other two arrive with streaming, micro-batch on the existing Spark cluster reaches minutes-level freshness without introducing a new runtime; §6.4.7 compares the three and states the decision order.
 
 ---
 
@@ -414,6 +421,8 @@ Flink is built for bounded and unbounded streams and supports stateful stream pr
 - streaming write patterns into Iceberg should be tested carefully for commit cadence, compaction, and consumer freshness
 - in steady state, Flink should be the sole writer for streaming-owned tables rather than sharing write ownership casually with batch jobs
 
+Flink is one of three runtimes that can write a topic into an Iceberg table, alongside Spark Structured Streaming and the Iceberg Kafka Connect sink. It is selected where freshness is genuinely sub-second or the job needs continuous keyed state; §6.4.7 compares the three and states the decision order.
+
 ---
 
 ### 4.5 Apache Kafka
@@ -433,6 +442,8 @@ Kafka is the preferred event backbone when the platform requires durable, replay
 **Kafka Connect** is the standard data integration framework bundled with Apache Kafka (Apache 2.0 licence). It runs as a cluster of worker processes alongside the Kafka brokers and manages connectors that move data between Kafka and external systems. No additional product or commercial dependency is introduced.
 
 **Debezium** (Apache 2.0, Red Hat-sponsored) is the CDC connector library that runs inside Kafka Connect. It captures row-level change events directly from source database transaction logs and publishes them as structured Kafka topic messages.
+
+Connect is a connector runtime, not a single-purpose CDC tool. In Stratus it hosts **source** connectors only — Debezium capturing into Kafka topics. The **Apache Iceberg sink connector** would run on this same worker cluster and write topics directly into Iceberg tables, with no stream processor in the path. That capability is deliberately not part of the selected design: it is one of the three writer options compared in §6.4.7, and adopting it would extend this component's responsibilities from ingestion into table writes, with the commit-coordination, duplicate, and failure-posture consequences recorded there.
 
 Together, Kafka Connect + Debezium form the CDC ingestion path:
 
@@ -455,11 +466,13 @@ Source DB                Kafka Connect            Kafka topic       Flink
 - each source system CDC feed is managed as a named Debezium connector with explicit configuration versioned in source control
 - connector configuration, offsets, and status are stored in dedicated Kafka topics — no external state store required
 - Flink consumes CDC topic messages directly; no intermediate transformation layer between Debezium output and Flink ingestion jobs
+- Connect hosts source connectors only; no sink connector writes to a governed Iceberg table without the comparison in §6.4.7 being worked through first, because that changes which component owns table writes
 - connector deployment and lifecycle management is owned by the platform team, not individual domain teams
 
 References:
 - Apache Kafka Connect: https://kafka.apache.org/documentation/#connect
 - Debezium: https://debezium.io/
+- Apache Iceberg Kafka Connect sink, the sink-side use of this same runtime (§6.4.7): https://iceberg.apache.org/docs/latest/kafka-connect/
 
 ### When Kafka is justified
 - continuous CDC ingestion with replay requirements
@@ -478,7 +491,38 @@ Kafka should not be treated as automatically mandatory just because Flink exists
 
 Kafka is delivered by Increment 8. Kafka Connect and Debezium are delivered by Increment 9 and are required before the CDC path is accepted; they are separate increments so the event backbone can be secured and proven first.
 
----
+### 4.5.1 Qualified alternative: Apache Pulsar
+
+Kafka is the selected backbone. **Apache Pulsar is a qualified alternative**, evaluated and recorded in [ADR-P1-005](../decisions/ADR-P1-005-event-backbone-selection.md) rather than dismissed, because three of its properties fit the Stratus deployment context specifically. This subsection exists so that a future reconsideration starts from evidence rather than from a fresh product comparison.
+
+**What Pulsar would gain**
+
+- **Serving and storage scale separately.** Brokers are stateless and own no data; Apache BookKeeper bookies own durable replicated storage. Adding consumers or topics does not force storage expansion, and broker rebalancing moves no data. On fixed on-premises hardware that decouples two capacity decisions Kafka makes together.
+- **Tiered storage onto the object store already deployed.** Sealed segments offload to S3-compatible storage while the active segment stays in BookKeeper, so the event log's cold backlog could live in the same Ceph RGW cluster as the lakehouse instead of on broker-local disk sized for peak retention.
+- **Native multi-tenancy.** Tenants and namespaces carry quotas, retention, and authorization, making domain isolation a configuration concern rather than a cluster-per-domain decision.
+- **Per-key order under parallel consumption.** Key_Shared subscriptions preserve order per key while multiple consumers process one topic, which is the property the CDC merge rule in §6.4.4 depends on.
+
+**What adopting it would cost**
+
+- **Three moving parts in production** — brokers, bookies, and a metadata store — against Kafka's single broker role in KRaft mode. Bookie replacement, ledger recovery, and metadata-store availability each become first-class runbooks.
+- **Narrower packaged CDC coverage.** Pulsar IO packages Debezium connectors for MySQL, PostgreSQL, and MongoDB only. Oracle and SQL Server capture requires the separate Debezium Server runtime with its Pulsar sink, so a platform ingesting from those sources operates two CDC runtimes where Kafka Connect runs all five on one framework.
+- **Smaller operational talent pool and fewer worked on-premises examples**, so runbooks must be written rather than adapted.
+- **Metadata-store churn upstream.** ZooKeeper remains supported, Oxia is recommended for new clusters from Pulsar 5.0, and the etcd backend is removed in 5.0.
+
+**What it would not change**
+
+Apache Atlas publishes and consumes entity change notifications over Kafka topics (`ATLAS_HOOK` inbound, `ATLAS_ENTITIES` outbound) as a property of the product. Verified against Atlas sources on 2026-08-06: the notification factory selects between exactly two implementations, `KafkaNotification` and `RestNotification`, rather than exposing a pluggable provider, and the REST path (`atlas.hook.rest.notification.enabled`) only changes how *hooks* reach Atlas — the server publishes to Kafka behind that endpoint and the outbound stream is unchanged. **Adopting Pulsar would therefore add a messaging system rather than replace one**, since the Atlas notification service would still be Kafka. That single fact is the strongest argument for the current selection: with Kafka as the backbone, Atlas consolidates onto it as planned in Increment 12; with Pulsar, the platform operates both permanently.
+
+**When to reconsider**
+
+Revisit this decision if event retention grows large enough that offloading the backlog to Ceph RGW is materially cheaper than provisioning broker storage, if domain isolation requirements outgrow topic-prefix conventions, or if Atlas gains support for a second notification transport. Reconsideration before Increment 8 is cheap; after it, the migration cost is real.
+
+References:
+- Apache Pulsar: https://pulsar.apache.org/
+- Pulsar architecture overview: https://pulsar.apache.org/docs/concepts-architecture-overview/
+- Pulsar tiered storage: https://pulsar.apache.org/docs/tiered-storage-overview/
+- Pulsar IO Debezium connectors: https://pulsar.apache.org/docs/io-cdc-debezium/
+- Debezium Server, including the Pulsar sink: https://debezium.io/documentation/reference/stable/operations/debezium-server.html
 
 ### 4.6 Apache Atlas
 
@@ -823,6 +867,20 @@ Raw or lightly normalised data.
 - Flink ingestion pipelines
 - external source extracts
 
+### Capture patterns at the source
+
+How data is captured determines what the bronze table can and cannot be trusted to represent. Each pattern is named explicitly per source, because their correctness properties differ.
+
+| Pattern | Mechanism | Correctness limits |
+|---|---|---|
+| Full snapshot extract | bounded `SELECT` over partitioned key ranges, or a native unload | correct by construction; cost grows with table size, so it suits reference and dimension data |
+| Watermark / incremental extract | pull rows where `updated_at` exceeds the last high-water mark | cheapest and most common, but **cannot observe hard deletes**, and breaks on clock skew, transactions committing out of order, and backdated updates; overlap the window and deduplicate downstream |
+| File drop / landing zone | vendor delivers to a bucket prefix or transfer location | build the event-driven variant, triggered by object-creation notification; polling a prefix listing degrades badly once it holds large object counts |
+| Log-based CDC | read the source transaction log (§4.5) | captures deletes and true transaction order; emits before/after images with a sequence number, which is what makes the downstream merge idempotent and order-safe |
+| Bootstrap snapshot plus log tail | chunked incremental snapshot alongside log capture | the supported migration from batch extraction to CDC; Debezium's signal-driven incremental snapshot avoids the table locks and extended copy window of a stop-the-world initial load |
+
+Where an application team proposes writing business state to a database and separately publishing an event, prefer the **outbox pattern**: the service writes state and an event row in one local transaction, and CDC on the outbox table publishes it. Dual writes drift; an outbox cannot.
+
 ### 6.2 Silver
 Conformed, validated, reusable enterprise data.
 
@@ -885,6 +943,210 @@ Schema evolution is allowed, but it must be governed:
 - every table should have an owner-approved retention and maintenance policy before production use
 
 Hidden partitioning should be preferred over exposing physical partition assumptions to consumers. Consumers should query tables, not construct paths.
+
+---
+
+### 6.4 Write modes into Iceberg
+
+§2.3 separates streaming and batch as **compute** concerns — which engine runs the work. This section defines them as **storage** concerns: how data actually lands in an Iceberg table.
+
+The two lanes converge. Whatever the engine, every write ends at the same operation: write Parquet data files into object storage, then atomically commit a manifest that makes them visible. Streaming and batch differ in **commit cadence** and **merge strategy**, not in mechanism. Engine choice does not imply write mode: Spark can write continuously in micro-batch, and Flink can append or upsert. Write mode is therefore a per-table decision with a named owner, not a consequence of which team wrote the job.
+
+#### 6.4.1 The four write modes
+
+| Mode | What the writer produces | Read cost | Write cost |
+|---|---|---|---|
+| Append-only | new data files only | lowest | lowest |
+| Upsert, copy-on-write (CoW) | rewritten data files containing the affected rows | lowest | highest |
+| Upsert, merge-on-read (MoR) | new data files plus delete files | grows until compaction | low |
+| Buffer-then-merge | continuous append to a staging table, periodic MERGE into the curated table | lowest on curated | amortised |
+
+#### 6.4.2 Scaling and blocking behaviour
+
+Each mode fails in a characteristic way. The failure signature matters more than the theory, because it is what an operator will actually observe.
+
+**Append-only**
+
+- *Pros*: cheapest commit; no read or write amplification; concurrent writers rarely contend because they produce disjoint files; fully replayable.
+- *Cons*: no in-place correction — restatements must be modelled as new rows carrying a sequence, with deduplication downstream.
+- *Scales*: near-linearly with volume and writer count. This is the default and the mode to prefer wherever the data model allows it.
+- *Blocks when*: commit cadence is high across many partitions. A 30-second commit interval across 200 partitions produces roughly 576,000 objects per day.
+- *Failure signature*: query planning time grows faster than data volume; manifest and metadata file counts climb; object listing slows.
+- *Mitigation*: lengthen the commit interval to minutes; schedule compaction as a first-class pipeline stage (§10.3), not as cleanup.
+
+**Upsert, copy-on-write**
+
+- *Pros*: fastest reads — consumers never merge delete files; simplest consumer semantics; the Iceberg default for update, delete, and merge commands.
+- *Cons*: write amplification. Updating a single row rewrites the entire data file that contains it — up to `write.target-file-size-bytes`, 512 MB by default.
+- *Scales*: with low change rates and read-heavy access — periodically rebuilt silver and gold tables.
+- *Blocks when*: change rate multiplied by file size exceeds the write budget. A small daily percentage of changed rows scattered across large files can rewrite most of a table to update very little of it. Concurrent writers touching overlapping files conflict under optimistic concurrency, retry, and can livelock.
+- *Failure signature*: job runtime dominated by rewriting unchanged rows; repeated commit retries on the same table.
+- *Mitigation*: switch high-churn tables to merge-on-read; partition writers by key range so they touch disjoint files; serialise commits per table.
+
+**Upsert, merge-on-read**
+
+- *Pros*: cheap writes — the writer records deletes instead of rewriting data. This is the only mode that sustains continuous CDC at rate.
+- *Cons*: read amplification — readers reconcile delete files against data files. Equality deletes cost more at read time than position deletes. Correctness of performance depends entirely on compaction keeping up.
+- *Scales*: with high update rates and continuous ingestion.
+- *Blocks when*: compaction falls behind. Delete files accumulate without bound and read latency degrades continuously. This is the characteristic merge-on-read failure: **writes stay fast while reads collapse**, so the problem surfaces to consumers first and to the writing team last.
+- *Failure signature*: rising delete-file count in table metadata — already a mandatory maintenance policy field (§10.3) — with read latency degrading while write latency stays flat.
+- *Mitigation*: aggressive scheduled compaction with an alert on the delete-file threshold; prefer position deletes where the engine offers the choice.
+
+**Buffer-then-merge**
+
+- *Pros*: decouples ingest latency from merge cost. Ingestion is append-only, so it scales like append; the expensive merge runs on a cadence the platform controls, amortising it across many changes instead of paying it per micro-batch.
+- *Cons*: two objects to operate and reason about; the curated table lags staging by the merge interval; staging consumes additional storage.
+- *Scales*: best overall shape for CDC into curated tables, and the recommended default when a source produces a continuous change stream that consumers read as current state.
+- *Blocks when*: the merge interval is shorter than the merge duration — merges overlap and queue — or merges fail silently and staging grows without bound.
+- *Failure signature*: merge duration trending toward the interval; staging row count or lag trending up.
+- *Mitigation*: monitor merge duration against its interval as an explicit signal; bound staging retention; alert on curated-table lag.
+
+#### 6.4.3 Choosing a lane
+
+Latency requirement is the deciding factor, and it is routinely overstated. Choosing a lane costlier than the requirement buys nothing but operational load and compaction expense.
+
+| Freshness requirement | Lane | Engine | Typical write mode | Operational cost |
+|---|---|---|---|---|
+| Sub-second | continuous streaming | Flink over the event backbone (Phase 2+) | append for bronze, merge-on-read for updatable tables | highest |
+| Seconds to minutes | micro-batch | Spark Structured Streaming on a 1–5 minute trigger | append, or buffer-then-merge | moderate |
+| Hours | scheduled batch | Spark under Airflow | append, or copy-on-write upsert | lowest to operate, highest peak storage load |
+
+Each lane still leaves a choice of writer: Flink, Spark Structured Streaming, and the Iceberg Kafka Connect sink can all commit to the same tables, and the sink sits at micro-batch freshness rather than continuous. §6.4.7 compares the three.
+
+**Batch is cheapest to operate but not cheapest for the storage tier**, and on fixed hardware the distinction matters. A scheduled run moves the same volume and produces a comparable object count, but concentrates it into one window instead of spreading it across the day, so the appliance must be sized for that peak. Elastic cloud storage absorbs the difference; an installed cluster does not. Where the source is already an event topic, batch ingestion is simply the writer tier of §6.4.7 running with a longer window — the buffering, rotation, and commit protocol are identical and only the interval differs — so the lane can be chosen after the writer exists, and revised later without redesign. What batch does **not** fix is a per-message write path: moving one-request-per-message to an overnight schedule leaves the request count unchanged and compresses it into a shorter window, which is worse.
+
+Two reasons legitimately force the continuous lane: a genuine sub-second requirement, or a source that only exposes a log — event topics with no queryable state behind them — in which case there is no batch option to begin with. Absent both, the micro-batch lane satisfies most stated "streaming" requirements at a fraction of the cost, and it does so on the Phase 1 Spark increment without waiting for the Phase 2 event backbone.
+
+#### 6.4.4 Correctness rules
+
+These are mandatory for any table fed by an upsert or CDC path.
+
+1. **Merge on a sequence, not only on a key.** The merge condition must compare a monotonic sequence — log sequence number, SCN, or partition offset — and reject older values. Matching on the business key alone lets a late-arriving older event overwrite newer state. This is the most common silent corruption in CDC pipelines.
+2. **Exactly-once is a commit property, not a transport property.** It is achieved by at-least-once delivery plus an idempotent atomic commit keyed on a checkpoint or offset identifier recorded in the Iceberg snapshot metadata. Pursuing exactly-once in the transport layer adds cost without delivering the guarantee.
+3. **Commit offsets last.** Source offsets are committed only after the data is durably written *and* the catalog commit has succeeded. Committing on read means a storage failure silently discards a window, with no error and no way to detect the loss afterwards. This ordering is the single rule that hand-built writers most often get wrong; the supported runtimes in §6.4.7 implement it, which is a reason to prefer them over custom code.
+4. **Watermark extraction cannot observe hard deletes.** A table fed by `updated_at > last_watermark` extraction silently retains rows deleted at source. Either accept and document that, or capture the source log (§6.1).
+5. **Event time and processing time are distinct fields.** Both are recorded; tables partition on event time where consumers filter on it. Watermark windows must overlap and the target must deduplicate, because commits arriving out of order and backdated updates are normal, not exceptional.
+6. **One writer per table in steady state**, as required by the write-ownership rule above. Where a second writer is unavoidable, partition writers by key range so they never contend for the same files.
+
+#### 6.4.5 Commit cadence and the small-file tax
+
+Small files are the dominant operational tax on this architecture, and commit cadence is the control. Every table therefore declares a commit cadence alongside the maintenance policy fields in §10.3.
+
+Iceberg targets 512 MB data files by default (`write.target-file-size-bytes` = 536870912). Writers producing files far below that target are trading a small latency gain for a permanent planning cost.
+
+**The governing figure is objects created per second, not bytes stored.** Streaming and batch move the same volume of data; they differ in how many objects that volume is divided into, and that division is a buffering setting rather than a property of either approach. Capacity is added by installing drives. Request and metadata capacity is fixed by the gateway nodes and index hardware already installed, so it is the figure that binds first.
+
+On premises there is no elasticity to absorb the difference, and one logical PUT is not one write:
+
+```text
+client PUT → RGW gateway → bucket index update → erasure split (k+m) → k+m drive operations
+```
+
+Under an 8+3 erasure profile each object costs eleven fragment writes plus a metadata update. At four objects per second that is negligible; at four hundred it is roughly 4,400 sustained small random writes competing with query traffic and compaction.
+
+Four failure modes follow, in the order they are likely to appear:
+
+| Failure mode | Signature |
+|---|---|
+| Metadata layer saturation | RGW holds each object in a sharded bucket index in RocksDB omap; plan roughly 100,000 objects per shard. Beyond that, resharding and RocksDB compaction produce latency spikes indistinguishable from storage saturation |
+| Write amplification | as above — the k+m multiplier applies to every object, so object count multiplies drive operations |
+| Burst replay | a writer restarting after an outage drains its backlog at maximum rate into a cluster with no headroom, worst of all while a drive is rebuilding |
+| Read-side degradation | a partition holding hundreds of thousands of small files spends its query planning time on footer reads and listings |
+
+Design rules that follow:
+
+- Rotate on **5–15 minutes**, not 30–60 seconds. The objective is reducing object count, not chasing freshness the tier is not meant to serve.
+- Where sub-minute freshness is genuinely required, serve it from the event backbone — Flink state or a query service reading the topic — and treat the lakehouse as the minutes-latency tier.
+- Bound bucket growth structurally, and **pre-shard the bucket index at creation** (`rgw_override_bucket_index_max_shards`) against the object-per-shard budget rather than relying on dynamic resharding, which is disabled on high-ingest buckets and performed deliberately instead. Place the index pool on NVMe.
+- Rate-limit the writer so replay cannot saturate the cluster, and back off on 503 responses.
+- Budget compaction as consuming the same cluster it is protecting: it reads every small file and writes larger ones back while ingest continues. Schedule off-peak and throttle it.
+- Monitor **two** figures against **two** ceilings: requests per second against the gateway limit, and total objects per bucket against the index shard budget. Batching improves the first and does nothing for the second, which only ever grows — which is why snapshot expiry and compaction (§10.3) remain mandatory regardless of write cadence.
+
+Sizing figures must be measured on the installed hardware rather than taken from public-cloud limits: benchmark PUT operations per second until p99 latency rises or 503s appear, repeat against a bucket pre-loaded to a realistic object count to expose metadata degradation, and set the operating budget at half the measured figure, reserving the rest for compaction, replay, and erasure recovery. The minimum rotation interval then follows from `partitions ÷ operating budget`. The detailed measurement and replay-drill procedure is in [kafka_to_onprem_lakehouse_design_notes.md](kafka_to_onprem_lakehouse_design_notes.md).
+
+#### 6.4.6 Zone defaults and table configuration
+
+| Zone | Default write mode | Rationale |
+|---|---|---|
+| Bronze | append-only, always | source fidelity, replay, and audit require immutability; corrections arrive as new rows, never as mutations |
+| Silver | upsert — copy-on-write when change rates are low, merge-on-read when fed continuously | conformed current state; buffer-then-merge is the preferred shape for a CDC source |
+| Gold | copy-on-write upsert, or full rebuild | read-optimised and consumer-facing; write cost is acceptable in exchange for read simplicity |
+| `platform.quality_check_results` | append-only | permanent audit trail (§5.3) |
+
+Write mode is set explicitly per table rather than left to engine defaults:
+
+| Property | Values | Iceberg default | Set when |
+|---|---|---|---|
+| `write.delete.mode`, `write.update.mode`, `write.merge.mode` | `copy-on-write`, `merge-on-read` (format v2 and above) | `copy-on-write` | select `merge-on-read` for continuously updated tables |
+| `write.target-file-size-bytes` | bytes | `536870912` (512 MB) | lower only with measured evidence |
+| `write.format.default` | `parquet` | `parquet` | retain |
+| `write.delete.isolation-level` | `serializable`, `snapshot` | `serializable` | relax only with a recorded justification |
+| `write.upsert.enabled` (Flink) | `true`, `false` | not set | Flink upsert writes; requires format v2 and identifier fields, requires partition source columns among the equality fields, and is mutually exclusive with overwrite |
+
+References:
+
+- Iceberg table configuration: https://iceberg.apache.org/docs/latest/configuration/
+- Iceberg Flink writes, including upsert requirements: https://iceberg.apache.org/docs/latest/flink-writes/
+
+#### 6.4.7 Choosing the writer
+
+Three runtimes can take a topic and produce Iceberg table commits. They occupy the same position — between the topic and the table — so this is a choice per table, not a layering.
+
+```text
+                     ┌─ Flink job ──────────────────┐
+                     │                              │
+event topic ─────────┼─ Spark Structured Streaming ─┼─────► Iceberg table
+                     │                              │       (via Polaris)
+                     └─ Iceberg Kafka Connect sink ─┘
+```
+
+| | Flink | Spark Structured Streaming | Iceberg Kafka Connect sink |
+|---|---|---|---|
+| Achievable freshness | sub-second | minutes, set by the trigger | minutes, set by the commit interval (300,000 ms default) |
+| Keyed state | full: joins, windows, event-time aggregation | available, in the micro-batch model | none; row-level transforms only |
+| Upsert mechanism | upsert writes keyed on declared equality fields | full SQL `MERGE INTO`, copy-on-write or merge-on-read | simple upsert |
+| Commit trigger | checkpoint, two-phase commit | one commit per micro-batch | fixed interval, coordinated by an elected worker over a control topic |
+| Runtime required | its own cluster: JobManager, TaskManagers, checkpoint store | the Spark cluster the platform already runs | the Connect worker cluster already running Debezium |
+| Available from | the streaming stage | **the foundation stage** | the streaming stage |
+
+**Decide in this order.**
+
+1. **Required freshness.** Sub-second admits only Flink. Minutes admits all three. Hours means this is not a streaming question at all — use scheduled batch (§6.4.3).
+2. **Required state.** Joins, windows, aggregation, or deduplication across events rules out the Connect sink at any price; it cannot hold keyed state.
+3. **Runtime already operated.** Where the first two leave a genuine choice, prefer the runtime the platform already runs. Adding a writer is cheaper than adding a cluster.
+
+Applying that to Stratus: Spark arrives in the foundation stage while Flink and Kafka Connect both arrive in the streaming stage, so **minutes-latency ingestion is achievable on the current increment with no new runtime**. Spark micro-batch is therefore the default answer to most stated streaming requirements, and the other two are adopted for a specific, named reason.
+
+**What the writer must do, whichever runtime provides it.** These are requirements on the ingestion tier, not implementation preferences, and they are the reason a supported runtime is used rather than a service written in-house:
+
+- buffer to local disk rather than memory, so window size is not bounded by heap and a restart does not lose the in-flight window
+- rotate on size or elapsed time, whichever comes first, writing one object per window per partition via multipart upload
+- commit to the catalog, then commit source offsets — never the reverse (§6.4.4)
+- on storage unavailability, stop committing and let consumer lag build; pause the consumer when the local buffer fills rather than failing, retrying inside the poll loop, or discarding data
+
+That last point is what a writer tier exists for: it gives backpressure somewhere to go. A consumer calling the object store from inside its own poll loop has no buffer, so a storage stall forces it to block past the poll interval and be evicted from the group, crash-loop, or drop data. Eviction triggers a rebalance across every other consumer, whose replayed windows then hit the appliance simultaneously — the storage problem becomes a consumer-group problem that amplifies it. Two settings bound the residual coupling: event retention must cover the longest tolerable storage outage **plus** the throttled catch-up that follows it, which is usually the longer of the two; and the backbone must not use tiered storage on the same appliance, or an outage takes out both systems at once and the decoupling fails exactly when it is needed.
+
+Window size belongs to the writer tier, never to the producing application. The producer cannot see target file size, consumer read patterns, or the appliance's available request capacity, and all three change independently of it. Worse, producer count is elastic: with N producer instances each buffering independently, one window yields N objects at roughly 1/N of the intended size, and scaling out under load multiplies object count precisely when the appliance is busiest. Write parallelism on the consumer side is bounded by partition count, which is chosen deliberately.
+
+**Flink** is selected where freshness is genuinely sub-second or the job needs continuous keyed state. Its cost is an additional cluster with its own checkpoint store, savepoint lifecycle, and failure drills.
+
+**Spark Structured Streaming** reuses the batch engine, its `MERGE INTO` support gives the strongest upsert story of the three, and one team skill set covers ingestion and the silver/gold transforms. Its floor is the trigger interval: it will not deliver sub-second, and a long-running streaming job has a different operational profile from a scheduled batch job even on the same cluster.
+
+**The Iceberg Kafka Connect sink** removes the stream processor from the path entirely for tables that need no state, and its coordinator design addresses the commit-contention risk of §15.2 structurally: one elected worker commits, so *n* tasks across *m* intervals produce one snapshot per interval rather than *n × m*. Four costs must be accepted explicitly before adopting it:
+
+- **Duplicates remain possible.** Exactly-once delivery is documented on KIP-447, but zombie fencing is not yet implemented. A task stalled beyond the consumer session timeout can have its partitions reassigned while still alive, and the zombie may then complete its own commit. Session-timeout tuning is a correctness control here, not merely rebalance hygiene.
+- **The default failure posture is brittle for on-premises storage.** `iceberg.control.commit.max-consecutive-failures` defaults to **1**, so the coordinator terminates after a single failed commit, and connector errors are non-retryable, which fails the task. A storage blip that Flink or Spark would ride out by letting lag build will stop this connector. Raise it deliberately.
+- **A silent misconfiguration exists.** If the Connect consumer group id and the control topic group id disagree, no coordinator is elected: records are consumed and nothing is ever committed, with no clear error. Any adoption must verify that a written record becomes a committed snapshot, not merely that the connector reports healthy.
+- **Two offset stores.** Source offsets live in a sink-managed consumer group committed with the data-file events in one Kafka transaction; control topic offsets ride in the Iceberg snapshot and are read back so only later events commit. Resetting offsets means resetting both groups.
+
+**What none of them change.** Polaris remains the catalog and governance is unaffected. The one-writer-per-table rule in §6 applies across all three: a table has one writer in steady state, whichever runtime it is, and a second writer added to an existing cluster is still a second writer. Orphan-file cleanup (§10.3) is required in every case, because all three can leave written-but-uncommitted files after a crash. Commit cadence drives the small-file tax (§6.4.5) identically. The sequence-number merge rule (§6.4.4) applies to any upsert path.
+
+Connect sink configuration defaults were verified against the Iceberg Kafka Connect documentation on 2026-08-06; its coordinator, offset, and failure-recovery behaviour is drawn from the connector's design document and should be read in full before adoption.
+
+References:
+
+- Iceberg Kafka Connect sink: https://iceberg.apache.org/docs/latest/kafka-connect/
+- Iceberg Spark structured streaming: https://iceberg.apache.org/docs/latest/spark-structured-streaming/
 
 ---
 
@@ -1085,6 +1347,8 @@ Each governed table must have a maintenance policy before production onboarding.
 
 **Targets are starting points.** Adjust cadences based on observed table activity and query performance. The key discipline is that every table has a maintenance schedule and an owner — not the specific numbers.
 
+**Event retention is a maintenance parameter too, and it is sized against replay rather than against the outage.** Retention must cover the outage plus the throttled catch-up that follows, and the catch-up is normally the longer term: with replay throttled to `k ×` the ingest rate, retention must be at least `T × k/(k−1)` for an outage of `T`. A six-hour maintenance window with replay throttled to 1.5× ingest therefore requires eighteen hours of retention, not six. The two settings pull against each other — throttling replay harder to protect the storage tier increases the retention required to survive the same outage — so the throttle is set first from the measured operating budget (§6.4.5) and retention is sized from it. Undersized retention converts consumer lag into permanent data loss.
+
 If this is neglected, performance and reliability will degrade over time.
 
 ### 10.4 Data quality and promotion
@@ -1108,25 +1372,34 @@ If control-plane state is not backed up, the platform is not recoverable even if
 
 ## 11. Reference End-to-End Flow
 
+Write modes referenced below are defined in §6.4.
+
 ### 11.1 Batch flow
-1. source files arrive in the object-storage landing zone
+1. source files arrive in the object-storage landing zone, or a bounded extract is captured per §6.1
 2. Airflow triggers ingestion and validation pipeline
-3. Spark normalises and writes bronze Iceberg tables
-4. Spark transforms bronze to silver
-5. Spark or SQL jobs materialise gold tables
+3. Spark normalises and **appends** to bronze Iceberg tables — bronze is never mutated in place
+4. Spark transforms bronze to silver, **upserting copy-on-write** where change rates are low
+5. Spark or SQL jobs materialise gold tables by **copy-on-write upsert or full rebuild**
 6. Atlas metadata and lineage are updated
 7. the acceleration engine (Firebolt Core or ClickHouse) optionally serves curated gold datasets
+
+Commit cadence is the job schedule, so the small-file pressure of §6.4.5 is low and compaction runs on its ordinary maintenance schedule.
 
 ### 11.2 Streaming flow
 This flow applies when a streaming backbone such as Kafka is deployed (typically Phase 2+).
 
-1. source database changes are captured by a Debezium connector running in Kafka Connect and published to a Kafka topic
+1. source database changes are captured by a Debezium connector running in Kafka Connect and published to a Kafka topic, carrying before/after images and a sequence number
 2. business events from application producers land directly in Kafka topics
-3. Flink consumes Kafka topics, enriches and transforms streams
-4. Flink writes bronze or silver Iceberg tables continuously via the Polaris catalog
-5. downstream Spark or Flink jobs materialise higher-order views
-6. Atlas metadata and lineage are synchronised
-7. the acceleration engine or BI consumers query curated outputs via Trino or directly
+3. Flink consumes Kafka topics, enriches and transforms streams; topics are keyed on the entity primary key so all changes to one row stay ordered in one partition
+4. Flink **appends** change events to bronze Iceberg tables continuously via the Polaris catalog, committing on the checkpoint interval
+5. current-state silver tables are produced either by **merge-on-read upsert** from Flink, or by the **buffer-then-merge** shape — periodic MERGE from the bronze change stream — which is the preferred default because it keeps ingestion append-only
+6. downstream Spark or Flink jobs materialise higher-order views
+7. Atlas metadata and lineage are synchronised
+8. the acceleration engine or BI consumers query curated outputs via Trino or directly
+
+Two obligations attach to this flow specifically: merges compare the source sequence number so late events cannot overwrite newer state (§6.4.4), and compaction must keep pace with delete-file growth or read latency degrades while writes continue to look healthy (§6.4.2).
+
+Steps 3 and 4 assume Flink between the topic and the table. Spark Structured Streaming and the Iceberg Kafka Connect sink can occupy that same position for tables whose freshness requirement is minutes rather than sub-second; §6.4.7 compares the three writers.
 
 ---
 
@@ -1560,9 +1833,14 @@ An increment document may show a build-system command such as `mvn verify` only 
 **Mitigation:** mandate Iceberg for all governed analytical datasets.
 
 ### 15.2 Risk: Spark and Flink commit contention or ownership confusion
-**Cause:** multiple engines writing the same tables without clear rules.
+**Cause:** multiple engines writing the same tables without clear rules. Iceberg commits are optimistically concurrent: writers that touch overlapping files detect the conflict at commit time, retry, and under sustained contention can livelock, so throughput collapses while both engines appear to be running normally.
 
-**Mitigation:** define one-writer-per-table steady-state ownership where possible, assign compaction ownership explicitly, and separate streaming append patterns from batch-upsert or serving-table materialization patterns.
+**Mitigation:** define one-writer-per-table steady-state ownership where possible, assign compaction ownership explicitly, and select the write mode per table as defined in §6.4 rather than letting it follow from engine choice. Note that the Iceberg Kafka Connect sink (§6.4.7) addresses this risk structurally, by electing a single coordinator so that many tasks produce one snapshot per interval instead of one per task. Where a second writer is unavoidable, partition writers by key range so they never touch the same files, or serialise commits per table. Copy-on-write upserts contend most, because rewriting a file conflicts with any other writer touching it; append-only and merge-on-read writers produce disjoint files and contend least.
+
+### 15.2.1 Risk: merge-on-read tables degrade silently for readers
+**Cause:** delete files accumulate faster than compaction removes them. Write latency stays flat, so the writing team sees no symptom while consumer query latency rises continuously.
+
+**Mitigation:** treat compaction as a scheduled pipeline stage rather than cleanup, alert on the delete-file count threshold already required by the §10.3 maintenance policy, and monitor read latency as a table-level signal independent of write health.
 
 ### 15.3 Risk: Atlas becomes shelfware
 **Cause:** no serious metadata ingestion, no ownership discipline, no lineage automation.
@@ -1723,6 +2001,12 @@ Get them wrong and you will just have an expensive collection of tools.
 - Apache Kafka: https://kafka.apache.org/
 - Apache Kafka Connect: https://kafka.apache.org/documentation/#connect
 - Debezium: https://debezium.io/
+- Iceberg Kafka Connect sink, one of the three writers compared in §6.4.7: https://iceberg.apache.org/docs/latest/kafka-connect/
+- Apache Pulsar, evaluated as an alternative in §4.5.1: https://pulsar.apache.org/
+- Pulsar architecture overview: https://pulsar.apache.org/docs/concepts-architecture-overview/
+- Pulsar tiered storage: https://pulsar.apache.org/docs/tiered-storage-overview/
+- Pulsar IO Debezium connectors: https://pulsar.apache.org/docs/io-cdc-debezium/
+- Debezium Server, including the Pulsar sink: https://debezium.io/documentation/reference/stable/operations/debezium-server.html
 - Trino documentation: https://trino.io/docs/current/
 - Trino Iceberg connector: https://trino.io/docs/current/connector/iceberg.html
 - Firebolt external data and Iceberg: https://docs.firebolt.io/performance-and-observability/iceberg-and-external-data

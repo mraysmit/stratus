@@ -157,7 +157,9 @@ final class ComposeClusterConformanceTest {
     void secretRotationUsesOverlapCutoverAndRevocationWithoutDestroyingData() {
         String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/ceph-compose-rotate-secrets.sh"));
         List<String> violations = new ArrayList<>();
-        int create = rotation.indexOf("set_rgw_key create");
+        // Anchored on the rotation-path call: the repair path also creates a
+        // key, and an unanchored search would silently start matching it.
+        int create = rotation.indexOf("set_rgw_key create \"$CEPH_DEMO_UID\" \"$new_primary_access\"");
         int cutover = rotation.indexOf("log \"CUTOVER PASS:");
         int revoke = rotation.indexOf("set_rgw_key remove", cutover);
         if (create < 0 || cutover < 0 || revoke < 0 || !(create < cutover && cutover < revoke)) {
@@ -187,6 +189,59 @@ final class ComposeClusterConformanceTest {
         }
         if (rotation.contains("down --volumes") || rotation.contains("ceph-compose-reset.sh")) {
             violations.add("secret rotation must never destroy Ceph volumes or reset the cluster");
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
+    @Test
+    void secretRotationRecoversFromInterruptionWithoutManualRepair() {
+        String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/ceph-compose-rotate-secrets.sh"));
+        List<String> violations = new ArrayList<>();
+        if (!rotation.contains("printf '%s\\n' \"$$\" >\"$lock_dir/owner.pid\"")) {
+            violations.add("the lock must record its owning process, or a killed run cannot be told from a live one");
+        }
+        int acquired = rotation.indexOf("lock_acquired=true");
+        int recordOwner = rotation.indexOf("owner.pid\"", acquired);
+        if (acquired < 0 || recordOwner < 0) {
+            violations.add("the owning process must be recorded once the lock is held");
+        }
+        if (!rotation.contains("kill -0 \"$owner_pid\"")) {
+            violations.add("staleness must be decided by testing the owning process, not by age or by prompting");
+        }
+        int reclaim = rotation.indexOf("reclaim_stale_lock");
+        int stillFails = rotation.indexOf("Another secret rotation appears to be active");
+        if (reclaim < 0 || stillFails < 0 || reclaim > stillFails) {
+            violations.add("a live lock must still fail closed after the stale-lock check declines to reclaim");
+        }
+        if (!rotation.contains("Removing orphaned rotation stage directory")) {
+            violations.add("reclaiming a stale lock must also clear the stage directories the dead run left behind");
+        }
+        if (!rotation.contains("[[ -d \"$orphan\" && \"$orphan\" != \"$stage\" ]]")) {
+            violations.add("orphan cleanup must never remove the current run's own stage directory");
+        }
+        assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
+    @Test
+    void keyRepairReconcilesRgwWithEnvAndRemovesUnrevokedKeys() {
+        String rotation = Repo.read(HARNESS.resolve("scripts/lifecycle/ceph-compose-rotate-secrets.sh"));
+        List<String> violations = new ArrayList<>();
+        if (!rotation.contains("--repair-keys) mode=repair-keys ;;")) {
+            violations.add("the drift left by a rolled-back rotation must have a repair command, not a manual procedure");
+        }
+        if (!rotation.contains("run --repair-keys to reconcile RGW with .env")) {
+            violations.add("preflight must name the repair command when it refuses on key drift");
+        }
+        int repairDispatch = rotation.indexOf("if [[ \"$mode\" == repair-keys ]]");
+        int rotationStart = rotation.indexOf("old_primary_access=\"$CEPH_RGW_ACCESS_KEY\"");
+        if (repairDispatch < 0 || rotationStart < 0 || repairDispatch > rotationStart) {
+            violations.add("repair must exit before any rotation state is generated; it rotates nothing");
+        }
+        if (!rotation.contains("REPAIR: removing key '$existing' from $uid")) {
+            violations.add("repair must remove keys absent from .env — a key left by a failed rotation is un-revoked");
+        }
+        if (!rotation.contains("|| fail \"Failed to attach the .env key to $uid\"")) {
+            violations.add("repair must verify each reattached key against RGW rather than assume success");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
     }

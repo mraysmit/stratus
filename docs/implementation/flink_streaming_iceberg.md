@@ -8,6 +8,8 @@ Increment 11 connects the Phase 2 streaming runtime to the Phase 1 lakehouse fou
 
 This increment is not a general Flink deployment and not an Iceberg maintenance increment. Increment 10 proves the Flink runtime. Increment 11 proves streaming table writes, checkpoint-aligned commits, table ownership, reader visibility, and operational guardrails.
 
+Flink, Spark Structured Streaming, and the Iceberg Kafka Connect sink are the three runtimes that can occupy this position between a topic and a table; architecture §6.4.7 compares them and states the decision order. Flink remains the selected path for this increment, because the streaming-owned tables below require continuous keyed state.
+
 The developer profile may write verification tables with reduced Flink parallelism and local checkpoint/savepoint state. The production profile reuses the same jobs and tables but requires Ceph RGW-backed recovery state, managed Polaris/RGW/Kafka credentials, production table locations, streaming-safe maintenance coordination, replay/recovery evidence, and no `file://` state path. Developer table data must remain isolated from production namespaces and buckets.
 
 **Prerequisites:**

@@ -225,6 +225,37 @@ final class IcebergRestCatalogConformanceTest {
     }
 
     @Test
+    void rejectsARowThatLeavesARequiredColumnNull() {
+        var schema = new Schema(
+                Types.NestedField.required(1, "id", Types.LongType.get()),
+                Types.NestedField.optional(2, "note", Types.StringType.get()));
+        Table table = createProbe(probeTable, schema);
+        appendRows(table, "enforcement-probe-0", probeRows(table, 1, 2));
+        long committedSnapshot = catalog.loadTable(probeTable).currentSnapshot().snapshotId();
+
+        // The record is built inside the lambda because either layer may
+        // enforce the schema — the record API on assignment or the Parquet
+        // writer on append. Both are the platform refusing the row; what must
+        // never happen is the row landing in a governed table.
+        var failure = assertThrows(RuntimeException.class,
+                () -> {
+                    var invalid = GenericRecord.create(table.schema());
+                    invalid.setField("id", null);
+                    invalid.setField("note", "missing-required-id");
+                    appendRows(table, "enforcement-probe-rejected", List.of(invalid));
+                },
+                "a row leaving a required column null must be rejected");
+
+        Table reloaded = catalog.loadTable(probeTable);
+        assertEquals(committedSnapshot, reloaded.currentSnapshot().snapshotId(),
+                "a rejected write must not advance the table snapshot");
+        assertEquals(2, readAll(reloaded).size(),
+                "a rejected write must not add rows to the table");
+        CatalogVerificationLogging.negativeConfirmed("required-column-null",
+                "refused with " + failure.getClass().getSimpleName());
+    }
+
+    @Test
     void createsWritesReadsAndDropsAProbeTableInEveryDataZone() {
         var schema = new Schema(
                 Types.NestedField.required(1, "id", Types.LongType.get()),
