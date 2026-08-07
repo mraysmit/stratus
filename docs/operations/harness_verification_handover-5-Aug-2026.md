@@ -7,7 +7,17 @@ became a harness verification exercise instead. Seven harness scripts had never
 been exercised in any recorded session; running them surfaced four real defects,
 three of which were verification blind spots — checks that reported PASS over a
 broken cluster. All four are fixed and committed as `b52b427` on `master`.
-**No Increment 2 (`P1-2.4-V1`) work was started.** That remains the next task.
+**No Increment 2 (`P1-2.4-V1`) work was started** in this session; it was taken
+up next and completed on 2026-08-06 (see the status note below).
+
+> **Status since this handover.** This document records the state on
+> 2026-08-05 and is not rewritten as work proceeds; §7 carries per-item
+> closure notes instead. `P1-2.4-V1` was completed and verified on 2026-08-06
+> in commit `b9aec63`, and the two rotation defects and the runbook clause
+> were closed on 2026-08-07 — see
+> [gap_closure_handover_20260807.md](gap_closure_handover_20260807.md). No item in §7 remains
+> open. Check the Increment task tracks for the current position rather than
+> this document.
 
 ---
 
@@ -214,30 +224,41 @@ unmodified in the commit — this is deliberate, not an oversight.
 
 ## 7. Open items (not addressed)
 
-1. **Interrupted rotation leaves a stale lock.** A rotation killed mid-run
-   leaves `.rotation/rotation.lock` and a `rotate.*` stage directory behind,
-   blocking every later rotation with *"Another secret rotation appears to be
-   active"*, plus an un-revoked old RGW key. The lock is released only in the
-   `EXIT` trap, which does not survive `SIGKILL`. Manual recovery: remove the
-   lock and stage dir, then reconcile keys against `.env`.
-   *Recorded in the commit message as follow-up.*
+1. ~~**Interrupted rotation leaves a stale lock.**~~ **Closed 2026-08-07.** A
+   rotation killed mid-run left `.rotation/rotation.lock` and a `rotate.*`
+   stage directory behind, blocking every later rotation with *"Another secret
+   rotation appears to be active"*, because the lock is released only in the
+   `EXIT` trap, which does not survive `SIGKILL`. The lock now records its
+   owning PID; the next run confirms that process is gone, reclaims the lock,
+   and clears the orphaned stage directories. A lock held by a live rotation
+   still fails closed. Covered by
+   `secretRotationRecoversFromInterruptionWithoutManualRepair`.
 
-2. **`.env` / RGW key drift after failed rotations.** A rolled-back rotation can
-   leave `.env` disagreeing with RGW for `stratus-verifier` and
-   `stratus-denied-owner`. Preflight catches it (*"The denied-owner access key in
-   .env is not attached to…"*) and refuses to run, which is correct, but there is
-   no repair command. Recovery is manual `radosgw-admin key create` / `key rm`.
+2. ~~**`.env` / RGW key drift after failed rotations.**~~ **Closed 2026-08-07.**
+   A rolled-back rotation could leave `.env` disagreeing with RGW for
+   `stratus-verifier` and `stratus-denied-owner`, with preflight correctly
+   refusing to run but offering no repair. `--repair-keys` now reconciles RGW
+   with `.env`: it attaches each `.env` key pair and removes every other key on
+   those identities, since a key left by a failed rotation is un-revoked. The
+   preflight failure message names the command. Covered by
+   `keyRepairReconcilesRgwWithEnvAndRemovesUnrevokedKeys`; both fixes still
+   need a live rotation run to be confirmed end to end.
 
-3. **Increment 2 `P1-2.4-V1` — not started.** Still the real next task:
-   provision `platform.quality_check_results` (14-column schema, append-only,
-   partitioned by `zone` and `checked_at` day), plus schema-evolution
-   conformance. It is the only thing blocking the `P1-2.G-D` developer gate,
-   which unblocks Increment 3.
+3. ~~**Increment 2 `P1-2.4-V1` — not started.**~~ **Closed 2026-08-06** by
+   commit `b9aec63`. `platform.quality_check_results` is provisioned
+   idempotently by the catalog bootstrap with the 14-column schema,
+   append-only marker, and `zone`/`checked_at`-day partitioning; the live
+   conformance suite covers it alongside schema evolution. `P1-2.G-D` is no
+   longer blocked by this item — see the Increment 2 task track.
 
-4. **P1-7.5 rotation runbook.** The rotation path now has a real gate, but the
-   propagation behaviour in §3.5 should be written into the runbook before that
-   work package is signed off — an operator rotating twice in quick succession
-   will see a failure that is expected.
+4. ~~**P1-7.5 rotation runbook.**~~ **Closed 2026-08-07.** The propagation
+   behaviour in §3.5 is written into
+   [harness_operations_runbook.md](harness_operations_runbook.md) §4 under
+   *Recovering from an interrupted rotation*, alongside the two fixes above:
+   an operator rotating twice in quick succession sees an expected failure and
+   is told to wait for propagation rather than treat the first rotation as
+   failed. `P1-7.5` still owns the production rotation runbook itself; this
+   closes only the harness-behaviour clause.
 
 ---
 

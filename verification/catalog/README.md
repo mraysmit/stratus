@@ -7,7 +7,8 @@ products only, the chain every compute engine will rely on: the zone
 namespaces resolve, a table can be created, written, read back, evolved in
 place, and purge-dropped through the catalog in every data zone, superseded
 snapshots expire while the current one stays readable, the files land
-inside the governed zone location, and a forged principal credential is
+inside the governed zone location, a row leaving a required column null is
+refused without advancing the snapshot, and a forged principal credential is
 refused.
 
 It also verifies the permanent `platform.quality_check_results` table
@@ -79,5 +80,9 @@ load (zstd-jni). Both are upstream-owned and tracked through BOM version
 upgrades, not suppressed locally.
 
 Open under the Increment 2 task track: table maintenance verification
-beyond snapshot expiry (compaction, orphan cleanup) and engine principals.
+beyond snapshot expiry — compaction, manifest rewrite, delete files, and
+orphan cleanup — which is carried by `P1-2.5-D1`, and engine principals,
+which belong to the increment that introduces each engine. The
+schema-enforcement negative added 2026-08-07 has not yet run against a live
+catalog; it is the one check in this suite without a transcript.
 Prerequisite: `storage` verification passed against a live cluster.
