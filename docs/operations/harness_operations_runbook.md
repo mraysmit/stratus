@@ -183,6 +183,33 @@ after a normal rotation. An operator rotating twice in quick succession will
 see a failure that is expected. Wait for propagation before the second
 rotation rather than treating the first as failed.
 
+**Churned keys settle far more slowly than the 300s gate allows.** The figure
+above is the *normal* case. Measured on 2026-08-08, an identity whose keys were
+rotated and then reconciled by `--repair-keys` took roughly **19 minutes** to
+settle, exhausting two consecutive 300s `verify-dashboard` deadlines. The
+deadline is deliberately not sized for this case, so a `verify-dashboard`
+failure shortly after repair is the gate reporting an unsettled cluster.
+Confirm rather than assume, with the discriminating test: through one dashboard
+session, create a bucket on behalf of several owners. If only the churned
+identity answers `500` (RGW `403`) while the others answer `201`, it is
+propagation. It clears with no intervention — restarting daemons or the harness
+only consumes the settle time.
+
+**A rotation invalidates the Polaris truststore.** Rotation regenerates the
+harness CA, and Polaris builds its truststore once at startup. A Polaris
+started before the rotation cannot validate the new RGW certificate afterwards,
+and the whole catalog suite fails with a *server-side*
+`PKIX path validation failed: Path does not chain with any of the trust
+anchors`. The workstation JVM is not at fault — its truststore is rebuilt on
+every test run. Restart Polaris and re-run the catalog bootstrap after any
+Ceph secret rotation:
+
+```bash
+bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-shutdown.sh
+bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-startup.sh
+bash platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh
+```
+
 **A killed rotation no longer needs manual repair.** The lock records its
 owning process. If a rotation is killed outright, the next run confirms that
 process is gone, reclaims the lock, removes the stage directories the dead run
@@ -203,7 +230,7 @@ exits before any rotation state is generated. Re-run `--preflight` afterwards
 to confirm the cluster is ready.
 
 The original observations are recorded in
-[harness_verification_handover.md](harness_verification_handover.md).
+[harness_verification_handover-5-Aug-2026.md](harness_verification_handover-5-Aug-2026.md).
 
 ---
 
@@ -255,7 +282,8 @@ lists and table properties). Filter one channel with
 
 | Symptom | Cause and resolution |
 |---|---|
-| `curl (52) empty reply` from a bootstrap script | the service is still starting; wait for its verify-endpoint script to pass, then re-run |
+| `curl (52) empty reply` from a bootstrap script | the service is still starting. The Polaris bootstrap now waits for the API itself; if this appears, the service is not merely slow — check its container logs |
+| `PKIX path ... does not chain with any of the trust anchors` from Polaris | the harness CA was rotated after Polaris started; restart Polaris and re-run the catalog bootstrap (§4) |
 | Live JVM tests fail on TLS or unknown host | missing hosts-file entry — run `ceph-compose-configure-hostname.sh`; the truststore itself is supplied by the wrapper |
 | `verify-storage` reports a stale image | rebuild the verifier image (§3.2) |
 | `NoSuchTable: platform.quality_check_results` | Polaris was restarted; re-run the catalog bootstrap (§2) |

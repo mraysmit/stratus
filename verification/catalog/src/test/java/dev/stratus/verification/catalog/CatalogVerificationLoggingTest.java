@@ -121,6 +121,38 @@ final class CatalogVerificationLoggingTest {
     }
 
     @Test
+    void orphanScanRecordsTheInventoryAtInfoAndTheLocationsAtDebug() {
+        CatalogVerificationLogging.configure("INFO");
+
+        CatalogVerificationLogging.orphanScanCompleted("platform.orphan_probe_x",
+                "s3://stratus-platform/platform/orphan_probe_x", 9, 8,
+                List.of("s3://stratus-platform/platform/orphan_probe_x/data/abandoned.parquet"),
+                List.of());
+
+        assertEquals(1, capture.records.size(), "INFO configuration must suppress DEBUG records");
+        String infoText = capturedText();
+        assertTrue(infoText.contains("Orphan scan completed table=platform.orphan_probe_x"
+                + " scannedFiles=9 referencedFiles=8 orphanFiles=1 withinMinimumAge=0"));
+        assertFalse(infoText.contains("abandoned.parquet"),
+                "the inventory is the INFO record; the locations belong at DEBUG");
+
+        capture.records.clear();
+        CatalogVerificationLogging.configure("DEBUG");
+
+        CatalogVerificationLogging.orphanScanCompleted("platform.orphan_probe_x",
+                "s3://stratus-platform/platform/orphan_probe_x", 9, 8,
+                List.of("s3://stratus-platform/platform/orphan_probe_x/data/abandoned.parquet"),
+                List.of("s3://stratus-platform/platform/orphan_probe_x/data/in-flight.parquet"));
+
+        assertEquals(2, capture.records.size(), "DEBUG must add the location record");
+        assertEquals(Level.FINE, capture.records.getLast().getLevel());
+        String debugText = capturedText();
+        assertTrue(debugText.contains("abandoned.parquet"), "DEBUG must name the orphans");
+        assertTrue(debugText.contains("in-flight.parquet"),
+                "DEBUG must also name what the age threshold withheld");
+    }
+
+    @Test
     void tableDefinitionRecordsIdentifyTheValidatedAspectAtInfo() {
         CatalogVerificationLogging.configure("INFO");
 

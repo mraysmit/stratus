@@ -18,9 +18,12 @@ source "$(dirname "$0")/../lib/polaris-compose-common.sh"
 
 load_environment
 
-scheme="https"
-[[ "${POLARIS_ALLOW_HTTP:-false}" == true ]] && scheme="http"
-api="$scheme://127.0.0.1:${POLARIS_PORT:-8181}/api"
+api="$(polaris_api_base)"
+
+# Startup returns as soon as the container is up, which is tens of seconds
+# before the API answers, so this script must wait rather than assume the
+# documented startup-then-bootstrap sequence leaves Polaris ready.
+wait_for_polaris_api
 
 # The bootstrap credential is realm,client-id,client-secret.
 client_id="$(printf '%s' "$POLARIS_BOOTSTRAP_CREDENTIALS" | cut -d, -f2)"
@@ -30,12 +33,15 @@ client_secret="$(printf '%s' "$POLARIS_BOOTSTRAP_CREDENTIALS" | cut -d, -f3)"
 
 curl_api() { curl --silent --cacert "$CEPH_HARNESS_CA_FILE" --max-time 30 "$@"; }
 
+# Tolerate a curl transport failure so the diagnostic below is reachable: an
+# unreachable Polaris exits curl 52, which under `set -e` would otherwise abort
+# this script with a bare exit code in exactly the case the message explains.
 token_response="$(curl_api -X POST "$api/catalog/v1/oauth/tokens" \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d 'grant_type=client_credentials' \
   -d "client_id=$client_id" \
   -d "client_secret=$client_secret" \
-  -d 'scope=PRINCIPAL_ROLE:ALL')"
+  -d 'scope=PRINCIPAL_ROLE:ALL' || true)"
 token="$(printf '%s' "$token_response" | sed -nE 's/.*"access_token" *: *"([^"]+)".*/\1/p')"
 [[ -n "$token" ]] || fail "Could not obtain an OAuth token from $api (is Polaris running? response: ${token_response:0:200})"
 log "Authenticated as $client_id"
