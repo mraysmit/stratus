@@ -110,6 +110,21 @@ final class CatalogVerificationLogging {
                 safeToken(filesWithinMinimumAge.toString(), 1024));
     }
 
+    /**
+     * Records one metadata-driven maintenance decision. INFO carries the
+     * verdict with the value and trigger it was taken from, because a verdict
+     * without both cannot be reviewed; DEBUG adds which metadata table was
+     * read and what the value counted.
+     */
+    static void maintenanceDecision(String table, String category, String metadataTable,
+                                    long observed, long threshold, boolean actionRecommended,
+                                    String detail) {
+        LOGGER.info("Maintenance decision table={} category={} observed={} threshold={} actionRecommended={}",
+                safeToken(table), safeToken(category), observed, threshold, actionRecommended);
+        LOGGER.debug("Maintenance decision detail table={} category={} metadataTable={} detail={}",
+                safeToken(table), safeToken(category), safeToken(metadataTable), safeToken(detail));
+    }
+
     static void negativeConfirmed(String check, String detail) {
         LOGGER.info("Negative check confirmed check={} detail={}", safeToken(check), safeToken(detail));
     }
