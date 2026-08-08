@@ -15,16 +15,21 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.data.GenericAppenderFactory;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
+import org.apache.iceberg.deletes.EqualityDeleteWriter;
+import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.SupportsPrefixOperations;
 import org.apache.iceberg.parquet.Parquet;
@@ -155,6 +160,28 @@ final class OrphanFileDetectionConformanceTest {
     }
 
     @Test
+    void treatsACommittedDeleteFileAsReferenced() {
+        // Row-level deletes put the reachable set behind a delete manifest,
+        // which is read by a different code path from data manifests. Without
+        // this the delete file is unreferenced, and a delete path wired to
+        // that verdict would remove the record of what was deleted.
+        Table table = probeWithACommittedEqualityDelete();
+
+        var detector = new OrphanFileDetector(
+                Clock.fixed(Instant.now().plus(ONE_HOUR), ZoneOffset.UTC), Duration.ZERO);
+        OrphanFileReport report = detector.detect(table);
+
+        assertTrue(report.scannedFiles() > 0,
+                "the scan must have listed objects under " + table.location());
+        assertEquals(List.of(), report.orphanFiles(),
+                "a committed delete file and its manifest must be reachable, not orphans");
+        assertEquals(List.of(), report.filesWithinMinimumAge(),
+                "a zero minimum age must leave nothing withheld");
+        CatalogVerificationLogging.tableDefinitionValidated(probeTable.toString(),
+                "orphan-detection-delete-files", "delete file and delete manifest resolved as referenced");
+    }
+
+    @Test
     void withholdsAnUnreferencedFileThatIsYoungerThanTheMinimumAge() {
         Table table = probeWithTwoCommittedAppends();
         String inFlight = writeDataFileWithoutCommitting(table, "still-being-written");
@@ -188,6 +215,40 @@ final class OrphanFileDetectionConformanceTest {
         // because an append carries the previous manifest forward.
         appendRows(table, "orphan-probe-0", probeRows(table, 1, 2));
         appendRows(table, "orphan-probe-1", probeRows(table, 3, 4));
+        return table;
+    }
+
+    /**
+     * A table carrying committed data and a committed equality-delete file, so
+     * the reachable set spans a delete manifest as well as data manifests.
+     */
+    private Table probeWithACommittedEqualityDelete() {
+        var schema = new Schema(
+                Types.NestedField.required(1, "id", Types.LongType.get()),
+                Types.NestedField.optional(2, "note", Types.StringType.get()));
+        // Row-level deletes require format version 2; stated rather than
+        // inherited so the test does not depend on the release default.
+        Table table = catalog.createTable(probeTable, schema, PartitionSpec.unpartitioned(),
+                Map.of("format-version", "2"));
+        createdProbes.add(table);
+        appendRows(table, "orphan-probe-0", probeRows(table, 1, 2));
+
+        Schema deleteSchema = table.schema().select("id");
+        var factory = new GenericAppenderFactory(table.schema(), table.spec(),
+                new int[] {table.schema().findField("id").fieldId()}, deleteSchema, null);
+        var deletePath = table.locationProvider().newDataLocation(
+                FileFormat.PARQUET.addExtension("equality-delete-" + UUID.randomUUID()));
+        EqualityDeleteWriter<Record> writer = factory.newEqDeleteWriter(
+                EncryptedFiles.plainAsEncryptedOutput(table.io().newOutputFile(deletePath)),
+                FileFormat.PARQUET, null);
+        try (writer) {
+            Record delete = GenericRecord.create(deleteSchema);
+            delete.setField("id", 1L);
+            writer.write(delete);
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to write the equality-delete file", exception);
+        }
+        table.newRowDelta().addDeletes(writer.toDeleteFile()).commit();
         return table;
     }
 
