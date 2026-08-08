@@ -1,0 +1,107 @@
+# Stratus Spark developer cluster: one master and two workers, the reduced
+# topology P1-3.1-D1 defines. Production multi-host placement, master recovery,
+# and restricted submission belong to P1-3.1-P1.
+name: stratus-spark-local
+
+x-spark-common: &spark-common
+  image: ${SPARK_IMAGE:?Set SPARK_IMAGE in .env; build it with scripts/lib/spark-compose-resolve-artifacts.sh}
+  env_file:
+    - .env
+  environment:
+    # Object storage and catalog credentials for the svc-spark identity,
+    # pulled from OpenBao by the harness scripts (ADR-P1-004). Never literal
+    # here and never in the template.
+    AWS_ACCESS_KEY_ID: ${SPARK_RGW_ACCESS_KEY:?svc-spark credentials not loaded; invoke through the harness scripts}
+    AWS_SECRET_ACCESS_KEY: ${SPARK_RGW_SECRET_KEY:?svc-spark credentials not loaded; invoke through the harness scripts}
+    AWS_REGION: ${CEPH_RGW_REGION:-default}
+    # Endpoints come from the providers' connection.env, exported by the
+    # harness scripts. The provider owns these values.
+    CEPH_RGW_ENDPOINT: ${CEPH_RGW_ENDPOINT:?Ceph connection settings not loaded; invoke through the harness scripts}
+    POLARIS_ENDPOINT: ${POLARIS_ENDPOINT:?Polaris connection settings not loaded; invoke through the harness scripts}
+    POLARIS_CATALOG: ${POLARIS_CATALOG:?Polaris connection settings not loaded; invoke through the harness scripts}
+    SPARK_POLARIS_CLIENT_ID: ${SPARK_POLARIS_CLIENT_ID:-}
+    SPARK_POLARIS_CLIENT_SECRET: ${SPARK_POLARIS_CLIENT_SECRET:-}
+    # Both lab CAs in one JVM truststore: object storage terminates on Ceph's
+    # certificate and the catalog on Polaris's, and neither harness signs for
+    # the other.
+    SPARK_SUBMIT_OPTS: -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks
+  volumes:
+    - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    - ./certs/stratus-truststore.jks:/opt/stratus/certs/stratus-truststore.jks:ro
+    # The Polaris CA in PEM form as well, so curl inside the container can
+    # validate the catalog without a JVM.
+    - ${POLARIS_HARNESS_CA_FILE:?Polaris connection settings not loaded; invoke through the harness scripts}:/opt/stratus/certs/stratus-polaris-ca.crt:ro
+    - ${CEPH_HARNESS_CA_FILE:?Ceph connection settings not loaded; invoke through the harness scripts}:/opt/stratus/certs/stratus-ca.crt:ro
+    - spark-events:/opt/spark/events
+    - spark-scratch:/opt/spark/scratch
+  networks:
+    - ceph
+  restart: unless-stopped
+
+services:
+  spark-master:
+    <<: *spark-common
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master.stratus.local --port 7077 --webui-port 8080
+    ports:
+      # Loopback-only by default, matching every harness port convention.
+      - "${SPARK_BIND_ADDRESS:-127.0.0.1}:${SPARK_MASTER_UI_PORT:-8090}:8080"
+      - "${SPARK_BIND_ADDRESS:-127.0.0.1}:${SPARK_MASTER_PORT:-7077}:7077"
+    healthcheck:
+      # The master web UI answering proves the daemon is up and serving.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks:
+      ceph:
+        aliases:
+          - spark-master.stratus.local
+
+  spark-worker1:
+    <<: *spark-common
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master.stratus.local:7077 --webui-port 8081
+      --cores ${SPARK_WORKER_CORES:-2} --memory ${SPARK_WORKER_MEMORY:-2g}
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    ports:
+      - "${SPARK_BIND_ADDRESS:-127.0.0.1}:${SPARK_WORKER1_UI_PORT:-8091}:8081"
+    networks:
+      ceph:
+        aliases:
+          - spark-worker1.stratus.local
+
+  spark-worker2:
+    <<: *spark-common
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master.stratus.local:7077 --webui-port 8081
+      --cores ${SPARK_WORKER_CORES:-2} --memory ${SPARK_WORKER_MEMORY:-2g}
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    ports:
+      - "${SPARK_BIND_ADDRESS:-127.0.0.1}:${SPARK_WORKER2_UI_PORT:-8092}:8081"
+    networks:
+      ceph:
+        aliases:
+          - spark-worker2.stratus.local
+
+networks:
+  # ADR-P1-003: join the Ceph harness network, where the Polaris catalog also
+  # publishes its alias. Never recreate it here; the startup script fails fast
+  # with a remediation command when it is absent.
+  ceph:
+    external: true
+    name: ${CEPH_HARNESS_NETWORK:?Ceph connection settings not loaded; invoke through the harness scripts}
+
+volumes:
+  # Local event log and scratch space: the developer-only condition P1-3.6-P1
+  # replaces with Ceph-backed event logs and a history server.
+  spark-events:
+  spark-scratch:

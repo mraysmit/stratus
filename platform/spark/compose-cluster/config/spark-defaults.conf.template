@@ -1,0 +1,54 @@
+# Stratus Spark defaults: the Polaris catalog and Ceph RGW binding (P1-3.2-D1).
+#
+# Rendered to config/spark-defaults.conf by lifecycle/spark-compose-startup.sh.
+# The __TOKEN__ placeholders are filled from the providers' published
+# connection.env files, because ADR-P1-003 forbids a consumer from copying a
+# provider's endpoint, network name, or catalog name into its own files.
+#
+# Credentials are not here and never will be. Spark reads the svc-spark key
+# pair from the standard AWS environment variables the harness exports from
+# OpenBao, so no secret is written to a configuration file (ADR-P1-004).
+
+spark.sql.extensions                      org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+
+# The Stratus catalog, resolved through Polaris over REST.
+spark.sql.catalog.__CATALOG__             org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.__CATALOG__.type        rest
+spark.sql.catalog.__CATALOG__.uri         __POLARIS_ENDPOINT__/api/catalog
+spark.sql.catalog.__CATALOG__.warehouse   __CATALOG__
+spark.sql.catalog.__CATALOG__.scope       PRINCIPAL_ROLE:ALL
+spark.sql.catalog.__CATALOG__.credential  __POLARIS_CREDENTIAL__
+# Polaris vends no subscoped credentials in the developer harness: RGW rejects
+# the AssumeRole session policy because it contains a non-S3 action, so the
+# catalog runs with stsUnavailable and Spark uses its own scoped identity.
+# Requesting no delegation makes that explicit rather than relying on a
+# fallback (iceberg_polaris_catalog.md, known upstream incompatibilities).
+spark.sql.catalog.__CATALOG__.header.X-Iceberg-Access-Delegation none
+
+# Iceberg data and metadata I/O against Ceph RGW.
+spark.sql.catalog.__CATALOG__.io-impl     org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.__CATALOG__.s3.endpoint __CEPH_RGW_ENDPOINT__
+spark.sql.catalog.__CATALOG__.s3.path-style-access true
+
+# S3A for raw landing files and anything addressed as s3a://. Iceberg's
+# S3FileIO above handles table data; this covers the paths Spark itself opens.
+spark.hadoop.fs.s3a.impl                  org.apache.hadoop.fs.s3a.S3AFileSystem
+spark.hadoop.fs.s3a.endpoint              __CEPH_RGW_ENDPOINT__
+spark.hadoop.fs.s3a.path.style.access     true
+spark.hadoop.fs.s3a.aws.credentials.provider org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+
+spark.sql.defaultCatalog                  __CATALOG__
+
+# Both lab CAs must be trusted by every JVM that touches TLS, not just the one
+# that submits. The driver resolves the catalog, but the data path runs on the
+# executors: without this the catalog resolves and every write then fails with
+# a PKIX error from the object-store client. The truststore is mounted into
+# all three containers by the compose file.
+spark.driver.extraJavaOptions             -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks
+spark.executor.extraJavaOptions           -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks
+
+# Local event log and scratch, the developer-only condition P1-3.6-P1 replaces
+# with Ceph-backed event logs and a history server.
+spark.eventLog.enabled                    true
+spark.eventLog.dir                        file:///opt/spark/events
+spark.local.dir                           /opt/spark/scratch
