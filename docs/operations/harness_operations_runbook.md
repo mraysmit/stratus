@@ -284,6 +284,8 @@ lists and table properties). Filter one channel with
 |---|---|
 | `curl (52) empty reply` from a bootstrap script | the service is still starting. The Polaris bootstrap now waits for the API itself; if this appears, the service is not merely slow — check its container logs |
 | `PKIX path ... does not chain with any of the trust anchors` from Polaris | the harness CA was rotated after Polaris started; restart Polaris and re-run the catalog bootstrap (§4) |
+| `curl` closes the connection to `https://127.0.0.1:8181` with no HTTP status | Windows `curl` is Schannel-backed and refuses a privately issued certificate whose revocation status it cannot check. This is expected: the harness scripts run curl inside the network instead. Do not add `--ssl-no-revoke`. JVM clients are unaffected — they validate against the truststore the test runner builds |
+| `POLARIS_ALLOW_HTTP=true in .env` on startup | an `.env` generated before TLS termination landed; delete it and re-run `polaris-compose-startup.sh` to regenerate from the template |
 | Live JVM tests fail on TLS or unknown host | missing hosts-file entry — run `ceph-compose-configure-hostname.sh`; the truststore itself is supplied by the wrapper |
 | `verify-storage` reports a stale image | rebuild the verifier image (§3.2) |
 | `NoSuchTable: platform.quality_check_results` | Polaris was restarted; re-run the catalog bootstrap (§2) |

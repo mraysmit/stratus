@@ -20,22 +20,57 @@ services:
       # RGW and vends subscoped credentials by AssumeRole against RGW STS,
       # so every TLS path terminates at the harness proxy certificate.
       JAVA_OPTS_APPEND: "-Djavax.net.ssl.trustStore=/etc/stratus/certs/stratus-truststore.jks"
-    ports:
-      # Loopback-only by default, matching every harness port convention.
-      - "${POLARIS_BIND_ADDRESS:-127.0.0.1}:${POLARIS_PORT:-8181}:8181"
+    # No published port: the catalog is reached through the TLS proxy below,
+    # so plain HTTP never leaves the harness network.
+    expose:
+      - "8181"
     volumes:
       # ADR-P1-003: the Ceph harness CA certificate is
       # consumed read-only; no private key crosses the harness boundary. The
       # path is exported by the harness scripts from the Ceph connection.env.
       - ${CEPH_HARNESS_CA_FILE:?Ceph connection settings not loaded; invoke through the harness scripts}:/etc/stratus/certs/stratus-ca.crt:ro
       - ./certs/stratus-truststore.jks:/etc/stratus/certs/stratus-truststore.jks:ro
+      # This harness's own CA, so the verification scripts can run curl from
+      # inside the network against the TLS proxy. The workstation cannot: its
+      # curl is Schannel-backed on Windows and refuses a private CA whose
+      # revocation status it cannot determine.
+      - ./certs/stratus-polaris-ca.crt:/etc/stratus/certs/stratus-polaris-ca.crt:ro
       - polaris-data:/data/polaris
+    networks:
+      - ceph
+    restart: unless-stopped
+
+  # TLS termination for the catalog, mirroring the Ceph harness's rgw-proxy.
+  # Polaris itself serves plain HTTP on the harness network only; nothing
+  # outside this compose project ever reaches it without TLS.
+  polaris-proxy:
+    image: ${POLARIS_PROXY_IMAGE:-nginx:1.29.8-alpine}
+    depends_on:
+      - polaris
+    ports:
+      # Loopback-only by default, matching every harness port convention.
+      - "${POLARIS_BIND_ADDRESS:-127.0.0.1}:${POLARIS_PORT:-8181}:8181"
+    volumes:
+      - ./polaris/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs/polaris.stratus.local.crt:/etc/nginx/tls/tls.crt:ro
+      - ./private/polaris.stratus.local.key:/etc/nginx/tls/tls.key:ro
+    healthcheck:
+      # Listener check only. busybox wget cannot be given a private CA, so
+      # proving the chain here is not possible; the end-to-end check that
+      # validates the certificate is wait_for_polaris_api in the harness
+      # scripts, which runs curl inside the network.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8181"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
     networks:
       ceph:
         aliases:
           # Published so engine harnesses (Spark, Trino, Flink) resolve the
-          # catalog by its stable name on the shared harness network. This
-          # alias is published for engine consumers, as connection.env publishes Ceph's.
+          # catalog by its stable name on the shared harness network. The alias
+          # belongs to the proxy, not to Polaris: a consumer reaching this name
+          # must land on the TLS listener whose certificate carries it.
           - polaris.stratus.local
     restart: unless-stopped
 

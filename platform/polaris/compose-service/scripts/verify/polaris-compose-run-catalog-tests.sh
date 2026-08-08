@@ -19,17 +19,19 @@ client_secret="$(printf '%s' "$POLARIS_BOOTSTRAP_CREDENTIALS" | cut -d, -f3)"
 [[ -n "$client_id" && -n "$client_secret" ]] \
   || fail "POLARIS_BOOTSTRAP_CREDENTIALS must be realm,client-id,client-secret (startup generates it)"
 
-scheme="https"
-[[ "${POLARIS_ALLOW_HTTP:-false}" == true ]] && scheme="http"
-
 # Workstation JVM truststore: a copy of the JVM's own CA set with the
 # disposable lab CA added, because JAVA_TOOL_OPTIONS also applies to Maven
 # itself, which still needs the public CAs for repository downloads. Reads
 # need no password, so none reaches any JVM command line.
 truststore="$(mktemp -d)/stratus-catalog-cacerts"
 cp "$JAVA_HOME/lib/security/cacerts" "$truststore"
+# Both harness CAs: the suite reaches the catalog through this harness's TLS
+# proxy and object storage through Ceph's, and neither harness signs for the
+# other because a signing key never crosses the boundary (ADR-P1-003).
 "$JAVA_HOME/bin/keytool" -importcert -noprompt -alias stratus-lab-ca \
   -file "$CEPH_HARNESS_CA_FILE" -keystore "$truststore" -storepass changeit >/dev/null 2>&1
+"$JAVA_HOME/bin/keytool" -importcert -noprompt -alias stratus-polaris-lab-ca \
+  -file "$POLARIS_HARNESS_CA_FILE" -keystore "$truststore" -storepass changeit >/dev/null 2>&1
 truststore_path="$truststore"
 if command -v cygpath >/dev/null 2>&1; then
   truststore_path="$(cygpath -m "$truststore")"
@@ -38,8 +40,10 @@ fi
 export STRATUS_CATALOG_INTEGRATION=true
 # DEBUG by default so transcripts prove both operational log levels.
 export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
-export STRATUS_POLARIS_URI="$scheme://127.0.0.1:${POLARIS_PORT:-8181}/api/catalog"
-export STRATUS_POLARIS_ALLOW_HTTP="${POLARIS_ALLOW_HTTP:-false}"
+# Loopback rather than polaris.stratus.local: the proxy certificate carries
+# 127.0.0.1 as a subject alternative name, so the workstation needs no
+# hosts-file entry to validate the catalog's TLS.
+export STRATUS_POLARIS_URI="$(polaris_api_base)/catalog"
 export STRATUS_POLARIS_CLIENT_ID="$client_id"
 export STRATUS_POLARIS_CLIENT_SECRET="$client_secret"
 export STRATUS_POLARIS_CATALOG=stratus

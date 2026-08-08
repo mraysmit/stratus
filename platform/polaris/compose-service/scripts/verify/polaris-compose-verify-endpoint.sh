@@ -13,9 +13,11 @@ load_environment
 [[ "$(compose ps --services --status running)" == *polaris* ]] \
   || fail "The polaris service is not running. Start it with lifecycle/polaris-compose-startup.sh"
 
-endpoint="$(polaris_api_base)/catalog/v1/config"
-
 # The bounded wait itself lives in the common library, because the catalog
 # bootstrap needs exactly the same readiness gate before its first request.
+# It probes from inside the harness network and reports the address it used,
+# which is what this line must name — the workstation loopback address is a
+# different route to the same listener and was not the one tested.
 wait_for_polaris_api
-log "PASS polaris-endpoint listening endpoint=$endpoint httpStatus=$POLARIS_API_STATUS waitedSeconds=$POLARIS_API_WAITED_SECONDS"
+log "PASS polaris-endpoint listening endpoint=$POLARIS_API_PROBED_ENDPOINT httpStatus=$POLARIS_API_STATUS waitedSeconds=$POLARIS_API_WAITED_SECONDS"
+log "Workstation clients reach the same listener at $(polaris_api_base)/catalog/v1/config"

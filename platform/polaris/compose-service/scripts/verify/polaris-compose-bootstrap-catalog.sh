@@ -18,7 +18,7 @@ source "$(dirname "$0")/../lib/polaris-compose-common.sh"
 
 load_environment
 
-api="$(polaris_api_base)"
+api="$(polaris_network_api_base)"
 
 # Startup returns as soon as the container is up, which is tens of seconds
 # before the API answers, so this script must wait rather than assume the
@@ -31,7 +31,15 @@ client_secret="$(printf '%s' "$POLARIS_BOOTSTRAP_CREDENTIALS" | cut -d, -f3)"
 [[ -n "$client_id" && -n "$client_secret" ]] \
   || fail "POLARIS_BOOTSTRAP_CREDENTIALS must be realm,client-id,client-secret (startup generates it)"
 
-curl_api() { curl --silent --cacert "$CEPH_HARNESS_CA_FILE" --max-time 30 "$@"; }
+# Every call runs inside the harness network; see polaris_curl for why the
+# workstation cannot validate this harness's certificate.
+curl_api() { polaris_curl "$@"; }
+
+# Body, then the HTTP status on the final line. A response body can no longer
+# be written to a host path with -o, because curl now runs in a container.
+curl_api_body_and_status() { polaris_curl --write-out '\n%{http_code}' "$@"; }
+status_of() { printf '%s' "${1##*$'\n'}"; }
+body_of() { printf '%s' "${1%$'\n'*}"; }
 
 # Tolerate a curl transport failure so the diagnostic below is reachable: an
 # unreachable Polaris exits curl 52, which under `set -e` would otherwise abort
@@ -104,17 +112,17 @@ log "GRANT catalog-role=catalog_admin privilege=CATALOG_MANAGE_CONTENT"
 # We conform to that safety rule rather than disable it, so zone data lives
 # at s3://stratus-<zone>/<zone>/.
 for zone in bronze silver gold platform; do
-  namespace_status="$(curl_api -o /tmp/polaris-ns-response.json -w '%{http_code}' \
+  namespace_response="$(curl_api_body_and_status \
     -X POST "$api/catalog/v1/stratus/namespaces" \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d "{\"namespace\": [\"$zone\"], \"properties\": {\"location\": \"s3://stratus-$zone/$zone/\", \"zone\": \"$zone\"}}")"
+  namespace_status="$(status_of "$namespace_response")"
   case "$namespace_status" in
     200) log "READY namespace=$zone (created)" ;;
     409) log "READY namespace=$zone (already exists)" ;;
-    *) fail "Namespace $zone failed (HTTP $namespace_status): $(cat /tmp/polaris-ns-response.json 2>/dev/null | head -c 300)" ;;
+    *) fail "Namespace $zone failed (HTTP $namespace_status): $(body_of "$namespace_response" | head -c 300)" ;;
   esac
 done
-rm -f /tmp/polaris-ns-response.json
 
 # platform.quality_check_results (P1-2.4): the permanent quality result
 # store from architecture §5.3 — fourteen columns, partitioned by zone and
@@ -155,16 +163,16 @@ quality_table_request='{
     "write.format.default": "parquet"
   }
 }'
-table_status="$(curl_api -o /tmp/polaris-table-response.json -w '%{http_code}' \
+table_response="$(curl_api_body_and_status \
   -X POST "$api/catalog/v1/stratus/namespaces/platform/tables" \
   -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
   -d "$quality_table_request")"
+table_status="$(status_of "$table_response")"
 case "$table_status" in
   200) log "READY table=platform.quality_check_results (created)" ;;
   409) log "READY table=platform.quality_check_results (already exists)" ;;
-  *) fail "Table platform.quality_check_results failed (HTTP $table_status): $(cat /tmp/polaris-table-response.json 2>/dev/null | head -c 300)" ;;
+  *) fail "Table platform.quality_check_results failed (HTTP $table_status): $(body_of "$table_response" | head -c 300)" ;;
 esac
-rm -f /tmp/polaris-table-response.json
 
 # Positive check: the table loads through the catalog API.
 table_load_status="$(curl_api -o /dev/null -w '%{http_code}' \

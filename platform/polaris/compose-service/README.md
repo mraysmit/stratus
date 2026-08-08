@@ -14,9 +14,6 @@ consumed the generated root credential without echoing it, the token
 endpoint issued an OAuth token for it (HTTP 200), and the unauthenticated
 API correctly answers 401. Known open items:
 
-- TLS termination for `polaris.stratus.local` (currently plain HTTP on the
-  loopback port behind the explicit `POLARIS_ALLOW_HTTP=true` developer
-  override)
 - an immutable image digest pin with scan and SBOM evidence (`P1-2.2-S1`);
   the observed digest is recorded in `.env.template`
 - the scoped `svc-polaris` RGW identity and catalog bootstrap (`P1-2.3-D1`)
