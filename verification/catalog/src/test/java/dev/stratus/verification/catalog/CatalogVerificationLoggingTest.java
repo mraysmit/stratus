@@ -153,6 +153,31 @@ final class CatalogVerificationLoggingTest {
     }
 
     @Test
+    void maintenanceDecisionRecordsCarryTheValueAndTriggerAtInfo() {
+        CatalogVerificationLogging.configure("INFO");
+
+        CatalogVerificationLogging.maintenanceDecision("platform.maintenance_probe_x",
+                "compact-data-files", "files", 5, 3, true, "data files smaller than 1000000 bytes");
+
+        assertEquals(1, capture.records.size(), "INFO configuration must suppress DEBUG records");
+        String text = capturedText();
+        assertTrue(text.contains("Maintenance decision table=platform.maintenance_probe_x"
+                + " category=compact-data-files observed=5 threshold=3 actionRecommended=true"),
+                "a verdict without its value and trigger cannot be reviewed, got: " + text);
+
+        capture.records.clear();
+        CatalogVerificationLogging.configure("DEBUG");
+
+        CatalogVerificationLogging.maintenanceDecision("platform.maintenance_probe_x",
+                "compact-data-files", "files", 5, 3, true, "data files smaller than 1000000 bytes");
+
+        assertEquals(2, capture.records.size(), "DEBUG must add the metadata-table record");
+        assertEquals(Level.FINE, capture.records.getLast().getLevel());
+        assertTrue(capturedText().contains("metadataTable=files"),
+                "DEBUG must name the metadata table the decision was read from");
+    }
+
+    @Test
     void tableDefinitionRecordsIdentifyTheValidatedAspectAtInfo() {
         CatalogVerificationLogging.configure("INFO");
 

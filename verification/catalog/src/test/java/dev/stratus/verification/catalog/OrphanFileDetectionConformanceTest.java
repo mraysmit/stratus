@@ -3,6 +3,11 @@
 
 package dev.stratus.verification.catalog;
 
+import static dev.stratus.verification.catalog.ProbeTableWriter.appendRows;
+import static dev.stratus.verification.catalog.ProbeTableWriter.probeRows;
+import static dev.stratus.verification.catalog.ProbeTableWriter.readAll;
+import static dev.stratus.verification.catalog.ProbeTableWriter.writeAndCommitEqualityDelete;
+import static dev.stratus.verification.catalog.ProbeTableWriter.writeDataFileWithoutCommitting;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,22 +22,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.data.GenericAppenderFactory;
-import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.IcebergGenerics;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.data.parquet.GenericParquetWriter;
-import org.apache.iceberg.deletes.EqualityDeleteWriter;
-import org.apache.iceberg.encryption.EncryptedFiles;
-import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.SupportsPrefixOperations;
-import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
 import org.junit.jupiter.api.AfterEach;
@@ -233,89 +228,8 @@ final class OrphanFileDetectionConformanceTest {
         createdProbes.add(table);
         appendRows(table, "orphan-probe-0", probeRows(table, 1, 2));
 
-        Schema deleteSchema = table.schema().select("id");
-        var factory = new GenericAppenderFactory(table.schema(), table.spec(),
-                new int[] {table.schema().findField("id").fieldId()}, deleteSchema, null);
-        var deletePath = table.locationProvider().newDataLocation(
-                FileFormat.PARQUET.addExtension("equality-delete-" + UUID.randomUUID()));
-        EqualityDeleteWriter<Record> writer = factory.newEqDeleteWriter(
-                EncryptedFiles.plainAsEncryptedOutput(table.io().newOutputFile(deletePath)),
-                FileFormat.PARQUET, null);
-        try (writer) {
-            Record delete = GenericRecord.create(deleteSchema);
-            delete.setField("id", 1L);
-            writer.write(delete);
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to write the equality-delete file", exception);
-        }
-        table.newRowDelta().addDeletes(writer.toDeleteFile()).commit();
+        writeAndCommitEqualityDelete(table, 1L);
         return table;
-    }
-
-    private static List<Record> probeRows(Table table, long firstId, long lastId) {
-        var rows = new ArrayList<Record>();
-        for (long id = firstId; id <= lastId; id++) {
-            var record = GenericRecord.create(table.schema());
-            record.setField("id", id);
-            record.setField("note", "probe-" + id);
-            rows.add(record);
-        }
-        return rows;
-    }
-
-    private static void appendRows(Table table, String fileName, List<Record> rows) {
-        String dataPath = writeDataFile(table, fileName, rows);
-        var input = table.io().newInputFile(dataPath);
-        table.newAppend().appendFile(org.apache.iceberg.DataFiles.builder(table.spec())
-                .withPath(dataPath)
-                .withFormat(FileFormat.PARQUET)
-                .withFileSizeInBytes(input.getLength())
-                .withRecordCount(rows.size())
-                .build()).commit();
-    }
-
-    /**
-     * Writes a real data file and never commits it — what an interrupted or
-     * failed write leaves in the bucket. Returns its location.
-     */
-    private static String writeDataFileWithoutCommitting(Table table, String fileName) {
-        return writeDataFile(table, fileName, probeRows(table, 99, 99));
-    }
-
-    private static String writeDataFile(Table table, String fileName, List<Record> rows) {
-        var dataPath = table.locationProvider().newDataLocation(
-                FileFormat.PARQUET.addExtension(fileName + "-" + UUID.randomUUID()));
-        var outputFile = table.io().newOutputFile(dataPath);
-        FileAppender<Record> appender;
-        try {
-            // zstd for the same reason as the catalog conformance suite: the
-            // bare builder falls back to gzip and drags in the Hadoop codec.
-            appender = Parquet.write(outputFile)
-                    .schema(table.schema())
-                    .set("write.parquet.compression-codec", "zstd")
-                    .createWriterFunc(messageType -> GenericParquetWriter.create(table.schema(), messageType))
-                    .build();
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to open the probe data file for writing", exception);
-        }
-        try (appender) {
-            for (Record record : rows) {
-                appender.add(record);
-            }
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to write the probe data file", exception);
-        }
-        return dataPath;
-    }
-
-    private static List<Record> readAll(Table table) {
-        var rows = new ArrayList<Record>();
-        try (var records = IcebergGenerics.read(table).build()) {
-            records.forEach(rows::add);
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to read the probe table back", exception);
-        }
-        return rows;
     }
 
     /** Locations are compared on bucket and key, never on scheme spelling. */
