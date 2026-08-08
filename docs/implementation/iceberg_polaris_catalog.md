@@ -647,9 +647,19 @@ The gate identifiers below are normative. A gate checkbox may be marked complete
 
 The Polaris 1.5.0 release line has no embedded H2 backend; its test-only metastore is `in-memory` and its persistent backend is `relational-jdbc`. D1 and D2 name that mode directly — an H2 reading of either gate is not satisfiable against this release.
 
-**Readiness.** Both gates have their producing evidence: `P1-2.2-D1` (two start/verify/stop cycles, 2026-08-03), `P1-2.3-D1` (catalog, namespaces, scoped `svc-polaris` identity with a forged-token negative, 2026-08-04), and `P1-2.4-V1` (fourteen live conformance checks including `platform.quality_check_results`, 2026-08-06) are all `Verified`, and the promotion manifest above satisfies D2.
+**Readiness.** Both gates have their producing evidence, and every producing task is `Verified`. This is the gate matrix and evidence index `P1-2.G-D` requires as its artifact.
 
-Two things stand between that evidence and a tick. Per the gate traceability rule the three producing tasks must reach `Accepted`, which is the platform owner's action under `P1-2.G-D`; and the fifteenth check — the schema-enforcement negative added 2026-08-07 to close the §5 verification row in the Phase 1 plan — has been written and compiles but has not yet run against a live catalog, because the harnesses are down. Re-run `polaris-compose-run-catalog-tests.sh` against a running stack before accepting. One clause also remains open — TLS for `polaris.stratus.local` — which the owner either accepts as a recorded deferral, as Increment 1 did for `P1-0.1`, or closes first.
+| Gate | Producing task | Evidence | Verified |
+|---|---|---|---|
+| D1 | `P1-2.2-D1` | two start/verify/stop cycles, fail-fast provider check, OAuth 200 and unauthenticated 401, idempotent shutdown and reset; transcripts in `platform/polaris/compose-service/logs/` | 2026-08-03 |
+| D1 | `P1-2.3-D1` | catalog and four zone namespaces, scoped `svc-polaris` RGW identity with bucket policies on the five Stratus buckets only, forged-token negative | 2026-08-04 |
+| D1 | `P1-2.4-V1` | `platform.quality_check_results` provisioned idempotently (14 columns, `identity(zone)`+`day(checked_at)`, append-only); live catalog conformance including schema evolution and schema enforcement | 2026-08-06, schema-enforcement check run live 2026-08-08 |
+| D1 | `P1-2.5-D1` | metadata-driven maintenance decisions read from the `files`, `manifests`, `delete_files`, and `snapshots` metadata tables, each threshold proven in both directions; orphan-file detection with every safeguard proven load-bearing by disabling it against the live cluster; no destructive path in either component | 2026-08-08 |
+| D2 | promotion manifest above | ten developer conditions named with their production replacement task and stop condition | 2026-08-07 |
+
+The live catalog conformance suite stands at **24 checks, all passing** against `apache/polaris:1.5.0` and live Ceph RGW; transcripts in `platform/polaris/compose-service/logs/`.
+
+**What stands between that evidence and a tick.** Per the gate traceability rule the four producing tasks must reach `Accepted`, which is the platform owner's action under `P1-2.G-D` and is deliberately not taken on the owner's behalf. One clause also remains open — TLS for `polaris.stratus.local`, with `POLARIS_ALLOW_HTTP=true` in the harness template — which the owner either accepts as a recorded deferral against `P1-2.2-P1` and `P1-7.4`, as Increment 1 did for `P1-0.1`, or closes before the tick. No other functional item is outstanding.
 
 ### Production gate
 
