@@ -233,18 +233,23 @@ final class IcebergRestCatalogConformanceTest {
         appendRows(table, "enforcement-probe-0", probeRows(table, 1, 2));
         long committedSnapshot = catalog.loadTable(probeTable).currentSnapshot().snapshotId();
 
-        // The record is built inside the lambda because either layer may
-        // enforce the schema — the record API on assignment or the Parquet
-        // writer on append. Both are the platform refusing the row; what must
-        // never happen is the row landing in a governed table.
+        // Positive control. The record is built outside the lambda so the
+        // assertion below cannot be satisfied by a failure that happens before
+        // the write is attempted: with the construction inside it, the throw
+        // proved only that something failed, and the two assertions after it
+        // then held vacuously because nothing had been written. Building it
+        // here also records which layer enforces — the record API accepts the
+        // null, so the refusal comes from the write path.
+        var invalid = GenericRecord.create(table.schema());
+        invalid.setField("id", null);
+        invalid.setField("note", "missing-required-id");
+        assertNull(invalid.getField("id"),
+                "the record API is expected to accept the null and leave enforcement to the write path; "
+                        + "if a release starts enforcing on assignment, this construction belongs inside the lambda");
+
         var failure = assertThrows(RuntimeException.class,
-                () -> {
-                    var invalid = GenericRecord.create(table.schema());
-                    invalid.setField("id", null);
-                    invalid.setField("note", "missing-required-id");
-                    appendRows(table, "enforcement-probe-rejected", List.of(invalid));
-                },
-                "a row leaving a required column null must be rejected");
+                () -> appendRows(table, "enforcement-probe-rejected", List.of(invalid)),
+                "appending a row that leaves a required column null must be rejected");
 
         Table reloaded = catalog.loadTable(probeTable);
         assertEquals(committedSnapshot, reloaded.currentSnapshot().snapshotId(),
@@ -608,6 +613,14 @@ final class IcebergRestCatalogConformanceTest {
 
     @Test
     void rejectsAForgedPrincipalCredential() {
+        // Positive control. The refusal below is only evidence about the
+        // credential if the catalog is reachable and the real credential is
+        // accepted at this moment: an unreachable endpoint or a TLS fault
+        // would otherwise satisfy the negative without a credential ever being
+        // judged. This client was built by the same path the forged one uses.
+        assertFalse(catalog.listNamespaces().isEmpty(),
+                "the real credential must reach the catalog, otherwise the refusal below proves nothing");
+
         var environment = new HashMap<>(System.getenv());
         environment.put("STRATUS_POLARIS_CLIENT_SECRET", "forged-secret-0000000000000000");
         var forgedConfig = CatalogVerifierConfig.from(environment);

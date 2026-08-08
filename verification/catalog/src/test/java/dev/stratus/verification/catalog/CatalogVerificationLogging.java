@@ -93,6 +93,23 @@ final class CatalogVerificationLogging {
                 safeToken(table), safeToken(aspect), safeToken(detail));
     }
 
+    /**
+     * Records an orphan-file scan. INFO carries the object inventory a
+     * maintenance decision is taken on; DEBUG carries the orphan locations
+     * themselves. Object keys are catalog content, not secret material.
+     */
+    static void orphanScanCompleted(String table, String location, int scannedFiles,
+                                    int referencedFiles, List<String> orphanFiles,
+                                    List<String> filesWithinMinimumAge) {
+        LOGGER.info("Orphan scan completed table={} scannedFiles={} referencedFiles={} orphanFiles={} withinMinimumAge={}",
+                safeToken(table), scannedFiles, referencedFiles,
+                orphanFiles.size(), filesWithinMinimumAge.size());
+        LOGGER.debug("Orphan scan detail table={} location={} orphans={} withinMinimumAge={}",
+                safeToken(table), safeToken(location),
+                safeToken(orphanFiles.toString(), 1024),
+                safeToken(filesWithinMinimumAge.toString(), 1024));
+    }
+
     static void negativeConfirmed(String check, String detail) {
         LOGGER.info("Negative check confirmed check={} detail={}", safeToken(check), safeToken(detail));
     }
