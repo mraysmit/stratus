@@ -83,6 +83,41 @@ fetch_service_identity_from_openbao() {
   log "Fetched svc-polaris credentials from OpenBao"
 }
 
+polaris_api_base() {
+  local scheme="https"
+  [[ "${POLARIS_ALLOW_HTTP:-false}" != true ]] || scheme="http"
+  printf '%s://127.0.0.1:%s/api' "$scheme" "${POLARIS_PORT:-8181}"
+}
+
+# Polaris cold-start takes tens of seconds (slower still while the Ceph cluster
+# shares the host), so every caller that talks to the API must wait first
+# rather than guess a sleep. This is not a convenience: curl answers a
+# not-yet-listening Polaris with exit 52, which under `set -e` aborts the
+# caller before it can print its own "is Polaris running?" diagnostic.
+# An unauthenticated 401/403 still proves the API is listening.
+# Sets POLARIS_API_STATUS and POLARIS_API_WAITED_SECONDS on success.
+wait_for_polaris_api() {
+  local endpoint deadline_seconds elapsed status_code
+  endpoint="$(polaris_api_base)/catalog/v1/config"
+  deadline_seconds="${POLARIS_STARTUP_DEADLINE_SECONDS:-90}"
+  elapsed=0
+  while (( elapsed < deadline_seconds )); do
+    status_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+      --cacert "$CEPH_HARNESS_CA_FILE" \
+      --max-time 10 "$endpoint" || true)"
+    case "$status_code" in
+      200|401|403)
+        POLARIS_API_STATUS="$status_code"
+        POLARIS_API_WAITED_SECONDS="$elapsed"
+        return 0
+        ;;
+    esac
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  fail "Polaris API did not answer on $endpoint within ${deadline_seconds}s (last result '${status_code:-no response}'); inspect logs with: docker compose --project-name stratus-polaris-local logs polaris"
+}
+
 compose_runtime() {
   local implementation="${COMPOSE_IMPLEMENTATION:-auto}"
   if [[ "$implementation" == docker ]] || { [[ "$implementation" == auto ]] && command -v docker >/dev/null 2>&1; }; then
