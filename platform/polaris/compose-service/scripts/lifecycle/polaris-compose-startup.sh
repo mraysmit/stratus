@@ -27,6 +27,10 @@ require_ceph_harness_network
 load_environment
 mkdir -p "$HARNESS_DIR/evidence" "$HARNESS_DIR/logs" "$HARNESS_DIR/certs"
 
+# TLS material for the harness proxy. Issued before compose runs because the
+# proxy mounts the certificate and key directly.
+bash "$HARNESS_DIR/scripts/lib/polaris-compose-generate-certificates.sh"
+
 # Polaris writes Iceberg table metadata to RGW server-side, so its JVM must
 # trust the disposable lab CA. The truststore holds only that public
 # certificate and is rebuilt whenever the CA changes; JKS reads need no
@@ -50,6 +54,7 @@ fi
 compose config --quiet
 compose up --detach --remove-orphans
 
-log "Polaris starting from $POLARIS_IMAGE on ${POLARIS_BIND_ADDRESS:-127.0.0.1}:${POLARIS_PORT:-8181}"
+log "Polaris starting from $POLARIS_IMAGE behind TLS on $(polaris_api_base)"
+log "Trust $HARNESS_DIR/certs/stratus-polaris-ca.crt to reach it from a new client"
 log "Check liveness with: bash scripts/verify/polaris-compose-verify-endpoint.sh"
 compose ps

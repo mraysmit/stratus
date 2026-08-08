@@ -35,6 +35,15 @@ if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
 fi
 export CEPH_HARNESS_CA_FILE
 
+# This harness's own CA, which signs the certificate its TLS proxy presents.
+# Separate from the Ceph CA because a signing key never crosses the harness
+# boundary (ADR-P1-003), so a client talking to both trusts both.
+POLARIS_HARNESS_CA_FILE="$HARNESS_DIR/certs/stratus-polaris-ca.crt"
+if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  POLARIS_HARNESS_CA_FILE="$(cygpath -m "$POLARIS_HARNESS_CA_FILE")"
+fi
+export POLARIS_HARNESS_CA_FILE
+
 # Loads .env without validation. Teardown paths use this so a half-configured
 # harness can still be shut down.
 load_environment_file() {
@@ -47,6 +56,11 @@ load_environment_file() {
 
 load_environment() {
   load_environment_file
+  # An .env written before TLS termination landed still carries this flag.
+  # It no longer has any effect, and leaving it unremarked would let an
+  # operator believe the catalog is reachable over plain HTTP.
+  [[ "${POLARIS_ALLOW_HTTP:-}" != true ]] \
+    || fail "POLARIS_ALLOW_HTTP=true in $HARNESS_DIR/.env, but this harness now terminates TLS at its proxy and Polaris publishes no plain-HTTP port. Remove that line, or delete .env and re-run lifecycle/polaris-compose-startup.sh to regenerate it from the template."
   : "${POLARIS_IMAGE:?POLARIS_IMAGE is required}"
   [[ "$POLARIS_IMAGE" != *latest* ]] || fail "POLARIS_IMAGE must be a pinned release, never latest"
   [[ -f "$CEPH_HARNESS_DIR/$CEPH_HARNESS_CA_CERT" ]] \
@@ -83,10 +97,34 @@ fetch_service_identity_from_openbao() {
   log "Fetched svc-polaris credentials from OpenBao"
 }
 
+# Always HTTPS: the catalog is published only through this harness's TLS
+# proxy, and Polaris itself binds no host port. Loopback rather than
+# polaris.stratus.local because the proxy certificate carries 127.0.0.1 as a
+# subject alternative name, which spares the developer a hosts-file entry.
+# This is the address for JVM clients on the workstation, which validate
+# against their own truststore; shell checks use polaris_curl instead.
 polaris_api_base() {
-  local scheme="https"
-  [[ "${POLARIS_ALLOW_HTTP:-false}" != true ]] || scheme="http"
-  printf '%s://127.0.0.1:%s/api' "$scheme" "${POLARIS_PORT:-8181}"
+  printf 'https://127.0.0.1:%s/api' "${POLARIS_PORT:-8181}"
+}
+
+# The catalog as seen from inside the shared harness network.
+polaris_network_api_base() {
+  printf 'https://polaris.stratus.local:%s/api' "${POLARIS_PORT:-8181}"
+}
+
+# Runs curl inside the harness network rather than on the workstation.
+#
+# This is not a convenience. On Windows the workstation's curl is
+# Schannel-backed, and Schannel refuses a privately issued certificate whose
+# revocation status it cannot determine — the connection closes with no HTTP
+# status at all. Passing --ssl-no-revoke would paper over it by weakening the
+# client, which the Increment 2 promotion manifest forbids as a way to satisfy
+# a TLS check. The Polaris container carries curl and mounts this harness's
+# CA, so the chain is validated in full, exactly as the Ceph harness runs its
+# checks inside mon1.
+polaris_curl() {
+  compose exec -T polaris curl --silent \
+    --cacert /etc/stratus/certs/stratus-polaris-ca.crt --max-time 30 "$@"
 }
 
 # Polaris cold-start takes tens of seconds (slower still while the Ceph cluster
@@ -98,17 +136,17 @@ polaris_api_base() {
 # Sets POLARIS_API_STATUS and POLARIS_API_WAITED_SECONDS on success.
 wait_for_polaris_api() {
   local endpoint deadline_seconds elapsed status_code
-  endpoint="$(polaris_api_base)/catalog/v1/config"
+  endpoint="$(polaris_network_api_base)/catalog/v1/config"
   deadline_seconds="${POLARIS_STARTUP_DEADLINE_SECONDS:-90}"
   elapsed=0
   while (( elapsed < deadline_seconds )); do
-    status_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-      --cacert "$CEPH_HARNESS_CA_FILE" \
-      --max-time 10 "$endpoint" || true)"
+    status_code="$(polaris_curl --output /dev/null --write-out '%{http_code}' \
+      "$endpoint" || true)"
     case "$status_code" in
       200|401|403)
         POLARIS_API_STATUS="$status_code"
         POLARIS_API_WAITED_SECONDS="$elapsed"
+        POLARIS_API_PROBED_ENDPOINT="$endpoint"
         return 0
         ;;
     esac
