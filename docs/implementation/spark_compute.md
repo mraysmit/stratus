@@ -854,9 +854,9 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Dependency collision | Not started |
-| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/developer/` | repeated lifecycle, master/worker health | D1 | Platform owner | Local capacity | Not started |
-| `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `platform/spark/config/`; `environments/developer/spark/` | catalog resolution and object read/write | D1 | Data-platform owner | Secret handling | Not started |
+| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Verified 2026-08-08 (developer scope): `platform/spark/image/` assembles the approved matrix — `iceberg-spark-runtime-4.1_2.13` and `iceberg-aws-bundle` 1.11.0 with `hadoop-aws` 3.4.1 — resolved by the repository Maven toolchain into the build context by `spark-compose-resolve-artifacts.sh`, which writes `artifact-lock.txt` with Maven coordinates and SHA-256 per jar. Hadoop client jars are excluded at resolution so no second copy is layered over the Spark distribution. Live S3A create/read proven by `readsAndWritesRawObjectsOverS3a`. Image scan, digest pin, SBOM and provenance remain with `P1-0.1` | Verified |
+| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Verified 2026-08-08: one master and two workers under `platform/spark/compose-cluster/`, published on loopback only, with local event-log and scratch volumes. Repeated start/verify cycles are idempotent and `spark-compose-verify-cluster.sh` polls the master's own view to a bounded deadline, so a running-but-unregistered worker fails rather than passes. Live: `workers=2/2 clusterCores=4`; four `SparkClusterConformanceTest` checks green. The path is `compose-cluster/`, matching the Ceph and Polaris harnesses, not the `developer/` name this row first proposed | Verified |
+| `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `platform/spark/compose-cluster/config/`; svc-spark identity | catalog resolution and object read/write | D1 | Data-platform owner | Verified 2026-08-08: Spark resolves all four governed namespaces through Polaris over TLS and writes and reads an Iceberg table whose files land under `s3://stratus-bronze/bronze/`; S3A raw object round trip proven separately, since it is configured independently of Iceberg's S3FileIO. `svc-spark` exists as both an RGW identity (bucket policies on the five Stratus buckets, proven to fail closed on `stratus-denied`) and a Polaris principal created by `spark-compose-bootstrap-principal.sh`. No credential is in a tracked file: the RGW key pair is pulled from OpenBao (ADR-P1-004) and the catalog secret is generated into the ignored `.env`; the Spark configuration is rendered from the providers' `connection.env` so no endpoint is duplicated (ADR-P1-003). A forged principal secret is refused, with a positive control proving the real one works at that moment. Least-privilege narrowing of the catalog role belongs to `P1-3.2-P1` | Verified |
 | `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; verifier tests | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Test-data determinism | Not started |
 | `P1-3.1-P1` | `P1-3.1` | Production | Deploy approved master recovery design, multi-host workers, durable scratch policy, and restricted submission. | Platform owner | `P1-3.1-S1`, production infrastructure | `platform/spark/`; `environments/production/spark/` | worker/master loss and RTO/RPO evidence | P1-P4 | Operations owner | Availability exception | Not started |
 | `P1-3.2-P1` | `P1-3.2` | Production | Apply Spark auth/crypto, managed secrets, trusted TLS proxying, and least-privilege Polaris/Ceph access. | Security owner | `P1-3.1-P1`, Increment 7 controls | `platform/spark/config/`; `environments/production/spark/` | positive/negative auth, encrypted transport | P3-P7 | Platform owner | Shared-secret rotation | Not started |
@@ -871,6 +871,27 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 
 - [ ] **D1** - Reduced Podman topology starts/stops idempotently and ingestion, transformations, quality gates, maintenance decisions, and verifier tests pass.
 - [ ] **D2** - Local volumes, local certificates, reduced workers, and bootstrap credentials are recorded in the promotion manifest.
+
+**Readiness (2026-08-08).** The cluster and its bindings are done and
+`Verified`: `P1-3.1-S1` (image and artifact lock, developer scope),
+`P1-3.1-D1` (master and two workers, idempotent lifecycle), and `P1-3.2-D1`
+(Polaris catalog resolution, Iceberg and S3A object read/write through the
+`svc-spark` identity). Live evidence is eight `spark-integration` checks plus
+seven offline harness guardrails; transcripts in
+`platform/spark/compose-cluster/logs/`.
+
+D1 is **not** satisfiable yet, and is deliberately not ticked. It requires
+ingestion, transformations, quality gates, and maintenance decisions to pass,
+and those are the jobs of `P1-3.3-V1`, which is `Not started`: `jobs/spark/`
+does not exist. What is proven today is that the engine, the catalog, and the
+object store are correctly wired for those jobs to be written against.
+
+D2 has no promotion manifest for this increment yet. The developer-only
+conditions already visible are the local event-log and scratch volumes
+(replaced by `P1-3.6-P1`), the two disposable lab CAs, the reduced two-worker
+single-host topology (`P1-3.1-P1`), the harness-generated `svc-spark` catalog
+secret, and the `catalog_admin` role standing in for a least-privilege engine
+role (`P1-3.2-P1`).
 
 ### Production gate
 

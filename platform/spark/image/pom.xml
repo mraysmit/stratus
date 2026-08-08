@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Artifact lock for the Stratus Spark runtime image.
+
+  This POM exists only to resolve the Iceberg and S3A client artifacts into
+  the image build context with their full transitive runtime sets, so the
+  image is assembled from artifacts the build system chose rather than from
+  URLs typed into a Dockerfile. It is deliberately outside the reactor: it
+  produces no code and is invoked by the harness artifact-resolution script.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.stratus</groupId>
+    <artifactId>stratus-spark-image-artifacts</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Stratus Spark Image Artifacts</name>
+    <description>Resolves the pinned Spark runtime artifacts into the image build context</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Increment 3 approved matrix; see spark_compute.md section 5. -->
+        <iceberg.version>1.11.0</iceberg.version>
+        <hadoop.aws.version>3.4.1</hadoop.aws.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-aws-bundle</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <!--
+              S3A for s3a:// landing files and Spark event logs. Its Hadoop
+              client dependencies are excluded: the Spark distribution already
+              ships them, and layering a second copy over the runtime is the
+              mismatch spark_compute.md section 5 forbids fixing that way.
+            -->
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${hadoop.aws.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client-runtime</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+    </dependencies>
+</project>

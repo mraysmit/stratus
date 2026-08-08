@@ -1,0 +1,6 @@
+# Build-context artifacts resolved by
+# compose-cluster/scripts/lib/spark-compose-resolve-artifacts.sh. They are
+# regenerable from pom.xml and verifiable against artifact-lock.txt, which is
+# tracked; the jars themselves are hundreds of megabytes and never belong in
+# the repository.
+jars/

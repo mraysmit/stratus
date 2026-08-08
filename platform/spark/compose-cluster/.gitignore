@@ -1,0 +1,13 @@
+# Local disposable state only; nothing here is ever committed.
+.env
+certs/
+private/
+logs/
+evidence/*
+!evidence/.gitkeep
+config/spark-defaults.conf
+*.key
+*.csr
+*.srl
+*.pem
+*.jks
