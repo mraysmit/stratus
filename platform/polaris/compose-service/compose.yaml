@@ -1,6 +1,6 @@
-# Polaris developer harness. Scaffold status: not yet live-validated; the
-# first start/verify/stop cycles belong to P1-2.2-D1 in
-# docs/implementation/iceberg_polaris_catalog.md.
+# Polaris developer harness. Lifecycle validated 2026-08-03 under P1-2.2-D1;
+# TLS terminates at the proxy below as of 2026-08-08. The implementation plan
+# and task track are in docs/implementation/iceberg_polaris_catalog.md.
 services:
   polaris:
     image: ${POLARIS_IMAGE:?Set POLARIS_IMAGE in .env to the approved pinned release; never latest}

@@ -142,6 +142,8 @@ final class SparkPipelineVerificationTest {
                 + "\"columns\":[\"customer_id\",\"email\",\"country\"]},"
                 + "{\"type\":\"completeness\",\"name\":\"email_mostly_present\",\"severity\":\"warning\","
                 + "\"column\":\"email\",\"maxNullRate\":0.1},"
+                + "{\"type\":\"completeness\",\"name\":\"email_mandatory\",\"severity\":\"blocking\","
+                + "\"column\":\"email\",\"maxNullRate\":0.0},"
                 + "{\"type\":\"uniqueness\",\"name\":\"customer_id_unique\",\"severity\":\"blocking\","
                 + "\"columns\":[\"customer_id\"]}]";
 
@@ -161,7 +163,7 @@ final class SparkPipelineVerificationTest {
         var recorded = LiveSparkCluster.sparkSql(
                 "SELECT count(*) FROM stratus.platform.quality_check_results WHERE run_id = '"
                         + QUALITY_RUN + "'", JOB);
-        assertTrue(recorded.output().contains("4"),
+        assertTrue(recorded.output().contains("5"),
                 "every rule must be recorded, passing or not: " + recorded.output());
     }
 
@@ -177,6 +179,16 @@ final class SparkPipelineVerificationTest {
                 "the duplicated business key must fail a blocking uniqueness rule: " + result.output());
         assertTrue(result.output().contains("duplicate"),
                 "the record must say what failed: " + result.output());
+
+        // Nulls in a mandatory column must fail with a detail that says how
+        // far off it was, which is the Phase 1 plan's own quality-fail row.
+        var mandatory = LiveSparkCluster.sparkSql(
+                "SELECT status, failure_detail FROM stratus.platform.quality_check_results "
+                        + "WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'email_mandatory'", JOB);
+        assertTrue(mandatory.output().contains("FAILED"),
+                "a mandatory column with nulls must fail a blocking rule: " + mandatory.output());
+        assertTrue(mandatory.output().contains("null rate"),
+                "the record must quantify the failure: " + mandatory.output());
 
         // The warning rule must not be recorded as a failure: the difference
         // is exactly what the promotion gate acts on.
@@ -212,6 +224,8 @@ final class SparkPipelineVerificationTest {
                 "--runId", "transform-" + SUFFIX);
 
         assertTrue(result.succeeded(), "the transform must succeed: " + result.describe());
+        assertTrue(result.output().contains("\"type\": \"TRANSFORM\""),
+                "every job must emit its lineage payload, not only ingestion: " + result.output());
 
         var rows = LiveSparkCluster.sparkSql("SELECT count(*) FROM " + SILVER, JOB);
         assertTrue(rows.output().contains("3"),
@@ -235,6 +249,8 @@ final class SparkPipelineVerificationTest {
                 "--runId", "gold-" + SUFFIX);
 
         assertTrue(result.succeeded(), "materialisation must succeed: " + result.describe());
+        assertTrue(result.output().contains("\"type\": \"MATERIALISATION\""),
+                "every job must emit its lineage payload: " + result.output());
 
         var rows = LiveSparkCluster.sparkSql(
                 "SELECT country, customers FROM " + GOLD + " ORDER BY country", JOB);
@@ -282,6 +298,41 @@ final class SparkPipelineVerificationTest {
 
     @Test
     @Order(11)
+    void promotionGatePromotesWhenEveryBlockingCheckPasses() {
+        // The blocking case above proves the gate can refuse. Without this it
+        // is indistinguishable from a gate that always refuses, which would
+        // stop the pipeline everywhere and look like caution.
+        String cleanRun = "quality-clean-" + SUFFIX;
+        String checks = "["
+                + "{\"type\":\"row_count_min\",\"name\":\"has_rows\",\"severity\":\"blocking\",\"minRows\":1},"
+                + "{\"type\":\"uniqueness\",\"name\":\"customer_id_unique\",\"severity\":\"blocking\","
+                + "\"columns\":[\"customer_id\"]}]";
+        String encoded = java.util.Base64.getEncoder()
+                .encodeToString(checks.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        // Silver is the deduplicated table, so the same rules that failed on
+        // bronze pass here — the data changed, not the rules.
+        var quality = LiveSparkCluster.submitJob(JOBS + "QualityCheckJob", JOB,
+                "--targetTable", SILVER, "--checksBase64", encoded, "--runId", cleanRun);
+        assertTrue(quality.succeeded(), "the clean quality run must succeed: " + quality.describe());
+
+        var passed = LiveSparkCluster.sparkSql(
+                "SELECT status FROM stratus.platform.quality_check_results WHERE run_id = '"
+                        + cleanRun + "' AND status <> 'PASSED'", JOB);
+        assertFalse(passed.output().contains("FAILED"),
+                "no rule may fail on the deduplicated table: " + passed.output());
+
+        var gate = LiveSparkCluster.submitJob(JOBS + "PromotionGate", JOB,
+                "--runId", cleanRun, "--targetTable", SILVER);
+
+        assertTrue(gate.succeeded(),
+                "a run whose blocking rules all pass must be promoted: " + gate.describe());
+        assertTrue(gate.output().contains("PROMOTION PROMOTE"),
+                "the gate must record the promote verdict: " + gate.output());
+    }
+
+    @Test
+    @Order(12)
     void qualityResultsTableContainsAllRunRecords() {
         var result = LiveSparkCluster.sparkSql(
                 "SELECT check_name, severity, status FROM stratus.platform.quality_check_results "

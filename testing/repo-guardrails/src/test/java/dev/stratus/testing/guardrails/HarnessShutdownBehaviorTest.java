@@ -66,7 +66,9 @@ final class HarnessShutdownBehaviorTest {
         new Harness("openbao", "platform/openbao/compose-service",
             "scripts/lifecycle/openbao-compose-shutdown.sh"),
         new Harness("polaris", "platform/polaris/compose-service",
-            "scripts/lifecycle/polaris-compose-shutdown.sh"));
+            "scripts/lifecycle/polaris-compose-shutdown.sh"),
+        new Harness("spark", "platform/spark/compose-cluster",
+            "scripts/lifecycle/spark-compose-shutdown.sh"));
 
     @TempDir
     Path temporaryDirectory;
