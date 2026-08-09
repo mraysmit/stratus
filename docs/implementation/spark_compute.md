@@ -926,7 +926,7 @@ Increment 3 is accepted when all of the following are true:
 - [ ] **P3** - Spark connects to Polaris and resolves all four namespaces
 - [ ] **P4** - Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
 - [ ] **P5** - image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
-- [ ] **P6** - `SparkPipelineVerificationTest` — all eleven tests pass against the live cluster
+- [ ] **P6** - `SparkPipelineVerificationTest` — every test passes against the live cluster (12 as of 2026-08-09; the count grew when the plan's §6 verification table was reconciled against the suite and three gaps were found: a completeness failure on a mandatory column, the promotion-gate pass case, and a lineage payload from every job rather than ingestion alone. Two were closed by extra assertions inside existing tests and one by a new test, so the count moved from eleven to twelve)
 - [ ] **P7** - Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
 - [ ] **P8** - Quality results written to `platform.quality_check_results` and queryable via Spark SQL
 - [ ] **P9** - Promotion gate correctly blocks silver promotion when a blocking quality check fails

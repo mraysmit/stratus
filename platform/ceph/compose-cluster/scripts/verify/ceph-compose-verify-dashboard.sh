@@ -73,12 +73,28 @@ echo "unauthenticated request: http=$unauth_code (401 expected)" >&2
 health_status=unavailable; mon_count=0; osd_up_in=0; version=unavailable; logout_code=000
 rgw_write_pass=false; rgw_write_detail="not attempted: authentication failed"
 if $auth_pass; then
-  if curl -sS --cacert "$work/ca.crt" -H "$accept" -H "Authorization: Bearer $token" \
-       -o "$work/health.json" "$base/api/health/minimal"; then
-    health_status=$(jq -r ".health.status // \"unavailable\"" "$work/health.json")
-    mon_count=$(jq -r ".mon_status.monmap.mons | length" "$work/health.json")
-    osd_up_in=$(jq -r "[.osd_map.osds[] | select(.up == 1 and .in == 1)] | length" "$work/health.json")
-  fi
+  # Poll for HEALTH_OK to a bounded deadline rather than reading once. A
+  # cluster bootstrapped moments ago reports HEALTH_WARN while placement
+  # groups settle, and a single read turns that into a failed gate on a
+  # healthy cluster — the same false negative the RGW write check below
+  # already avoids by retrying. A cluster that never reaches HEALTH_OK still
+  # fails, so the signal is preserved rather than relaxed.
+  health_timeout=${STRATUS_HEALTH_TIMEOUT_SECONDS:-120}
+  health_deadline=$(( SECONDS + health_timeout ))
+  health_attempts=0
+  while :; do
+    health_attempts=$(( health_attempts + 1 ))
+    if curl -sS --cacert "$work/ca.crt" -H "$accept" -H "Authorization: Bearer $token" \
+         -o "$work/health.json" "$base/api/health/minimal"; then
+      health_status=$(jq -r ".health.status // \"unavailable\"" "$work/health.json")
+      mon_count=$(jq -r ".mon_status.monmap.mons | length" "$work/health.json")
+      osd_up_in=$(jq -r "[.osd_map.osds[] | select(.up == 1 and .in == 1)] | length" "$work/health.json")
+    fi
+    [ "$health_status" = HEALTH_OK ] && break
+    [ "$SECONDS" -ge "$health_deadline" ] && break
+    sleep 5
+  done
+  echo "cluster health settled to $health_status after $health_attempts attempt(s)" >&2
   version=$(curl -sS --cacert "$work/ca.crt" -H "$accept" -H "Authorization: Bearer $token" \
     "$base/api/summary" | jq -r ".version // \"unavailable\"")
 
