@@ -57,7 +57,7 @@ increment rather than inherited:
 
 - an RGW identity with bucket policies on the five Stratus buckets, provisioned
   by the Ceph harness from its `service-identities.conf` and published to
-  OpenBao ([ADR-P1-004](../../docs/decisions/ADR-P1-004-developer-secret-store.md))
+  OpenBao ([ADR-P1-004](../../docs/decisions/ADR-P1-004-openbao-secret-distribution.md))
 - a Polaris principal created by `spark-compose-bootstrap-principal.sh`
 
 No credential is written to a tracked file. The RGW key pair is pulled from
