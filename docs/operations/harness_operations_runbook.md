@@ -52,10 +52,29 @@ bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-startup.
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh
 ```
 
+Add the Spark batch engine only if you need it; it is a consumer of both
+harnesses above and never starts them itself:
+
+```bash
+bash platform/spark/compose-cluster/scripts/lifecycle/spark-compose-startup.sh
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-verify-cluster.sh
+```
+
+The first Spark start needs the runtime image, which the harness never builds
+for you (P1-0.1). Resolve its artifacts and build it once:
+
+```bash
+bash platform/spark/compose-cluster/scripts/lib/spark-compose-resolve-artifacts.sh
+docker build -f platform/spark/image/Dockerfile -t stratus/spark-runtime:dev platform/spark/image
+```
+
 Expected end state: `READY bucket=` lines for all five buckets,
 `PUBLISH openbao path=stratus/service-identities/svc-polaris`,
 `READY catalog=stratus`, four `READY namespace=` lines, and
-`READY table=platform.quality_check_results`.
+`READY table=platform.quality_check_results`. With Spark added: `PUBLISH
+openbao path=stratus/service-identities/svc-spark`, `READY
+principal=svc-spark`, and `PASS spark-cluster workers=2/2`.
 
 Every step is idempotent — re-running converges and reports
 `(already exists)`.
@@ -134,7 +153,19 @@ operational log levels.
 bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh
 ```
 
-### 3.5 Full Ceph harness sequence in one command
+### 3.5 Live batch compute — Spark
+
+```bash
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
+```
+
+Submits real statements to the standalone cluster and proves worker
+registration, the runtime image contents, catalog namespace resolution, an
+Iceberg write and read landing in the governed zone, an S3A raw object round
+trip, and a forged principal secret being refused. Requires Ceph, OpenBao,
+Polaris, and Spark up, and the `svc-spark` identity provisioned.
+
+### 3.6 Full Ceph harness sequence in one command
 
 ```bash
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-validate-cluster.sh
@@ -145,7 +176,7 @@ Runs bucket bootstrap, identity provisioning, bucket/storage/security/
 dashboard/dataset verification, and the live JVM tests as one command with a
 per-step transcript. `--full` wraps the sequence in startup and shutdown.
 
-### 3.6 Running the live Maven profiles directly
+### 3.7 Running the live Maven profiles directly
 
 Each wrapper passes extra arguments through to Maven, so a targeted or
 combined run keeps the environment the wrapper supplies:
@@ -236,7 +267,10 @@ The original observations are recorded in
 
 ## 5. Shut down
 
+Consumers first, providers last:
+
 ```bash
+bash platform/spark/compose-cluster/scripts/lifecycle/spark-compose-shutdown.sh
 bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-shutdown.sh
 bash platform/openbao/compose-service/scripts/lifecycle/openbao-compose-shutdown.sh
 bash platform/ceph/compose-cluster/scripts/lifecycle/ceph-compose-shutdown.sh
@@ -262,7 +296,9 @@ docker ps --format '{{.Names}}' | grep stratus
 | Ceph harness transcripts | `platform/ceph/compose-cluster/logs/` |
 | Live Ceph JVM test transcripts | `platform/ceph/tests/logs/` |
 | Catalog conformance transcripts | `platform/polaris/compose-service/logs/` |
+| Spark conformance transcripts | `platform/spark/compose-cluster/logs/` |
 | Storage verification evidence (JSON) | `platform/ceph/compose-cluster/evidence/` |
+| Spark cluster verification evidence (JSON) | `platform/spark/compose-cluster/evidence/` |
 | Per-test reports | each module's `target/surefire-reports/` |
 | Coverage reports | each module's `target/site/jacoco/` |
 
@@ -292,6 +328,9 @@ lists and table properties). Filter one channel with
 | Polaris cannot fetch `svc-polaris` | OpenBao was restarted; re-run `ceph-compose-provision-service-identities.sh` |
 | Rotation preflight refuses to run | `.env` and RGW disagree after a failed rotation; run `ceph-compose-rotate-secrets.sh --repair-keys` (§4), then re-run `--preflight` |
 | `Another secret rotation appears to be active` | a rotation really is running; a lock from a killed run is reclaimed automatically (§4) |
+| Spark startup says the runtime image does not exist | resolve the artifacts and build it once (§2); the harness never builds an image |
+| Spark fails with `Failed to create any local dir` | the event-log or scratch volume predates the image that owns those directories; `spark-compose-shutdown.sh --volumes` then start again |
+| Spark resolves the catalog but every write fails on PKIX | the executors are missing the truststore — check both `spark.driver.extraJavaOptions` and `spark.executor.extraJavaOptions` in the rendered `config/spark-defaults.conf` |
 | `rclone` reports a Windows path for `--ca-cert` | Git Bash path conversion — prefix the command with `MSYS_NO_PATHCONV=1` |
 | `Did not find winutils.exe` in a catalog transcript | benign Hadoop probe on Windows workstations; see [the catalog verifier README](../../verification/catalog/README.md) for the assessment |
 
