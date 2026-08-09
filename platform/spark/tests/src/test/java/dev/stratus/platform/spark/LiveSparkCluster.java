@@ -95,12 +95,42 @@ final class LiveSparkCluster {
         return rclone(timeout, "purge", "cephrgw:" + bucketAndPrefix);
     }
 
+    /**
+     * Places a raw file in the landing zone through the storage owner's own
+     * client, so the pipeline starts from a real object written the way a
+     * source system would deliver one — not from a table Spark made earlier.
+     */
+    static CommandResult writeLandingFile(String bucketRelativePath, String content, Duration timeout) {
+        String container = "/tmp/landing-fixture";
+        return run(timeout, List.of("docker", "compose", "--project-name", "stratus-ceph-local",
+                "exec", "-T", "s3client",
+                "sh", "-c",
+                "printf '" + content + "\\n' > " + container
+                        + " && rclone --ca-cert /certs/stratus-ca.crt copyto " + container
+                        + " cephrgw:stratus-landing/" + bucketRelativePath));
+    }
+
     /** Lists whatever remains under a prefix; blank output means nothing does. */
     static String listObjectPrefix(String bucketAndPrefix, Duration timeout) {
         CommandResult result = rclone(timeout, "ls", "cephrgw:" + bucketAndPrefix);
         // A missing prefix is not an error condition here — it is the state
         // cleanup is trying to reach — and rclone reports it on stderr.
         return result.succeeded() ? result.output().trim() : "";
+    }
+
+    /**
+     * Submits a platform job class from the mounted job jar to the standalone
+     * master. This is a real submission: the driver runs in the master
+     * container and the work executes on the registered workers.
+     */
+    static CommandResult submitJob(String mainClass, Duration timeout, String... jobArguments) {
+        var argv = new ArrayList<>(List.of(
+                "/opt/spark/bin/spark-submit",
+                "--master", "spark://spark-master.stratus.local:7077",
+                "--class", mainClass,
+                "/opt/stratus/jobs/stratus-spark-jobs.jar"));
+        argv.addAll(List.of(jobArguments));
+        return exec(MASTER_SERVICE, timeout, argv.toArray(new String[0]));
     }
 
     private static CommandResult rclone(Duration timeout, String... arguments) {

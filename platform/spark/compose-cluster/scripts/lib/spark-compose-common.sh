@@ -54,6 +54,20 @@ SPARK_BASE_IMAGE='apache/spark:4.1.2-scala2.13-java17-python3-ubuntu'
 SPARK_IMAGE="${SPARK_IMAGE:-stratus/spark-runtime:dev}"
 export SPARK_BASE_IMAGE SPARK_IMAGE
 
+# The platform job jar the cluster mounts. Built by the reactor, not by this
+# harness (P1-0.1): the scripts fail with the build command rather than
+# running it.
+SPARK_JOBS_JAR="$REPO_DIR/jobs/spark/target/stratus-spark-jobs-1.0-SNAPSHOT.jar"
+if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  SPARK_JOBS_JAR="$(cygpath -m "$SPARK_JOBS_JAR")"
+fi
+export SPARK_JOBS_JAR
+
+require_jobs_jar() {
+  [[ -f "$REPO_DIR/jobs/spark/target/stratus-spark-jobs-1.0-SNAPSHOT.jar" ]] \
+    || fail "The platform job jar is missing. Build it: ./mvnw -pl :stratus-spark-jobs -am package -DskipTests"
+}
+
 # Loads .env without validation. Teardown paths use this so a half-configured
 # harness can still be shut down.
 load_environment_file() {

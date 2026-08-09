@@ -200,6 +200,7 @@ bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-startup.
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh
 
 # batch compute, optional — a consumer of the three above
+./mvnw -pl :stratus-spark-jobs -am package -DskipTests
 bash platform/spark/compose-cluster/scripts/lifecycle/spark-compose-startup.sh
 bash platform/spark/compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
 
