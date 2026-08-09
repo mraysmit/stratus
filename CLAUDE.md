@@ -29,8 +29,9 @@ never a global Maven).
   Never introduce a stand-in to raise coverage.
 - Tests select by JUnit tag: `unit` (offline: pure logic and real
   environmental failures), `ceph-integration` (live Ceph cluster),
-  `catalog-integration` (live Polaris + Ceph harnesses), and
-  `secrets-integration` (live OpenBao harness). Live tags are excluded by
+  `catalog-integration` (live Polaris + Ceph harnesses),
+  `secrets-integration` (live OpenBao harness), and `spark-integration`
+  (live Spark cluster over Polaris and Ceph). Live tags are excluded by
   default; run with the matching `-P<tag>-tests` profile or `-Pall-tests`
   while the harnesses are up. Profiles are defined in the root pom.
 - A change is complete only when the §12 completion gate passes, including

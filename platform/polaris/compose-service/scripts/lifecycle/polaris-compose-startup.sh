@@ -8,9 +8,7 @@ source "$(dirname "$0")/../lib/polaris-compose-common.sh"
 # the template once with a per-machine disposable bootstrap credential and
 # then left alone. Requires the Ceph harness to be running (ADR-P1-003); it
 # is never started transitively from here.
-#
-# Scaffold status: the first two start/verify/stop validation cycles belong
-# to P1-2.2-D1 and have not yet been recorded.
+
 
 rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
