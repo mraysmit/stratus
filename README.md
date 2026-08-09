@@ -199,10 +199,15 @@ bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-provision-service
 bash platform/polaris/compose-service/scripts/lifecycle/polaris-compose-startup.sh
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh
 
+# batch compute, optional — a consumer of the three above
+bash platform/spark/compose-cluster/scripts/lifecycle/spark-compose-startup.sh
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
+
 # live conformance suites
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh
 bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
 ```
 
 Live suites are excluded from the default build and select by JUnit tag. Mocks, fakes, and simulated product endpoints are prohibited: product behaviour is proven against the running product.

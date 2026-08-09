@@ -859,7 +859,7 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 | `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `platform/spark/compose-cluster/config/`; svc-spark identity | catalog resolution and object read/write | D1 | Data-platform owner | Verified 2026-08-08: Spark resolves all four governed namespaces through Polaris over TLS and writes and reads an Iceberg table whose files land under `s3://stratus-bronze/bronze/`; S3A raw object round trip proven separately, since it is configured independently of Iceberg's S3FileIO. `svc-spark` exists as both an RGW identity (bucket policies on the five Stratus buckets, proven to fail closed on `stratus-denied`) and a Polaris principal created by `spark-compose-bootstrap-principal.sh`. No credential is in a tracked file: the RGW key pair is pulled from OpenBao (ADR-P1-004) and the catalog secret is generated into the ignored `.env`; the Spark configuration is rendered from the providers' `connection.env` so no endpoint is duplicated (ADR-P1-003). A forged principal secret is refused, with a positive control proving the real one works at that moment. Least-privilege narrowing of the catalog role belongs to `P1-3.2-P1` | Verified |
 | `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; verifier tests | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Test-data determinism | Not started |
 | `P1-3.1-P1` | `P1-3.1` | Production | Deploy approved master recovery design, multi-host workers, durable scratch policy, and restricted submission. | Platform owner | `P1-3.1-S1`, production infrastructure | `platform/spark/`; `environments/production/spark/` | worker/master loss and RTO/RPO evidence | P1-P4 | Operations owner | Availability exception | Not started |
-| `P1-3.2-P1` | `P1-3.2` | Production | Apply Spark auth/crypto, managed secrets, trusted TLS proxying, and least-privilege Polaris/Ceph access. | Security owner | `P1-3.1-P1`, Increment 7 controls | `platform/spark/config/`; `environments/production/spark/` | positive/negative auth, encrypted transport | P3-P7 | Platform owner | Shared-secret rotation | Not started |
+| `P1-3.2-P1` | `P1-3.2` | Production | Apply Spark auth/crypto, managed secrets, trusted TLS proxying, and least-privilege Polaris/Ceph access. | Security owner | `P1-3.1-P1`, Increment 7 controls | `platform/spark/compose-cluster/config/`; `environments/production/spark/` | positive/negative auth, encrypted transport | P3-P7 | Platform owner | Shared-secret rotation | Not started |
 | `P1-3.6-P1` | `P1-3.6` | Production | Deploy Ceph-backed event logs and history server; prove relocation and continuity. | Operations owner | `P1-3.2-P1` | history-server config/runbook | `s3a://` event continuity and restart test | P8-P9 | Operations owner | Event-log retention | Not started |
 | `P1-3.5-V1` | `P1-3.5` | Production | Run full production pipeline, quality, maintenance, capacity, and worker-failure regression. | QA owner | `P1-3.6-P1` | production reports | JUnit, job IDs, metrics, object/table evidence | P10-P13 | Data owner | Representative workload needed | Not started |
 | `P1-3.G-D` | `P1-3` | Developer | Accept D1-D2 after all producing tasks and evidence are accepted. | Platform owner | `P1-3.3-V1` | developer gate record | gate matrix/evidence index | D1-D2 | Data owner | Open functional defect | Not started |
@@ -871,6 +871,25 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 
 - [ ] **D1** - Reduced Podman topology starts/stops idempotently and ingestion, transformations, quality gates, maintenance decisions, and verifier tests pass.
 - [ ] **D2** - Local volumes, local certificates, reduced workers, and bootstrap credentials are recorded in the promotion manifest.
+
+### Developer-to-production promotion controls
+
+This table is the promotion manifest that gate **D2** requires. Every
+developer-only condition in the Increment 3 harness is named here with the
+production task that replaces it and the condition under which promotion
+stops. A developer condition that is not listed has not been assessed and
+blocks the developer gate.
+
+| Developer condition | Production replacement task | Rollback or stop condition |
+|---|---|---|
+| Reduced single-host topology: one master and two workers on one workstation, sized 2 cores and 2 GB each | `P1-3.1-P1` deploys multi-host workers with an approved master recovery design | never claim an RTO/RPO, capacity, or failover posture from this topology; the production gate stays open until worker and master loss drills pass |
+| Local event-log and scratch volumes (`file:///opt/spark/events`, `/opt/spark/scratch`) | `P1-3.6-P1` moves event logs to Ceph and adds the history server | event history is lost on volume removal here; no continuity or relocation evidence may be taken from this mode |
+| Two disposable lab CAs trusted by the engine — Ceph's for object storage and Polaris's for the catalog | `P1-7.4` replaces both with FreeIPA Dogtag-issued material | never fall back to plain HTTP or relax client verification to make a TLS check pass |
+| Harness-generated `svc-spark` catalog secret in the ignored `.env`, reset into Polaris on every bootstrap | `P1-3.2-P1` with Increment 7 controls | rotate after any real use; never promote a harness credential |
+| `svc-spark` holds the `catalog_admin` catalog role rather than a least-privilege engine role | `P1-3.2-P1` | a production engine principal never carries catalog administration; promotion stops until the role is narrowed and a negative test proves the boundary |
+| Runtime image pinned by tag `stratus/spark-runtime:dev`, built on the workstation from a local artifact lock | `P1-3.1-S1` under `P1-0.1` publishes it by immutable digest with scan, SBOM, and provenance | production runs by digest only; this clause shares the `P1-0.1` publication deferral and cannot be closed from a tag pin |
+| No Spark authentication or network encryption between master, workers, and driver | `P1-3.2-P1` applies Spark auth and encrypted transport | no shared or representative use until both are on; a shared lab without them is a stop condition |
+| Submission is unrestricted from any container on the harness network | `P1-3.1-P1` restricts submission | never expose the master port beyond loopback in this mode |
 
 **Readiness (2026-08-08).** The cluster and its bindings are done and
 `Verified`: `P1-3.1-S1` (image and artifact lock, developer scope),
@@ -886,12 +905,11 @@ and those are the jobs of `P1-3.3-V1`, which is `Not started`: `jobs/spark/`
 does not exist. What is proven today is that the engine, the catalog, and the
 object store are correctly wired for those jobs to be written against.
 
-D2 has no promotion manifest for this increment yet. The developer-only
-conditions already visible are the local event-log and scratch volumes
-(replaced by `P1-3.6-P1`), the two disposable lab CAs, the reduced two-worker
-single-host topology (`P1-3.1-P1`), the harness-generated `svc-spark` catalog
-secret, and the `catalog_admin` role standing in for a least-privilege engine
-role (`P1-3.2-P1`).
+D2's promotion manifest is the table above, added 2026-08-08. It names eight
+developer-only conditions with the production task that replaces each. D2 is
+satisfiable on that evidence once the platform owner accepts it; it is not
+ticked here because the gate traceability rule requires the producing tasks to
+be `Accepted`, which is the owner's action.
 
 ### Production gate
 
