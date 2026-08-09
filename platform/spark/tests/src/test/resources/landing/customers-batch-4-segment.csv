@@ -1,0 +1,3 @@
+customer_id,email,country,updated_at,segment
+8,heidi@example.com,GB,2026-08-03T09:00:00Z,enterprise
+1,alice.new@example.com,GB,2026-08-03T09:00:00Z,retail

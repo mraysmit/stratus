@@ -11,7 +11,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -48,6 +50,9 @@ public final class QualityCheckJob {
     public static final String STATUS_WARNING = "WARNING";
     public static final String SEVERITY_BLOCKING = "blocking";
 
+    static final Set<String> ARGUMENTS = Set.of(
+            "targetTable", "checks", "checksBase64", "runId", "pipelineRunId");
+
     private static final Logger LOGGER = Logger.getLogger(QualityCheckJob.class.getName());
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -55,7 +60,7 @@ public final class QualityCheckJob {
     }
 
     public static void main(String... argv) {
-        JobArguments arguments = JobArguments.parse(argv);
+        JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String checks = checkDefinitions(arguments);
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
@@ -124,6 +129,13 @@ public final class QualityCheckJob {
             String status = outcome.passed
                     ? STATUS_PASSED
                     : (SEVERITY_BLOCKING.equalsIgnoreCase(severity) ? STATUS_FAILED : STATUS_WARNING);
+            // The measurement behind the verdict, at DEBUG: an operator asking
+            // why a rule failed needs the number it saw and the number it was
+            // allowed, and neither belongs in the run's INFO summary.
+            LOGGER.log(Level.FINE, () -> String.format(
+                    "QUALITY RULE table=%s name=%s type=%s severity=%s status=%s metric=%s threshold=%s",
+                    targetTable, text(definition, "name", null), text(definition, "type", null),
+                    severity, status, outcome.metricValue, outcome.threshold));
             rows.add(RowFactory.create(
                     runId, identifier[1], identifier[2], identifier[1],
                     text(definition, "type", null), text(definition, "name", text(definition, "type", null)),
@@ -262,7 +274,18 @@ public final class QualityCheckJob {
         return parts;
     }
 
-    private static StructType resultSchema() {
+    /**
+     * The shape a result record is written in.
+     *
+     * <p>Every writer to the results table uses this rather than reading the
+     * deployed table's schema back. The two are not interchangeable: Iceberg
+     * maps {@code checked_at} to {@code TIMESTAMP_NTZ}, and a row built with a
+     * {@code java.sql.Timestamp} against that schema is refused outright, while
+     * against this one Spark converts it on the write. Reading the table's
+     * schema also makes the record's column order depend on whatever is
+     * deployed.
+     */
+    static StructType resultSchema() {
         return new StructType()
                 .add("run_id", DataTypes.StringType, false)
                 .add("dataset_namespace", DataTypes.StringType, false)

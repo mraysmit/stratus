@@ -36,11 +36,24 @@ import org.junit.jupiter.api.Test;
 @Tag("unit")
 final class AssertionQualityTest {
 
-    /** Every test source in the repository. */
+    /**
+     * Every test source in the repository except this one.
+     *
+     * <p>A rule has to quote the thing it bans — in its pattern, and in the
+     * comment saying why it exists — so scanning this file only ever finds the
+     * ban itself. The exclusion is safe because none of the rules below can
+     * apply here: this class runs offline against file text and never sees a
+     * command's output, a teardown, or a live endpoint.
+     *
+     * <p>It is also the reason this file was believed clean when it was
+     * written: the rules were verified before it was committed, and
+     * {@code trackedFiles} could not see it.
+     */
     private static List<Path> testSources() {
         return Repo.trackedFiles().stream()
                 .filter(path -> path.toString().endsWith("Test.java"))
                 .filter(path -> path.toString().replace('\\', '/').contains("/src/test/java/"))
+                .filter(path -> !path.getFileName().toString().equals("AssertionQualityTest.java"))
                 .toList();
     }
 

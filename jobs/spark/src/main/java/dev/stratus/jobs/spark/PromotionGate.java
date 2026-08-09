@@ -8,6 +8,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
@@ -40,13 +42,16 @@ public final class PromotionGate {
 
     public static final String STATUS_OVERRIDDEN = "overridden";
 
+    static final Set<String> ARGUMENTS = Set.of(
+            "runId", "targetTable", "override-reason", "override-principal");
+
     private static final Logger LOGGER = Logger.getLogger(PromotionGate.class.getName());
 
     private PromotionGate() {
     }
 
     public static void main(String... argv) {
-        JobArguments arguments = JobArguments.parse(argv);
+        JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String runId = arguments.require("runId");
         String targetTable = arguments.require("targetTable");
 
@@ -70,7 +75,7 @@ public final class PromotionGate {
             }
             if (decision.blocked()) {
                 spark.stop();
-                System.exit(2);
+                System.exit(JobExit.PROMOTION_BLOCKED);
             }
         } finally {
             spark.stop();
@@ -88,6 +93,11 @@ public final class PromotionGate {
         boolean overridden = false;
         for (Row row : results) {
             String status = row.getString(2);
+            // Each recorded verdict at DEBUG: the INFO line says what the gate
+            // decided, and this says which records it decided from.
+            LOGGER.log(Level.FINE, () -> "PROMOTION EVIDENCE runId=" + runId
+                    + " check=" + row.getString(0) + " severity=" + row.getString(1)
+                    + " status=" + status);
             if (STATUS_OVERRIDDEN.equals(status)) {
                 overridden = true;
             } else if (QualityCheckJob.STATUS_FAILED.equals(status)) {
@@ -113,8 +123,11 @@ public final class PromotionGate {
                         + " (failing: " + String.join(",", decision.failingChecks()) + ")",
                 null, Timestamp.from(Instant.now(clock)), null);
         try {
-            spark.createDataFrame(List.of(record),
-                            spark.table(QualityCheckJob.RESULTS_TABLE).schema())
+            // The declared shape, not the deployed table's. Iceberg maps
+            // checked_at to TIMESTAMP_NTZ, and a java.sql.Timestamp against
+            // that schema is refused where the same value against the declared
+            // one is converted on the write.
+            spark.createDataFrame(List.of(record), QualityCheckJob.resultSchema())
                     .writeTo(QualityCheckJob.RESULTS_TABLE).append();
         } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {
             throw new IllegalStateException(QualityCheckJob.RESULTS_TABLE

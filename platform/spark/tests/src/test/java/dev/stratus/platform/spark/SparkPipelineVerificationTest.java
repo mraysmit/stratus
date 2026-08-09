@@ -51,23 +51,24 @@ final class SparkPipelineVerificationTest {
     private static final String SILVER = "stratus.silver.pipeline_customers_" + SUFFIX;
     private static final String GOLD = "stratus.gold.pipeline_customers_by_country_" + SUFFIX;
     private static final String QUALITY_RUN = "quality-" + SUFFIX;
+    private static final String BATCH = "pipeline-" + SUFFIX;
 
     /**
      * Four rows with one duplicated business key and one blank email, so the
      * uniqueness rule fails and the completeness rule has a null to count
      * once ingestion has turned the blank into one.
      */
-    private static final String FIXTURE_CSV = String.join("\\n",
+    private static final String FIXTURE_CSV = String.join("\n",
             "customer_id,email,country,updated_at",
-            "1,alice@example.com,GB,2026-08-09 10:00:00",
-            "2,bob@example.com,GB,2026-08-09 10:00:00",
-            "2,bob.updated@example.com,US,2026-08-09 10:05:00",
-            "3, ,US,2026-08-09 10:00:00");
+            "1,alice@example.com,GB,2026-08-09T10:00:00Z",
+            "2,bob@example.com,GB,2026-08-09T10:00:00Z",
+            "2,bob.updated@example.com,US,2026-08-09T10:05:00Z",
+            "3, ,US,2026-08-09T10:00:00Z");
 
     @BeforeAll
     static void placeTheLandingFile() {
         LiveSparkCluster.require();
-        var written = LiveSparkCluster.writeLandingFile(
+        var written = LiveSparkCluster.writeLandingContent(
                 LANDING_PREFIX + "/customers.csv", FIXTURE_CSV, JOB);
         assertTrue(written.succeeded(), "the landing fixture must upload: " + written.describe());
     }
@@ -122,6 +123,7 @@ final class SparkPipelineVerificationTest {
                 "--sourceFile", SOURCE_FILE,
                 "--targetTable", BRONZE,
                 "--sourceSystem", "crm",
+                "--batchId", BATCH,
                 "--runId", "ingest-" + SUFFIX);
 
         assertTrue(result.succeeded(), "ingestion must succeed: " + result.describe());
@@ -224,7 +226,7 @@ final class SparkPipelineVerificationTest {
                 "--sourceTable", BRONZE,
                 "--targetTable", SILVER,
                 "--businessKey", "customer_id",
-                "--orderBy", "updated_at",
+                "--sequenceColumn", "updated_at",
                 "--runId", "transform-" + SUFFIX);
 
         assertTrue(result.succeeded(), "the transform must succeed: " + result.describe());

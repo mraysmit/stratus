@@ -3,9 +3,14 @@
 
 package dev.stratus.jobs.spark;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The {@code --name value} arguments a platform job is submitted with.
@@ -21,6 +26,8 @@ import java.util.Optional;
  * @version 1.0.0
  */
 public final class JobArguments {
+
+    private static final Logger LOGGER = Logger.getLogger(JobArguments.class.getName());
 
     private final Map<String, String> values;
 
@@ -45,6 +52,33 @@ public final class JobArguments {
             }
         }
         return new JobArguments(values);
+    }
+
+    /**
+     * Stops the job when an argument was supplied that this job does not read.
+     *
+     * <p>Without this, a renamed argument is not a break but a silence: the old
+     * name is accepted, ignored, and the job runs with the default the caller
+     * was trying to replace. That is how {@code --orderBy} would have survived
+     * its rename to {@code --sequenceColumn} — every submission still working,
+     * every one of them no longer ordering by anything.
+     *
+     * <p>The diagnostic record names the arguments and never their values: a
+     * value can carry a secret, and a name cannot.
+     */
+    public JobArguments rejectUnknown(Set<String> known) {
+        var unknown = new ArrayList<String>();
+        for (String name : values.keySet()) {
+            if (!known.contains(name)) {
+                unknown.add(name);
+            }
+        }
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("Unrecognised argument(s) --"
+                    + String.join(", --", unknown) + "; this job reads " + new TreeSet<>(known));
+        }
+        LOGGER.log(Level.FINE, () -> "JOB ARGUMENTS accepted=" + values.keySet());
+        return this;
     }
 
     public String require(String name) {

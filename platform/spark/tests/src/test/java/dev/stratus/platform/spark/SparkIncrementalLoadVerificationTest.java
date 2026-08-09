@@ -1,0 +1,653 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
+package dev.stratus.platform.spark;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+
+/**
+ * Proves the batch pipeline over a week of arrivals rather than a single file.
+ *
+ * <p>A pipeline tested on one batch is tested on the only day it cannot get
+ * wrong. What breaks a data platform is the second day: a batch that should add
+ * to what is there rather than replace it, a replay that carries an older
+ * version of a record already corrected, a source system that adds a column or
+ * changes one, a batch that fails its checks and is fixed and sent again. Each
+ * of those is a scenario here, and each is one the previous suite would have
+ * passed while the platform did the wrong thing.
+ *
+ * <p>The tests are ordered because they are one table's history. Every fixture
+ * is a file under {@code src/test/resources/landing}, uploaded through the
+ * storage owner's own client, so the pipeline starts from a real object written
+ * the way a source system would deliver one.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-08-09
+ * @version 1.0.0
+ */
+@Tag("spark-integration")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+final class SparkIncrementalLoadVerificationTest {
+
+    private static final Duration JOB = Duration.ofMinutes(10);
+    private static final String JOBS = "dev.stratus.jobs.spark.";
+
+    /** The status codes the jobs document; see {@code JobExit}. */
+    private static final int EXIT_PROMOTION_BLOCKED = 2;
+    private static final int EXIT_SCHEMA_DRIFT = 3;
+
+    private static final String SUFFIX = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    private static final String LANDING_PREFIX = "spark-incremental/" + SUFFIX;
+    private static final String BRONZE = "stratus.bronze.incremental_customers_" + SUFFIX;
+    private static final String SILVER = "stratus.silver.incremental_customers_" + SUFFIX;
+    private static final String COUNTRIES = "stratus.silver.incremental_countries_" + SUFFIX;
+
+    /**
+     * The schema is declared rather than inferred. Inference reads types out of
+     * whichever rows happened to arrive, so the same column is an integer in
+     * one batch and a string in the next — which would mean the drift these
+     * tests examine was manufactured by the CSV parser rather than sent by the
+     * source system.
+     */
+    private static final String SCHEMA =
+            "customer_id INT, email STRING, country STRING, updated_at TIMESTAMP";
+    private static final String SCHEMA_WITH_SEGMENT = SCHEMA + ", segment STRING";
+    private static final String SCHEMA_WITH_STRING_ID =
+            "customer_id STRING, email STRING, country STRING, updated_at TIMESTAMP";
+
+    private static final String BATCH_1 = "2026-08-01";
+    private static final String BATCH_2 = "2026-08-02";
+    private static final String BATCH_3_LATE = "2026-08-03-replay";
+    private static final String BATCH_4_SEGMENT = "2026-08-04";
+    private static final String BATCH_5_TYPECHANGE = "2026-08-05";
+    private static final String BATCH_6_DEFECTIVE = "2026-08-06";
+    private static final String BATCH_7_NDJSON = "2026-08-07";
+    private static final String BATCH_8_TIED = "2026-08-08";
+
+    private static final String BLOCKED_RUN = "incremental-blocked-" + SUFFIX;
+
+    /** Recorded so the orphan probe can be removed even if its own test fails. */
+    private static String bronzeDataPrefix;
+
+    @BeforeAll
+    static void placeTheReferenceData() {
+        LiveSparkCluster.require();
+        var created = LiveSparkCluster.sparkSql(
+                "CREATE TABLE " + COUNTRIES + " (country STRING) USING iceberg; "
+                        + "INSERT INTO " + COUNTRIES + " VALUES ('GB'), ('US'), ('DE'), ('FR')", JOB);
+        assertTrue(created.succeeded(), "the country reference table must exist: " + created.describe());
+    }
+
+    @BeforeEach
+    void requireLiveCluster() {
+        LiveSparkCluster.require();
+    }
+
+    @AfterAll
+    static void removeProbeTablesAndObjects() {
+        // Asserted, not assumed: a cleanup whose result is discarded fails
+        // silently and leaves probe tables in a governed zone while the suite
+        // still reports green.
+        for (String table : new String[] {SILVER, COUNTRIES, BRONZE}) {
+            var dropped = LiveSparkCluster.sparkSql("DROP TABLE IF EXISTS " + table + " PURGE", JOB);
+            assertTrue(dropped.succeeded(), "probe table " + table + " must be dropped: "
+                    + dropped.describe());
+        }
+        String landing = "stratus-landing/" + LANDING_PREFIX;
+        LiveSparkCluster.removeObjectPrefix(landing, JOB);
+        assertEquals("", LiveSparkCluster.listObjectPrefix(landing, JOB),
+                "the landing fixtures must be gone after cleanup");
+
+        if (bronzeDataPrefix != null) {
+            // The orphan probe is deliberately unknown to the table, so a
+            // PURGE drop does not account for it.
+            LiveSparkCluster.removeObjectPrefix(bronzeDataPrefix, JOB);
+            assertEquals("", LiveSparkCluster.listObjectPrefix(bronzeDataPrefix, JOB),
+                    "no probe object may remain in the governed bronze bucket");
+        }
+    }
+
+    @Test
+    @Order(1)
+    void theFirstBatchCreatesBronzePartitionedByBatchWithItsWriteProperties() {
+        var result = ingest("customers-batch-1.csv", BATCH_1, SCHEMA);
+
+        assertTrue(result.succeeded(), "the first ingestion must succeed: " + result.describe());
+        assertEquals("5", scalar("count(*)", BRONZE), "every row of the first batch must land");
+        assertEquals("5", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '" + BATCH_1 + "'"),
+                "every row must carry the batch it arrived in");
+        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_source_file IS NULL"),
+                "every row must record the object it was read from");
+        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_ingested_at IS NULL"),
+                "every row must record when it was ingested");
+
+        // One partition per batch is what makes a replay a metadata operation
+        // that cannot reach another batch's files.
+        assertEquals("1", scalar("count(*)", BRONZE + ".partitions"),
+                "bronze must be partitioned by batch");
+
+        Map<String, String> properties = tableProperties(BRONZE);
+        assertEquals("copy-on-write", properties.get("write.merge.mode"), properties.toString());
+        assertEquals("serializable", properties.get("write.delete.isolation-level"),
+                properties.toString());
+        assertEquals("parquet", properties.get("write.format.default"), properties.toString());
+        assertEquals("true", properties.get("write.spark.accept-any-schema"), properties.toString());
+        assertEquals("true", properties.get("stratus.append-only"), properties.toString());
+    }
+
+    @Test
+    @Order(2)
+    void reSendingTheSameBatchIsRefusedRatherThanSilentlyDoubled() {
+        var result = ingest("customers-batch-1.csv", BATCH_1, SCHEMA);
+
+        assertFalse(result.succeeded(),
+                "a batch already in the table must be refused: " + result.describe());
+        assertTrue(result.output().contains("append-only"),
+                "the refusal must say why: " + result.output());
+        assertTrue(result.output().contains(BATCH_1),
+                "the refusal must name the batch: " + result.output());
+        assertEquals("5", scalar("count(*)", BRONZE), "the refused batch must not have been written");
+    }
+
+    @Test
+    @Order(3)
+    void replayingABatchDeliberatelyRewritesThatBatchAndNothingElse() {
+        var result = ingest("customers-batch-1.csv", BATCH_1, SCHEMA, "--onExistingBatch", "replace");
+
+        assertTrue(result.succeeded(), "a deliberate replay must succeed: " + result.describe());
+        assertEquals("5", scalar("count(*)", BRONZE), "a replay must converge, not accumulate");
+        assertEquals("alice@example.com",
+                scalar("email", BRONZE + " WHERE customer_id = 1"),
+                "the replayed rows must be the same rows");
+    }
+
+    @Test
+    @Order(4)
+    void aSecondBatchAccumulatesInsteadOfReplacingTheFirst() {
+        // The scenario the previous suite could not have: it ingested once, so
+        // a job that replaced the table on every run looked identical to one
+        // that appended. This is the assertion that tells them apart.
+        var result = ingest("customers-batch-2.csv", BATCH_2, SCHEMA);
+
+        assertTrue(result.succeeded(), "the second ingestion must succeed: " + result.describe());
+        assertEquals("8", scalar("count(*)", BRONZE),
+                "the second batch must add to the first, not replace it");
+        assertEquals("2", scalar("count(DISTINCT stratus_batch_id)", BRONZE),
+                "both batches must be identifiable in the table");
+        assertEquals("1", scalar("count(*)", BRONZE + " WHERE customer_id = 5"),
+                "a customer only the first batch carried must still be there");
+        assertEquals("2", scalar("count(*)", BRONZE + ".partitions"),
+                "each batch must be its own partition");
+    }
+
+    @Test
+    @Order(5)
+    void transformingTheFirstBatchCreatesSilverWithoutTheBronzeAuditColumns() {
+        var result = transform(BATCH_1);
+
+        assertTrue(result.succeeded(), "the first transform must succeed: " + result.describe());
+        assertTrue(result.output().contains("\"type\": \"TRANSFORM\""),
+                "every job must emit its lineage payload: " + result.output());
+        assertEquals("5", scalar("count(*)", SILVER), "silver must hold the first batch's customers");
+
+        // Bronze provenance belongs to a row that arrived once. A silver row is
+        // rewritten by whichever batch last corrected it, so carrying the batch
+        // id forward would state something that stops being true.
+        var columns = LiveSparkCluster.sparkSql("DESCRIBE TABLE " + SILVER, JOB);
+        assertFalse(columns.output().contains("stratus_batch_id"),
+                "silver must not carry the ingestion audit columns: " + columns.output());
+
+        Map<String, String> properties = tableProperties(SILVER);
+        assertEquals("copy-on-write", properties.get("write.merge.mode"), properties.toString());
+        assertEquals("hash", properties.get("write.distribution-mode"), properties.toString());
+        assertFalse(properties.containsKey("stratus.append-only"),
+                "silver is upserted, not appended: " + properties);
+    }
+
+    @Test
+    @Order(6)
+    void aCorrectionInALaterBatchUpdatesTheRowItCorrects() {
+        var result = transform(BATCH_2);
+
+        assertTrue(result.succeeded(), "the second transform must succeed: " + result.describe());
+        assertEquals("7", scalar("count(*)", SILVER),
+                "two new customers must be inserted and the corrected one updated in place");
+        assertEquals("bob.corrected@example.com",
+                scalar("email", SILVER + " WHERE customer_id = 2"),
+                "the newer version of the record must win");
+        assertEquals("1", scalar("count(*)", SILVER + " WHERE customer_id = 2"),
+                "an update must not become a second row");
+    }
+
+    @Test
+    @Order(7)
+    void aReplayCarryingAnOlderVersionDoesNotOverwriteTheCorrection() {
+        // The failure this guards against is silent: both rows are valid, the
+        // merge succeeds, and silver quietly ends up holding the version that
+        // was already superseded. Nothing downstream can tell.
+        var ingested = ingest("customers-batch-3-late.csv", BATCH_3_LATE, SCHEMA);
+        assertTrue(ingested.succeeded(), "the late batch must still be recorded: " + ingested.describe());
+        assertEquals("10", scalar("count(*)", BRONZE),
+                "bronze records what arrived, including a replay of old state");
+
+        var result = transform(BATCH_3_LATE);
+
+        assertTrue(result.succeeded(), "the transform must succeed: " + result.describe());
+        assertEquals("7", scalar("count(*)", SILVER), "a replay of old state must insert nothing");
+        assertEquals("bob.corrected@example.com",
+                scalar("email", SILVER + " WHERE customer_id = 2"),
+                "the older row must not overwrite the correction");
+        assertEquals("frank@example.com",
+                scalar("email", SILVER + " WHERE customer_id = 6"),
+                "nor overwrite a row it is older than by hours rather than days");
+    }
+
+    @Test
+    @Order(8)
+    void aBatchThatAddsAColumnEvolvesTheTableInsteadOfReplacingIt() {
+        var result = ingest("customers-batch-4-segment.csv", BATCH_4_SEGMENT, SCHEMA_WITH_SEGMENT);
+
+        assertTrue(result.succeeded(),
+                "a source system adding a field must not stop the pipeline: " + result.describe());
+        assertEquals("12", scalar("count(*)", BRONZE), "the batch must be appended");
+        assertEquals("10", scalar("count(*)", BRONZE + " WHERE segment IS NULL"),
+                "rows that arrived before the column existed must read back null");
+        assertEquals("enterprise", scalar("segment", BRONZE + " WHERE customer_id = 8"),
+                "the new column must carry its values");
+    }
+
+    @Test
+    @Order(9)
+    void aBatchThatChangesAColumnTypeIsRefusedByName() {
+        var result = ingest("customers-batch-5-typechange.csv", BATCH_5_TYPECHANGE,
+                SCHEMA_WITH_STRING_ID);
+
+        assertEquals(EXIT_SCHEMA_DRIFT, result.exitCode(),
+                "schema drift has its own status code so an orchestrator can escalate rather than "
+                        + "retry: " + result.describe());
+        assertTrue(result.output().contains("customer_id"),
+                "the refusal must name the column: " + result.output());
+        assertTrue(result.output().contains("int"),
+                "and the type the table holds: " + result.output());
+        assertTrue(result.output().contains("string"),
+                "and the type the batch carries: " + result.output());
+
+        assertEquals("12", scalar("count(*)", BRONZE), "a refused batch must write nothing");
+        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '"
+                + BATCH_5_TYPECHANGE + "'"), "not even partially");
+    }
+
+    @Test
+    @Order(10)
+    void aKeyArrivingTwiceAtTheSameInstantCollapsesToTheSameRowOnEveryRun() {
+        var ingested = ingest("customers-batch-8-tied.csv", BATCH_8_TIED, SCHEMA);
+        assertTrue(ingested.succeeded(), "the tied batch must ingest: " + ingested.describe());
+        assertEquals("14", scalar("count(*)", BRONZE), "bronze keeps both rows as they arrived");
+
+        var first = transform(BATCH_8_TIED);
+        assertTrue(first.succeeded(), "the transform must succeed: " + first.describe());
+        assertEquals("8", scalar("count(*)", SILVER), "the tied key must collapse to one row");
+        String kept = scalar("email", SILVER + " WHERE customer_id = 20");
+
+        // Ordering by the sequence alone leaves this to whichever row the
+        // engine read first, so the same input could produce a different silver
+        // table on the next run and every quality result would be measuring
+        // something else.
+        var second = transform(BATCH_8_TIED);
+        assertTrue(second.succeeded(), "the repeated transform must succeed: " + second.describe());
+        assertEquals("8", scalar("count(*)", SILVER), "a repeated transform must not add a row");
+        assertEquals(kept, scalar("email", SILVER + " WHERE customer_id = 20"),
+                "a repeated transform over the same input must keep the same row");
+    }
+
+    @Test
+    @Order(11)
+    void aDefectiveBatchIsBlockedInsideTheTransformAndSucceedsAfterItIsCorrected() {
+        var ingested = ingest("customers-batch-6-defective.csv", BATCH_6_DEFECTIVE, SCHEMA);
+        assertTrue(ingested.succeeded(), "bronze accepts what arrived: " + ingested.describe());
+        assertEquals("17", scalar("count(*)", BRONZE), "the defective batch is still recorded");
+
+        var quality = runQualityChecks(BLOCKED_RUN, defectiveDataRules());
+        assertTrue(quality.succeeded(),
+                "the quality job reports rather than decides: " + quality.describe());
+        assertEquals("2", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"),
+                "the null email and the unknown country must both be recorded as failures");
+
+        // The gate consulted from inside the job, which is how Airflow will run
+        // it in Increment 4 — one task, one status code.
+        var blocked = transform(BATCH_6_DEFECTIVE, "--qualityRunId", BLOCKED_RUN);
+        assertEquals(EXIT_PROMOTION_BLOCKED, blocked.exitCode(),
+                "a failed blocking rule must stop the transform: " + blocked.describe());
+        assertTrue(blocked.output().contains("PROMOTION BLOCK"),
+                "the gate must record its verdict: " + blocked.output());
+        assertEquals("8", scalar("count(*)", SILVER), "a blocked transform must write nothing");
+
+        var corrected = ingest("customers-batch-6-corrected.csv", BATCH_6_DEFECTIVE, SCHEMA,
+                "--onExistingBatch", "replace");
+        assertTrue(corrected.succeeded(), "the corrected batch must replay: " + corrected.describe());
+        assertEquals("16", scalar("count(*)", BRONZE),
+                "the corrected batch must replace the defective one, not join it");
+
+        String cleanRun = "incremental-clean-" + SUFFIX;
+        var recheck = runQualityChecks(cleanRun, defectiveDataRules());
+        assertTrue(recheck.succeeded(), "the re-check must run: " + recheck.describe());
+        assertEquals("0", scalar("count(*)", results(cleanRun) + " AND status = 'FAILED'"),
+                "the same rules must pass once the data is corrected");
+
+        var promoted = transform(BATCH_6_DEFECTIVE, "--qualityRunId", cleanRun);
+        assertTrue(promoted.succeeded(), "the corrected batch must transform: " + promoted.describe());
+        assertEquals("10", scalar("count(*)", SILVER), "the two corrected customers must reach silver");
+        assertEquals("liam@example.com", scalar("email", SILVER + " WHERE customer_id = 10"),
+                "and carry their corrected values");
+    }
+
+    @Test
+    @Order(12)
+    void anOverrideIsRecordedAlongsideTheVerdictItOverridesRatherThanReplacingIt() {
+        var result = LiveSparkCluster.submitJob(JOBS + "PromotionGate", JOB,
+                "--runId", BLOCKED_RUN,
+                "--targetTable", BRONZE,
+                "--override-reason", "known upstream defect, tracked as STRATUS-1",
+                "--override-principal", "data-steward");
+
+        assertTrue(result.succeeded(), "an override must promote: " + result.describe());
+        assertTrue(result.output().contains("PROMOTION OVERRIDDEN"),
+                "an override must never be silent: " + result.output());
+
+        assertEquals("1", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'overridden'"),
+                "the override must be recorded as its own result");
+        assertEquals("2", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"),
+                "and must not edit the verdict it overrides");
+
+        var who = LiveSparkCluster.sparkSql("SELECT failure_detail FROM "
+                + results(BLOCKED_RUN) + " AND status = 'overridden'", JOB);
+        assertTrue(who.output().contains("data-steward"),
+                "the record must name who overrode it: " + who.output());
+    }
+
+    @Test
+    @Order(13)
+    void theFreshnessRuleMeasuresAgeRatherThanReportingOne() {
+        // Both directions in one run, over the same table: the business
+        // timestamps are days old and the ingest timestamps are minutes old, so
+        // a rule that always failed and a rule that always passed would each be
+        // caught here.
+        String run = "incremental-freshness-" + SUFFIX;
+        String checks = "["
+                + "{\"type\":\"freshness\",\"name\":\"business_time_recent\",\"severity\":\"blocking\","
+                + "\"column\":\"updated_at\",\"maxAgeMinutes\":60},"
+                + "{\"type\":\"freshness\",\"name\":\"ingest_time_recent\",\"severity\":\"blocking\","
+                + "\"column\":\"stratus_ingested_at\",\"maxAgeMinutes\":1440}]";
+        var result = runQualityChecks(run, checks);
+        assertTrue(result.succeeded(), "the freshness run must complete: " + result.describe());
+
+        var stale = LiveSparkCluster.sparkSql("SELECT status, failure_detail FROM "
+                + results(run) + " AND check_name = 'business_time_recent'", JOB);
+        assertTrue(stale.output().contains("FAILED"),
+                "business time is days behind and must fail an hourly SLA: " + stale.output());
+        assertTrue(stale.output().contains("minutes old"),
+                "the record must quantify the staleness: " + stale.output());
+
+        var fresh = LiveSparkCluster.sparkSql("SELECT status FROM "
+                + results(run) + " AND check_name = 'ingest_time_recent'", JOB);
+        assertTrue(fresh.output().contains("PASSED"),
+                "the rows were ingested minutes ago and must pass a daily SLA: " + fresh.output());
+    }
+
+    @Test
+    @Order(14)
+    void theReferentialIntegrityRuleNamesTheReferenceItCouldNotFind() {
+        var broken = LiveSparkCluster.sparkSql("SELECT status, failure_detail FROM "
+                + results(BLOCKED_RUN) + " AND check_name = 'country_known'", JOB);
+
+        assertTrue(broken.output().contains("FAILED"),
+                "an unknown country code must fail: " + broken.output());
+        assertTrue(broken.output().contains(COUNTRIES),
+                "the record must name the reference table: " + broken.output());
+
+        // The control. Without it a rule that failed on every table would have
+        // passed the assertion above.
+        String run = "incremental-references-" + SUFFIX;
+        var clean = runQualityChecks(run, referenceRule(), SILVER);
+        assertTrue(clean.succeeded(), "the control run must complete: " + clean.describe());
+        assertEquals("0", scalar("count(*)", results(run) + " AND status <> 'PASSED'"),
+                "every country in silver is in the reference table, so the rule must pass");
+    }
+
+    @Test
+    @Order(15)
+    void maintenanceExpiresSnapshotsWithoutChangingWhatTheTableHolds() {
+        String before = scalar("count(*)", BRONZE + ".snapshots");
+        String rows = scalar("count(*)", BRONZE);
+        assertTrue(Integer.parseInt(before) > 1,
+                "sixteen batches and replays must have left snapshots to expire, found " + before);
+
+        // Expiry alone, so nothing else can commit a snapshot while this is
+        // being counted.
+        var expiry = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
+                "--targetTable", BRONZE,
+                "--operations", "expire_snapshots",
+                "--retainLast", "1",
+                "--olderThan", aMomentFromNow());
+
+        assertTrue(expiry.succeeded(), "snapshot expiry must succeed: " + expiry.describe());
+        assertEquals("1", scalar("count(*)", BRONZE + ".snapshots"),
+                "retain_last=1 must leave exactly one of the " + before + " snapshots");
+
+        // Compaction is not asserted to reduce the file count: bronze holds one
+        // file per batch partition and there is nothing for it to merge. What
+        // must hold either way is that maintenance changed no data.
+        var compaction = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
+                "--targetTable", BRONZE,
+                "--operations", "rewrite_data_files");
+
+        assertTrue(compaction.succeeded(), "compaction must succeed: " + compaction.describe());
+        assertEquals(rows, scalar("count(*)", BRONZE), "maintenance must not change the row count");
+        assertEquals("liam@example.com", scalar("email", BRONZE + " WHERE customer_id = 10"),
+                "nor any row's contents");
+    }
+
+    @Test
+    @Order(16)
+    void orphanDeletionRefusesARetentionShortEnoughToRaceALiveWrite() {
+        // What this cannot prove, and why. Iceberg refuses any retention inside
+        // 24 hours, because a file written minutes ago may belong to a commit
+        // still in flight. Every file in this harness is minutes old, and an
+        // object's modification time is set by the storage server on write, so
+        // there is no way to present it with an orphan old enough to delete.
+        // Deleting a genuinely aged orphan is therefore out of reach here.
+        //
+        // What it does prove is the property that matters more: the destructive
+        // operation refuses rather than half-running, and nothing is touched
+        // when it does.
+        String liveFile = scalar("file_path", BRONZE + ".files LIMIT 1");
+        assertTrue(liveFile.startsWith("s3://stratus-bronze/"),
+                "bronze data must be in the governed bucket: " + liveFile);
+        String withoutScheme = liveFile.substring("s3://".length());
+        bronzeDataPrefix = withoutScheme.substring(0, withoutScheme.lastIndexOf('/'));
+        String liveFileName = liveFile.substring(liveFile.lastIndexOf('/') + 1);
+        String orphan = bronzeDataPrefix + "/stratus-orphan-probe.parquet";
+
+        var placed = LiveSparkCluster.writeObject(orphan, "not a real data file", JOB);
+        assertTrue(placed.succeeded(), "the orphan probe must be written: " + placed.describe());
+        assertTrue(LiveSparkCluster.listObjectPrefix(bronzeDataPrefix, JOB)
+                        .contains("stratus-orphan-probe"),
+                "the probe must be in place, or the assertions below prove nothing");
+
+        var refused = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
+                "--targetTable", BRONZE,
+                "--operations", "delete_orphan_files",
+                "--olderThan", aMomentFromNow());
+
+        assertFalse(refused.succeeded(),
+                "a retention inside the concurrent-write window must be refused: "
+                        + refused.describe());
+        assertTrue(refused.output().contains("less than 24 hours"),
+                "the refusal must say what makes the interval unsafe: " + refused.output());
+
+        // The negative control: the same operation with a retention outside that
+        // window runs to completion. Without it, the refusal above is
+        // indistinguishable from an operation that never works at all.
+        var ran = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
+                "--targetTable", BRONZE,
+                "--operations", "delete_orphan_files",
+                "--olderThan", aDayAndAHalfAgo());
+
+        assertTrue(ran.succeeded(), "a safe retention must run: " + ran.describe());
+        assertTrue(ran.output().contains("MAINTENANCE delete_orphan_files"),
+                "and report what it did: " + ran.output());
+
+        String remaining = LiveSparkCluster.listObjectPrefix(bronzeDataPrefix, JOB);
+        assertTrue(remaining.contains(liveFileName),
+                "a file the table refers to must survive both runs: " + remaining);
+        assertTrue(remaining.contains("stratus-orphan-probe"),
+                "and so must a stray younger than the retention: " + remaining);
+        assertEquals("16", scalar("count(*)", BRONZE), "neither run may touch live data");
+    }
+
+    @Test
+    @Order(17)
+    void theSameContractHoldsForABatchDeliveredAsNdjson() {
+        var result = ingest("customers-batch-7.ndjson", BATCH_7_NDJSON, SCHEMA);
+
+        assertTrue(result.succeeded(), "an ndjson batch must ingest: " + result.describe());
+        assertEquals("18", scalar("count(*)", BRONZE), "it must accumulate like any other batch");
+        assertEquals("mia@example.com", scalar("email", BRONZE + " WHERE customer_id = 11"),
+                "its values must survive the format");
+        assertEquals("2", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '"
+                + BATCH_7_NDJSON + "'"), "and carry the same audit columns");
+
+        var transformed = transform(BATCH_7_NDJSON);
+        assertTrue(transformed.succeeded(), "and reach silver: " + transformed.describe());
+        assertEquals("12", scalar("count(*)", SILVER), "both customers must be inserted");
+    }
+
+    private static LiveSparkCluster.CommandResult ingest(String resource, String batchId,
+                                                         String schema, String... extra) {
+        var uploaded = LiveSparkCluster.uploadLandingResource(resource,
+                LANDING_PREFIX + "/" + resource, JOB);
+        assertTrue(uploaded.succeeded(), "the landing fixture must upload: " + uploaded.describe());
+
+        var argv = new ArrayList<>(List.of(
+                "--sourceFile", "s3a://stratus-landing/" + LANDING_PREFIX + "/" + resource,
+                "--targetTable", BRONZE,
+                "--sourceSystem", "crm",
+                "--batchId", batchId,
+                "--schema", schema,
+                "--runId", "ingest-" + batchId + "-" + SUFFIX));
+        argv.addAll(List.of(extra));
+        return LiveSparkCluster.submitJob(JOBS + "IngestionJob", JOB, argv.toArray(new String[0]));
+    }
+
+    private static LiveSparkCluster.CommandResult transform(String batchId, String... extra) {
+        var argv = new ArrayList<>(List.of(
+                "--sourceTable", BRONZE,
+                "--targetTable", SILVER,
+                "--businessKey", "customer_id",
+                "--sequenceColumn", "updated_at",
+                "--sourceBatch", batchId,
+                "--runId", "transform-" + batchId + "-" + SUFFIX));
+        argv.addAll(List.of(extra));
+        return LiveSparkCluster.submitJob(JOBS + "TransformJob", JOB, argv.toArray(new String[0]));
+    }
+
+    private static LiveSparkCluster.CommandResult runQualityChecks(String runId, String checks) {
+        return runQualityChecks(runId, checks, BRONZE);
+    }
+
+    private static LiveSparkCluster.CommandResult runQualityChecks(String runId, String checks,
+                                                                   String table) {
+        // Base64 rather than raw JSON: submitting through the container runtime
+        // on Windows strips the double quotes, and the job then fails on a
+        // document that was correct when this test wrote it.
+        String encoded = Base64.getEncoder().encodeToString(checks.getBytes(StandardCharsets.UTF_8));
+        return LiveSparkCluster.submitJob(JOBS + "QualityCheckJob", JOB,
+                "--targetTable", table, "--checksBase64", encoded, "--runId", runId);
+    }
+
+    /**
+     * Rules chosen for what the defective batch actually breaks. Uniqueness is
+     * deliberately absent: bronze holds every version of a record it ever
+     * received, so a rule demanding one row per key would fail on a correctly
+     * working table.
+     */
+    private static String defectiveDataRules() {
+        return "["
+                + "{\"type\":\"row_count_min\",\"name\":\"has_rows\",\"severity\":\"blocking\","
+                + "\"minRows\":1},"
+                + "{\"type\":\"completeness\",\"name\":\"email_mandatory\",\"severity\":\"blocking\","
+                + "\"column\":\"email\",\"maxNullRate\":0.0},"
+                + "{\"type\":\"referential_integrity\",\"name\":\"country_known\","
+                + "\"severity\":\"blocking\",\"column\":\"country\",\"referenceTable\":\"" + COUNTRIES
+                + "\",\"referenceColumn\":\"country\"}]";
+    }
+
+    private static String referenceRule() {
+        return "[{\"type\":\"referential_integrity\",\"name\":\"country_known\","
+                + "\"severity\":\"blocking\",\"column\":\"country\",\"referenceTable\":\"" + COUNTRIES
+                + "\",\"referenceColumn\":\"country\"}]";
+    }
+
+    private static String results(String runId) {
+        return "stratus.platform.quality_check_results WHERE run_id = '" + runId + "'";
+    }
+
+    private static String scalar(String expression, String from) {
+        return LiveSparkCluster.scalar(expression, from, JOB);
+    }
+
+    /** The properties the catalog actually holds for a table, by name. */
+    private static Map<String, String> tableProperties(String table) {
+        var result = LiveSparkCluster.sparkSql("SHOW TBLPROPERTIES " + table, JOB);
+        assertTrue(result.succeeded(), "the table's properties must be readable: " + result.describe());
+        var properties = new LinkedHashMap<String, String>();
+        for (String line : result.output().split("\\R")) {
+            int tab = line.indexOf('\t');
+            if (tab > 0) {
+                properties.put(line.substring(0, tab).trim(), line.substring(tab + 1).trim());
+            }
+        }
+        assertFalse(properties.isEmpty(), "no properties were parsed from: " + result.output());
+        return properties;
+    }
+
+    /**
+     * A retention boundary just ahead of now, so maintenance considers
+     * everything this suite has written. Reading the wall clock is right here:
+     * the statement being tested is "everything up to this moment".
+     */
+    private static String aMomentFromNow() {
+        return LocalDateTime.now(ZoneOffset.UTC).plusMinutes(1)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    /** Outside Iceberg's 24-hour floor for removing files no table refers to. */
+    private static String aDayAndAHalfAgo() {
+        return LocalDateTime.now(ZoneOffset.UTC).minusHours(36)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+}

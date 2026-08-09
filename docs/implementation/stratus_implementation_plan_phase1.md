@@ -270,8 +270,8 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 - Apache Spark standalone cluster deployed on Podman containers
 - Spark configured to use Apache Polaris as its Iceberg catalog
 - Spark configured to read and write to Ceph RGW using approved `svc-spark` S3 credentials
-- An ingestion job: reads a CSV or JSON file from `stratus-landing`, writes it as an Iceberg table in `stratus-bronze`
-- A transformation job: reads from bronze, applies type normalisation and deduplication, writes to `stratus-silver`
+- An ingestion job: reads a CSV, JSON or NDJSON file from `stratus-landing` and appends it as a batch to an Iceberg table in `stratus-bronze`; a batch already in the table is refused unless a replay is asked for explicitly (ADR-P1-006)
+- A transformation job: reads from bronze, deduplicates on the business key, and upserts into `stratus-silver` on a monotonic sequence, so a replay carrying an older version of a record cannot overwrite state already corrected
 - A materialisation job: reads from silver, aggregates, writes a summary table to `stratus-gold`
 - A metadata-driven maintenance job: inspects Iceberg metadata tables such as `files`, `snapshots`, `manifests`, and `history`; applies per-table policy; and runs snapshot expiry, rewrite/compaction, delete-file cleanup, or orphan cleanup only when thresholds are breached
 - A data quality job: runs schema conformance, completeness, and uniqueness checks on a dataset; writes results to `platform.quality_check_results`
@@ -284,13 +284,24 @@ Spark is the engine that populates and transforms Iceberg tables. It depends on 
 | Spark connects to Polaris | Spark session resolves tables via the Polaris REST catalog |
 | Spark connects to object storage | Spark can read and write parquet files through Ceph RGW |
 | Ingestion job | Source file in landing zone produces a bronze Iceberg table with correct row count and schema |
+| Ingestion job — second batch | A second landing file adds to the table rather than replacing it; rows from the first batch remain and each batch stays identifiable |
+| Ingestion job — replay | Re-sending a batch already in the table is refused by default, and replaces exactly that batch when a replay is asked for |
+| Ingestion job — schema drift | A batch adding a column evolves the table and earlier rows read back null; a batch changing a column's type is refused with a status code of its own, naming every conflicting column |
 | Transform job | Bronze table produces a silver table with deduplication applied; row counts match expectations |
+| Transform job — late arrival | A batch carrying an older version of a record already in silver leaves silver unchanged; the correction survives |
+| Transform job — determinism | A key arriving twice at the same sequence value collapses to one row, and a re-run over the same input keeps the same one |
 | Materialisation job | Silver table produces a gold summary table with correct aggregates |
 | Quality job — pass | A clean dataset produces PASS outcomes in `platform.quality_check_results` |
 | Quality job — fail | A dataset with nulls in a mandatory column produces a FAIL outcome with correct detail |
+| Quality job — freshness and references | A stale timestamp fails an SLA and a recent one passes it; a value absent from the reference table fails and names the reference |
 | Promotion gate — pass | Dataset with all PASS outcomes is promoted |
 | Promotion gate — block | Dataset with a FAIL blocking outcome is not promoted; failure reason is recorded |
+| Promotion gate — inside the job | A blocked run stops the transform that consulted it, writing nothing and exiting with the documented status code |
+| Promotion gate — override | An override promotes, is recorded as its own result naming the principal, and leaves the original verdict unedited |
+| Failed batch replay | A defective batch is blocked, corrected, replayed under the same batch id, and passes the same rules it first failed |
 | Maintenance job | Compaction, snapshot expiry, delete-file cleanup, and orphan cleanup decisions are driven by Iceberg metadata-table signals and per-table thresholds |
+| Maintenance job — effect | Snapshot expiry leaves exactly the retained snapshots and changes no row of the table |
+| Maintenance job — orphan cleanup | Orphan removal is refused without an explicit retention, and refused again when the retention falls inside the window a concurrent write could occupy; live files and the row count are untouched. Removal of a genuinely aged orphan needs a table older than a day and is proven in the production run |
 | Atlas lineage payload | Each job produces a lineage event payload (logged; not yet sent to Atlas) |
 
 ### Demonstrated outcome
