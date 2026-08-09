@@ -5,6 +5,8 @@ package dev.stratus.jobs.spark;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -32,13 +34,15 @@ public final class MaintenanceJob {
     public static final String REWRITE_DATA_FILES = "rewrite_data_files";
     public static final String DELETE_ORPHAN_FILES = "delete_orphan_files";
 
+    static final Set<String> ARGUMENTS = Set.of("targetTable", "operations", "olderThan", "retainLast");
+
     private static final Logger LOGGER = Logger.getLogger(MaintenanceJob.class.getName());
 
     private MaintenanceJob() {
     }
 
     public static void main(String... argv) {
-        JobArguments arguments = JobArguments.parse(argv);
+        JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String[] operations = arguments.requireList("operations");
 
@@ -61,6 +65,10 @@ public final class MaintenanceJob {
                             String olderThan, String retainLast) {
         String catalog = QualityCheckJob.splitIdentifier(targetTable)[0];
         var metrics = new ArrayList<String>();
+        LOGGER.log(Level.FINE, () -> "MAINTENANCE planned table=" + targetTable
+                + " operations=" + String.join(",", operations)
+                + " olderThan=" + (olderThan == null ? "unset" : olderThan)
+                + " retainLast=" + (retainLast == null ? "default 2" : retainLast));
         for (String operation : operations) {
             switch (operation) {
                 case EXPIRE_SNAPSHOTS -> metrics.add(expireSnapshots(spark, catalog, targetTable,
@@ -83,6 +91,7 @@ public final class MaintenanceJob {
         String call = String.format("CALL %s.system.expire_snapshots(table => '%s', retain_last => %s%s)",
                 catalog, unqualified(targetTable), retainLast == null ? "2" : retainLast,
                 olderThan == null ? "" : ", older_than => TIMESTAMP '" + olderThan + "'");
+        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
         Row result = spark.sql(call).first();
         return "MAINTENANCE expire_snapshots table=" + targetTable
                 + " dataFilesDeleted=" + result.get(0)
@@ -90,9 +99,10 @@ public final class MaintenanceJob {
     }
 
     private static String rewriteDataFiles(SparkSession spark, String catalog, String targetTable) {
-        Row result = spark.sql(String.format(
-                "CALL %s.system.rewrite_data_files(table => '%s')",
-                catalog, unqualified(targetTable))).first();
+        String call = String.format("CALL %s.system.rewrite_data_files(table => '%s')",
+                catalog, unqualified(targetTable));
+        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
+        Row result = spark.sql(call).first();
         return "MAINTENANCE rewrite_data_files table=" + targetTable
                 + " rewrittenDataFiles=" + result.get(0)
                 + " addedDataFiles=" + result.get(1);
@@ -105,11 +115,52 @@ public final class MaintenanceJob {
                     "delete_orphan_files requires an explicit --olderThan timestamp; inheriting the "
                             + "default retention can delete files a concurrent write has staged");
         }
-        List<Row> removed = spark.sql(String.format(
-                "CALL %s.system.remove_orphan_files(table => '%s', older_than => TIMESTAMP '%s')",
-                catalog, unqualified(targetTable), olderThan)).collectAsList();
+        // Three things this procedure needs that the others do not, each found
+        // by running it against the live platform:
+        //
+        // - The fully qualified identifier. Orphan removal reads the table's
+        //   metadata tables by name, and a two-part name is resolved with its
+        //   first part taken for a catalog: "The catalog `bronze` not found".
+        // - A location whose scheme Hadoop can list. Iceberg's S3FileIO writes
+        //   paths as s3://, and the cluster registers only s3a, so listing the
+        //   table's own location fails with "No FileSystem for scheme s3".
+        // - equal_schemes, so a file listed as s3a:// is recognised as the same
+        //   file the metadata records as s3://. Without it every live file
+        //   looks like an orphan, which is the most destructive possible
+        //   misreading.
+        String location = tableLocation(spark, targetTable).replaceFirst("^s3://", "s3a://");
+        String call = String.format(
+                "CALL %s.system.remove_orphan_files(table => '%s', older_than => TIMESTAMP '%s', "
+                        + "location => '%s', equal_schemes => map('s3', 's3a'))",
+                catalog, targetTable, olderThan, location);
+        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
+        List<Row> removed = spark.sql(call).collectAsList();
         return "MAINTENANCE delete_orphan_files table=" + targetTable
                 + " orphanFilesRemoved=" + removed.size();
+    }
+
+    /**
+     * The table's own storage location, read from its newest metadata log
+     * entry.
+     *
+     * <p>The location is not among the properties {@code SHOW TBLPROPERTIES}
+     * returns, and the metadata log always has an entry, so this holds for a
+     * table that has never been written to as well as one that has.
+     */
+    static String tableLocation(SparkSession spark, String targetTable) {
+        Row newest = spark.sql("SELECT file FROM " + targetTable
+                + ".metadata_log_entries ORDER BY timestamp DESC LIMIT 1").first();
+        return metadataParent(newest.getString(0));
+    }
+
+    /** The table root holding a {@code <root>/metadata/<file>.json} entry. */
+    static String metadataParent(String metadataFile) {
+        int metadata = metadataFile.lastIndexOf("/metadata/");
+        if (metadata < 0) {
+            throw new IllegalStateException(
+                    "Cannot derive the table location from " + metadataFile);
+        }
+        return metadataFile.substring(0, metadata);
     }
 
     /** Iceberg procedures take the identifier without its catalog prefix. */

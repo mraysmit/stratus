@@ -294,14 +294,56 @@ sudo systemctl enable --now stratus-spark.service
 
 Five Spark jobs are implemented as capability modules under `jobs/spark/`; Java packages use the `dev.stratus.jobs.spark` namespace.
 
+Every job rejects an argument it does not read. A misspelled or retired name
+stops the job rather than being ignored, because an ignored argument means the
+job ran with the default the caller was trying to replace.
+
+**Status codes** (`JobExit`). The orchestrator reads the code, not the log:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The job did what it was asked |
+| `1` | The arguments were wrong, or the job could not complete |
+| `2` | A blocking quality check failed, so nothing was written |
+| `3` | The incoming schema conflicts with the table's, so nothing was written |
+
+**Write mode per zone** follows the architecture (§6.4.6): bronze appends,
+silver upserts copy-on-write, gold is rebuilt in full. Each zone's write
+properties — `write.{delete,update,merge}.mode`, the matching isolation levels,
+`write.format.default`, `write.target-file-size-bytes` and the pinned
+`format-version` — are stated by `ZoneWriteProperties` and applied both at
+create and on every run, because Iceberg honours table properties on CREATE and
+silently discards them on an append.
+
 ### Job 1 — Ingestion: landing → bronze
 
-Reads a CSV or JSON source file from `stratus-landing`, applies minimal normalisation (string trimming, null handling), and writes an Iceberg table in the `bronze` namespace via Polaris.
+Reads a CSV, JSON or NDJSON source file from `stratus-landing`, applies minimal
+normalisation (string trimming, null handling), and appends it to an Iceberg
+table in the `bronze` namespace via Polaris.
+
+Bronze accumulates. Each landing file is a batch, and a batch is appended to
+whatever the table already holds — a second day's file must not be able to erase
+the first day's. Bronze is partitioned by `stratus_batch_id`, which makes a
+replay a metadata operation that cannot reach another batch's files.
 
 **Inputs:**
 - `sourceFile` — S3A path to the source file in `stratus-landing` (e.g. `s3a://stratus-landing/customers/2024-01-15/customers.csv`)
 - `targetTable` — fully qualified Iceberg table name (e.g. `stratus.bronze.customers`)
 - `sourceSystem` — name of the source system (written as table property for Atlas lineage)
+- `batchId` — the identity of this delivery, carried on every row
+- `onExistingBatch` — `fail` (default) or `replace`. A batch id the table already holds is refused unless a replay is asked for explicitly
+- `schema` — optional DDL string. Preferred over inference, which reads types out of whichever rows happened to arrive: `007` becomes `7`, and a column of all blanks infers one type in this batch and another in the next
+- `runId` — optional; defaults to a generated identifier
+
+**Audit columns added to every row:** `stratus_batch_id`,
+`stratus_ingested_at` (from the job's injected clock, so the value is testable),
+`stratus_source_file`.
+
+**Schema drift.** A batch that adds a column evolves the table, and the rows
+that arrived before it read back null. A batch that changes a column's type is
+refused with status `3`, naming every conflicting column and both types — not
+just the first, because a source system that changed five columns should not
+cost five failed runs to discover.
 
 **Outputs:**
 - Bronze Iceberg table written in `stratus-bronze`
@@ -320,16 +362,54 @@ Reads a CSV or JSON source file from `stratus-landing`, applies minimal normalis
 
 ### Job 2 — Transform: bronze → silver
 
-Reads a bronze Iceberg table, applies deduplication on the business key, type normalisation, and reference data enrichment where applicable. Writes a silver Iceberg table.
+Reads a bronze Iceberg table, collapses it to one row per business key, and
+upserts those rows into a silver Iceberg table.
+
+Silver is merged, not rebuilt. The merge condition compares a monotonic
+sequence as well as the key, so a row only updates a row it is newer than.
+Matching on the key alone lets a replay carrying an older version of a record
+overwrite state that was already corrected — the architecture (§6.4.4) calls
+that the most common silent corruption in a change-data pipeline, and it is
+silent precisely because both rows are valid and the table simply ends up
+holding the wrong one.
+
+```sql
+MERGE INTO <silver> AS t USING <batch> AS s
+  ON t.<key> = s.<key>
+  WHEN MATCHED AND (s.<seq> > t.<seq> OR t.<seq> IS NULL) THEN UPDATE SET *
+  WHEN NOT MATCHED THEN INSERT *
+```
+
+`t.<seq> IS NULL` is in the condition on purpose: comparing against a null
+yields null rather than true, so without it a silver row that arrived without a
+sequence value could never be corrected again.
 
 **Inputs:**
 - `sourceTable` — fully qualified bronze table name
 - `targetTable` — fully qualified silver table name
 - `businessKey` — comma-separated list of columns forming the deduplication key
+- `sequenceColumn` — the monotonic column that decides which version of a record is newer. This replaces the retired `orderBy`, which is now refused rather than ignored
+- `sourceBatch` — optional; process one bronze batch rather than the whole table. Reading the whole table re-picks the newest row per key on every run, which produces the right answer for the wrong reason and leaves the sequence comparison unable to decide anything
+- `qualityRunId` — optional; consult the promotion gate before writing
+- `runId` — optional; defaults to a generated identifier
+
+Within a batch, a key arriving twice is collapsed to one row. The ordering is
+made total by a hash of the row's own contents, so two rows sharing a key *and*
+a sequence value still have a defined winner and a re-run over the same input
+produces the same silver table.
+
+Type normalisation and reference-data enrichment are not implemented. They
+remain in scope for a later increment.
 
 **Outputs:**
 - Silver Iceberg table written in `stratus-silver`
 - Lineage event: bronze table → silver table
+
+**Row-level deletes (tombstones) are not implemented.** They need a delete-flag
+argument, a rule for a null flag, and they change silver from update-only to a
+table that produces delete files, which interacts with `write.delete.mode`. The
+ordering trap is worth recording for whoever adds them: the delete clause must
+carry the sequence guard too, or a late tombstone deletes a newer row.
 
 ### Job 3 — Materialisation: silver → gold
 
@@ -338,9 +418,12 @@ Reads one or more silver Iceberg tables, applies aggregations or joins, and writ
 **Inputs:**
 - `sourceTables` — comma-separated list of fully qualified silver table names
 - `targetTable` — fully qualified gold table name
+- `sql` — the aggregation or join. It runs with the engine's own catalog privileges, so it is platform configuration and not user input; the source tables are stated separately precisely so lineage records what was actually read
+- `qualityRunId` — optional; consult the promotion gate before writing
+- `runId` — optional; defaults to a generated identifier
 
 **Outputs:**
-- Gold Iceberg table written in `stratus-gold`
+- Gold Iceberg table written in `stratus-gold`, rebuilt in full — the documented gold write mode
 - Lineage event: silver tables → gold table
 
 ### Job 4 — Quality checks
@@ -355,10 +438,16 @@ Runs a defined set of quality rules against a target Iceberg table and writes re
 - `referential_integrity` — foreign key values exist in reference table
 - `row_count_min` — row count meets minimum threshold
 
+`schema_conformance` checks that the named columns are present. It does not
+check their types; drift in a column's type is refused by ingestion (Job 1)
+before any row reaches a table a rule could measure.
+
 **Inputs:**
 - `targetTable` — fully qualified Iceberg table name
 - `checks` — JSON array of check definitions (type, parameters, severity)
+- `checksBase64` — the same JSON, base64-encoded. Exactly one of the two must be given. The encoded form exists because a JSON document does not survive every path to a job: submitting through a container runtime on Windows strips the double quotes
 - `runId` — unique identifier for this quality run
+- `pipelineRunId` — optional; ties this quality run to the pipeline run that caused it
 
 **Outputs:**
 - One result record per check written to `platform.quality_check_results`
@@ -371,9 +460,36 @@ Runs Iceberg maintenance operations on a target table using Spark actions.
 **Inputs:**
 - `targetTable` — fully qualified Iceberg table name
 - `operations` — comma-separated list: `expire_snapshots`, `rewrite_data_files`, `delete_orphan_files`
+- `olderThan` — retention boundary. Required for `delete_orphan_files`: Iceberg's own default would delete files older than three days, and a job that inherits that silently can remove files a concurrent write has staged but not yet committed
+- `retainLast` — snapshots to keep, defaulting to 2 rather than Iceberg's 1, so there is a snapshot to roll back to after a bad write
 
 **Outputs:**
-- Metrics logged: snapshots expired, files rewritten, bytes reclaimed, orphan files removed
+- Metrics logged: data and manifest files deleted, files rewritten and added, orphan files removed
+
+Orphan removal needs three things on this platform that the other operations do
+not, each found by running it against the live cluster rather than reasoned
+about:
+
+- The **fully qualified** table identifier. Orphan removal reads the table's
+  metadata tables by name, and a two-part name has its first part taken for a
+  catalog — `The catalog 'bronze' not found`.
+- A **location whose scheme Hadoop can list**. Iceberg's S3FileIO records paths
+  as `s3://` and the cluster registers only `s3a`, so listing the table's own
+  location fails with `No FileSystem for scheme "s3"`. The location is not among
+  the properties `SHOW TBLPROPERTIES` returns, so the job derives it from the
+  newest metadata log entry.
+- `equal_schemes => map('s3', 's3a')`, so a file listed as `s3a://` is
+  recognised as the file the metadata records as `s3://`. Without it every live
+  file looks like an orphan, which is the most destructive possible misreading.
+
+Iceberg additionally refuses any retention inside 24 hours, whatever
+`--olderThan` says, because a file written minutes ago may belong to a commit
+still in flight.
+
+Which operations to run is still named on the command line. Driving the decision
+from Iceberg metadata-table thresholds is task `P1-2.5-P1`; the components that
+make that decision (`MaintenanceAdvisor`, `OrphanFileDetector`) exist and are
+proven under `P1-2.5-D1`, and neither has any destructive path.
 
 ---
 
@@ -799,7 +915,57 @@ podman run --rm --env-file /etc/stratus/verifiers/spark-pipeline.env \
   ${STRATUS_SPARK_PIPELINE_VERIFIER_IMAGE}
 ```
 
-All eleven tests must pass before Increment 3 is considered complete.
+All tests must pass before Increment 3 is considered complete.
+
+### Incremental-load verification
+
+The listing above is one pipeline over one file, which is the only day a batch
+pipeline cannot get wrong. `SparkIncrementalLoadVerificationTest`, in the same
+module, is the days after it: seventeen ordered scenarios over one table's
+history, driven by eight landing fixtures under
+`platform/spark/tests/src/test/resources/landing/`.
+
+| # | Scenario | What it proves |
+| --- | --- | --- |
+| 1 | The first batch lands | Audit columns populated, one partition per batch, write properties as `ZoneWriteProperties` states them |
+| 2 | The same batch is sent again | Refused, naming the batch and the table |
+| 3 | The same batch is replayed deliberately | Rewrites that batch and converges |
+| 4 | A second batch lands | Bronze holds both — the case a `createOrReplace` ingestion would have failed silently |
+| 5 | The first batch reaches silver | Silver created without the bronze audit columns |
+| 6 | A correction arrives | The row is updated in place, new customers inserted |
+| 7 | A replay carries an older version | Bronze grows, silver is unchanged — the sequence guard |
+| 8 | A batch adds a column | The table evolves; earlier rows read back null |
+| 9 | A batch changes a column's type | Refused with status `3`, naming the column and both types |
+| 10 | A key arrives twice at the same instant | One row, and the same one on a re-run |
+| 11 | A defective batch, then its correction | The gate blocks the transform from inside the job; the corrected batch replays and passes the same rules |
+| 12 | The blocked run is overridden | Recorded as its own result naming the principal; the original verdict is untouched |
+| 13 | Freshness | Stale business time fails an hourly SLA, recent ingest time passes a daily one |
+| 14 | Referential integrity | An unknown code fails naming the reference table; a clean table passes |
+| 15 | Maintenance | Expiry leaves exactly the retained snapshots and changes no row |
+| 16 | Orphan cleanup | A retention inside the concurrent-write window is refused naming the interval, and nothing is touched; the same operation with a safe retention runs |
+| 17 | An NDJSON batch | The same contract on the other supported format |
+
+Scenarios 4 and 7 are the load-bearing ones, and each was proven to fail with
+the defect put back: restoring `createOrReplace` in the ingestion job breaks 4,
+and dropping the sequence comparison from the merge breaks 7.
+
+**Not covered, and why.** Scenario 16 does not prove that an orphan file is
+actually deleted. Iceberg refuses any retention inside 24 hours, because a file
+written minutes ago may belong to a commit still in flight; every file in this
+harness is minutes old, and an object's modification time is set by the storage
+server on write, so there is no way to present the job with an orphan old enough
+to delete. Proving the deletion itself needs a table that has existed for more
+than a day, which belongs to the production run (`P1-3.5-V1`). What the scenario
+does prove is that the destructive operation refuses rather than half-running,
+and that the same operation with a safe retention runs — so the refusal is about
+the interval and not about a job that never works.
+
+That distinction is not academic. Writing this scenario is what found that
+`delete_orphan_files` could not run against this platform **at all**: it failed
+first on the table identifier and then on the `s3://` scheme, before any
+retention was even considered. The previous suite tested only that the operation
+was refused without `--olderThan`, so a job that could never have succeeded
+looked exactly like one that worked.
 
 ---
 
@@ -857,7 +1023,8 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 | `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Verified 2026-08-08 (developer scope): `platform/spark/image/` assembles the approved matrix — `iceberg-spark-runtime-4.1_2.13` and `iceberg-aws-bundle` 1.11.0 with `hadoop-aws` 3.4.1 — resolved by the repository Maven toolchain into the build context by `spark-compose-resolve-artifacts.sh`, which writes `artifact-lock.txt` with Maven coordinates and SHA-256 per jar. Hadoop client jars are excluded at resolution so no second copy is layered over the Spark distribution. Live S3A create/read proven by `readsAndWritesRawObjectsOverS3a`. Image scan, digest pin, SBOM and provenance remain with `P1-0.1` | Accepted |
 | `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Verified 2026-08-08: one master and two workers under `platform/spark/compose-cluster/`, published on loopback only, with local event-log and scratch volumes. Repeated start/verify cycles are idempotent and `spark-compose-verify-cluster.sh` polls the master's own view to a bounded deadline, so a running-but-unregistered worker fails rather than passes. Live: `workers=2/2 clusterCores=4`; four `SparkClusterConformanceTest` checks green. The path is `compose-cluster/`, matching the Ceph and Polaris harnesses, not the `developer/` name this row first proposed | Accepted |
 | `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `platform/spark/compose-cluster/config/`; svc-spark identity | catalog resolution and object read/write | D1 | Data-platform owner | Verified 2026-08-08: Spark resolves all four governed namespaces through Polaris over TLS and writes and reads an Iceberg table whose files land under `s3://stratus-bronze/bronze/`; S3A raw object round trip proven separately, since it is configured independently of Iceberg's S3FileIO. `svc-spark` exists as both an RGW identity (bucket policies on the five Stratus buckets, proven to fail closed on `stratus-denied`) and a Polaris principal created by `spark-compose-bootstrap-principal.sh`. No credential is in a tracked file: the RGW key pair is pulled from OpenBao (ADR-P1-004) and the catalog secret is generated into the ignored `.env`; the Spark configuration is rendered from the providers' `connection.env` so no endpoint is duplicated (ADR-P1-003). A forged principal secret is refused, with a positive control proving the real one works at that moment. Least-privilege narrowing of the catalog role belongs to `P1-3.2-P1` | Accepted |
-| `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; `platform/spark/tests/` | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Verified 2026-08-09: five jobs under `jobs/spark/` (ingestion, transform, materialisation, quality, maintenance) plus `PromotionGate`, proven end to end by `SparkPipelineVerificationTest` — 11/11 against the live cluster, transcript `platform/spark/compose-cluster/logs/spark-conformance-tests-20260809T042935Z.log`. The fixture carries a duplicated business key and a blank field on purpose, so the failed-quality block is proven on a real failure rather than asserted: the blocking uniqueness rule records FAILED, the non-blocking completeness rule records WARNING, and the gate blocks naming the failing rule. Determinism is addressed rather than hoped for — deduplication orders by an explicit column so re-runs keep the same row, and ingestion uses createOrReplace so a repeated run converges instead of doubling. The gate also blocks when a run has no recorded results at all, so a quality job that dies before writing cannot promote unchecked data; that path was observed live during development. Orphan-file deletion is refused without an explicit retention age. 20 offline unit tests cover argument parsing, the lineage payload shape, and the verdict. | Accepted |
+| `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; `platform/spark/tests/` | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Verified 2026-08-09: five jobs under `jobs/spark/` (ingestion, transform, materialisation, quality, maintenance) plus `PromotionGate`, proven end to end by `SparkPipelineVerificationTest` — 11/11 against the live cluster, transcript `platform/spark/compose-cluster/logs/spark-conformance-tests-20260809T042935Z.log`. The fixture carries a duplicated business key and a blank field on purpose, so the failed-quality block is proven on a real failure rather than asserted: the blocking uniqueness rule records FAILED, the non-blocking completeness rule records WARNING, and the gate blocks naming the failing rule. Determinism is addressed rather than hoped for — deduplication orders by an explicit column so re-runs keep the same row. The gate also blocks when a run has no recorded results at all, so a quality job that dies before writing cannot promote unchecked data; that path was observed live during development. Orphan-file deletion is refused without an explicit retention age. 20 offline unit tests cover argument parsing, the lineage payload shape, and the verdict. **Superseded in part by `P1-3.3-V2`:** this row also recorded that ingestion used `createOrReplace` so a repeated run converged. That held for one file and was wrong for two — a second landing file replaced the whole table, which contradicts the architecture's append-only bronze, and no test in this task's suite would have noticed because none ingested twice. | Accepted |
+| `P1-3.3-V2` | `P1-3.3` | Developer | Bring the bronze and silver write modes in line with the architecture and prove the pipeline over successive batches; done when a second batch accumulates, a late replay cannot overwrite a correction, and both are proven to fail if the guard is removed. | Data-engineering owner | `P1-3.3-V1` | `jobs/spark/`; `platform/spark/tests/` | multi-batch, late arrival, schema drift, failed-batch replay | D1 | Data owner | Verified 2026-08-09: 37/37 live `spark-integration` checks, transcript `platform/spark/compose-cluster/logs/spark-conformance-tests-20260809T111311Z.log`, and 56 offline unit tests. Bronze now appends by batch and refuses a batch it already holds unless a replay is asked for (ADR-P1-006); silver is upserted on a monotonic sequence so a replay carrying older state cannot overwrite a correction. Both guards were proven load-bearing by putting the defect back: restoring `createOrReplace` failed `aSecondBatchAccumulatesInsteadOfReplacingTheFirst` with 3 rows where 8 were expected, and removing the sequence comparison failed `aReplayCarryingAnOlderVersionDoesNotOverwriteTheCorrection` with `bob.stale@example.com` where the correction should have held — in each case that test alone. Writing the scenarios found three defects nothing had exercised: a MERGE source registered from a DataFrame plan cannot be planned by Spark 4.1, the promotion-gate override wrote a `java.sql.Timestamp` against the deployed table's `TIMESTAMP_NTZ` schema and always failed, and `delete_orphan_files` could not run at all against this platform — it failed first on the table identifier and then on the `s3://` scheme. Not proven here: deletion of a genuinely aged orphan, which Iceberg's 24-hour retention floor puts out of reach of a harness whose files are minutes old; it belongs to `P1-3.5-V1` | Accepted |
 | `P1-3.1-P1` | `P1-3.1` | Production | Deploy approved master recovery design, multi-host workers, durable scratch policy, and restricted submission. | Platform owner | `P1-3.1-S1`, production infrastructure | `platform/spark/`; `environments/production/spark/` | worker/master loss and RTO/RPO evidence | P1-P4 | Operations owner | Availability exception | Not started |
 | `P1-3.2-P1` | `P1-3.2` | Production | Apply Spark auth/crypto, managed secrets, trusted TLS proxying, and least-privilege Polaris/Ceph access. | Security owner | `P1-3.1-P1`, Increment 7 controls | `platform/spark/compose-cluster/config/`; `environments/production/spark/` | positive/negative auth, encrypted transport | P3-P7 | Platform owner | Shared-secret rotation | Not started |
 | `P1-3.6-P1` | `P1-3.6` | Production | Deploy Ceph-backed event logs and history server; prove relocation and continuity. | Operations owner | `P1-3.2-P1` | history-server config/runbook | `s3a://` event continuity and restart test | P8-P9 | Operations owner | Event-log retention | Not started |
@@ -927,6 +1094,13 @@ ingestion, transformations, quality gates, maintenance decisions, and the
 verifier tests — now has live evidence: 11 pipeline checks, 8 cluster and
 binding checks, and 27 offline guardrail and unit tests.
 
+**Extended the same day by `P1-3.3-V2`.** The evidence above covered one batch.
+It now covers successive ones: 37 live checks in a single run (transcript
+`spark-conformance-tests-20260809T111311Z.log`) and 56 offline unit tests, with
+bronze appending by batch and silver upserting on a sequence as §6.4.6 of the
+architecture requires. Both new guards were proven to fail with the defect put
+back.
+
 D1 is therefore satisfiable on the evidence, and is still not ticked here for
 one reason only: the gate traceability rule requires every producing task to
 be `Accepted`, and all four are `Verified`. That transition is the platform
@@ -947,7 +1121,7 @@ Increment 3 is accepted when all of the following are true:
 - [ ] **P3** - Spark connects to Polaris and resolves all four namespaces
 - [ ] **P4** - Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
 - [ ] **P5** - image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
-- [ ] **P6** - `SparkPipelineVerificationTest` — every test passes against the live cluster (12 as of 2026-08-09; the count grew when the plan's §6 verification table was reconciled against the suite and three gaps were found: a completeness failure on a mandatory column, the promotion-gate pass case, and a lineage payload from every job rather than ingestion alone. Two were closed by extra assertions inside existing tests and one by a new test, so the count moved from eleven to twelve)
+- [ ] **P6** - `SparkPipelineVerificationTest` and `SparkIncrementalLoadVerificationTest` — every test passes against the live cluster (12 and 17 as of 2026-08-09). The first proves one batch end to end. The second proves the days after it, and exists because a review asked what real-world cases the suite covered and found that every test ran on a single file ingested once: a second batch, a late replay, a schema change and a failed-batch replay were all absent, and two of them could not have passed against the jobs as they were (`P1-3.3-V2`, ADR-P1-006)
 - [ ] **P7** - Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
 - [ ] **P8** - Quality results written to `platform.quality_check_results` and queryable via Spark SQL
 - [ ] **P9** - Promotion gate correctly blocks silver promotion when a blocking quality check fails
