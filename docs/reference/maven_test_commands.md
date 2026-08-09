@@ -26,7 +26,8 @@ Therefore, `mvnw clean verify` is the complete local regression command. It runs
 | `-Pceph-integration-tests` | `ceph-integration` | no | running local Ceph harness | Targeted live Ceph suite run |
 | `-Pcatalog-integration-tests` | `catalog-integration` | no | running local Ceph and Polaris harnesses | Targeted live catalog conformance run (use `verify/polaris-compose-run-catalog-tests.sh`) |
 | `-Psecrets-integration-tests` | `secrets-integration` | no | running local OpenBao harness | Targeted live secret-store conformance run (use `verify/openbao-compose-run-secrets-tests.sh`) |
-| `-Pall-tests` | all tags | yes | running local Ceph and Polaris harnesses | Full offline plus live regression and acceptance boundary |
+| `-Pspark-integration-tests` | `spark-integration` | no | running local Ceph, OpenBao, Polaris and Spark harnesses | Targeted live Spark cluster and batch pipeline run (use `verify/spark-compose-run-live-tests.sh`) |
+| `-Pall-tests` | all tags | yes | running local Ceph, Polaris and Spark harnesses | Full offline plus live regression and acceptance boundary |
 | `-Puntagged-tests` | no known tag | no | none | Audit for tests missing an approved tag |
 
 Targeted profiles deliberately skip the aggregate coverage report because they execute only part of the production code. They are diagnostic commands, not completion evidence.

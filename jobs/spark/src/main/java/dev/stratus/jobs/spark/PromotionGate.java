@@ -1,0 +1,124 @@
+// Copyright 2026 Mark Andrew Ray-Smith Cityline Ltd
+// SPDX-License-Identifier: Apache-2.0
+
+package dev.stratus.jobs.spark;
+
+import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Logger;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.RowFactory;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.functions;
+
+/**
+ * Decides whether a dataset may be promoted, from the quality results already
+ * recorded for a run.
+ *
+ * <p>The decision is deterministic and reads nothing but
+ * {@code platform.quality_check_results}: any blocking check recorded as
+ * {@code FAILED} blocks, warnings never do, and a run with no recorded results
+ * blocks rather than promotes. That last case matters — a quality job that
+ * crashed before writing leaves no failures, and treating "no evidence" as
+ * "no problem" would promote exactly the data nobody checked.
+ *
+ * <p>An override is recorded as an additional {@code overridden} record
+ * against the same run, so the results table remains the whole history of what
+ * was decided and by whom. Overriding is never silent and never edits the
+ * original verdict.
+ *
+ * This class is part of the Stratus on-premises data fabric platform.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-08-09
+ * @version 1.0.0
+ */
+public final class PromotionGate {
+
+    public static final String STATUS_OVERRIDDEN = "overridden";
+
+    private static final Logger LOGGER = Logger.getLogger(PromotionGate.class.getName());
+
+    private PromotionGate() {
+    }
+
+    public static void main(String... argv) {
+        JobArguments arguments = JobArguments.parse(argv);
+        String runId = arguments.require("runId");
+        String targetTable = arguments.require("targetTable");
+
+        SparkSession spark = SparkSession.builder().appName("stratus-promotion-gate").getOrCreate();
+        try {
+            PromotionDecision decision = evaluate(spark, runId, targetTable);
+            LOGGER.info(decision.describe());
+
+            var overrideReason = arguments.optional("override-reason");
+            var overridePrincipal = arguments.optional("override-principal");
+            if (overrideReason.isPresent() != overridePrincipal.isPresent()) {
+                throw new IllegalArgumentException(
+                        "An override requires both --override-reason and --override-principal");
+            }
+            if (decision.blocked() && overrideReason.isPresent()) {
+                recordOverride(spark, decision, overridePrincipal.get(), overrideReason.get(),
+                        Clock.systemUTC());
+                LOGGER.info("PROMOTION OVERRIDDEN runId=" + runId
+                        + " principal=" + overridePrincipal.get());
+                return;
+            }
+            if (decision.blocked()) {
+                spark.stop();
+                System.exit(2);
+            }
+        } finally {
+            spark.stop();
+        }
+    }
+
+    public static PromotionDecision evaluate(SparkSession spark, String runId, String targetTable) {
+        List<Row> results = spark.table(QualityCheckJob.RESULTS_TABLE)
+                .filter(functions.col("run_id").equalTo(runId))
+                .select("check_name", "severity", "status")
+                .collectAsList();
+
+        var failing = new ArrayList<String>();
+        var warnings = new ArrayList<String>();
+        boolean overridden = false;
+        for (Row row : results) {
+            String status = row.getString(2);
+            if (STATUS_OVERRIDDEN.equals(status)) {
+                overridden = true;
+            } else if (QualityCheckJob.STATUS_FAILED.equals(status)) {
+                failing.add(row.getString(0));
+            } else if (QualityCheckJob.STATUS_WARNING.equals(status)) {
+                warnings.add(row.getString(0));
+            }
+        }
+
+        // No results at all is not a pass. See the class comment.
+        boolean blocked = results.isEmpty() || (!failing.isEmpty() && !overridden);
+        return new PromotionDecision(runId, targetTable, blocked, results.size(), failing, warnings);
+    }
+
+    private static void recordOverride(SparkSession spark, PromotionDecision decision,
+                                       String principal, String reason, Clock clock) {
+        String[] identifier = QualityCheckJob.splitIdentifier(decision.targetTable());
+        Row record = RowFactory.create(
+                decision.runId(), identifier[1], identifier[2], identifier[1],
+                "promotion_override", "promotion_override", QualityCheckJob.SEVERITY_BLOCKING,
+                STATUS_OVERRIDDEN, null, null,
+                "overridden by " + principal + ": " + reason
+                        + " (failing: " + String.join(",", decision.failingChecks()) + ")",
+                null, Timestamp.from(Instant.now(clock)), null);
+        try {
+            spark.createDataFrame(List.of(record),
+                            spark.table(QualityCheckJob.RESULTS_TABLE).schema())
+                    .writeTo(QualityCheckJob.RESULTS_TABLE).append();
+        } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {
+            throw new IllegalStateException(QualityCheckJob.RESULTS_TABLE
+                    + " does not exist; an override cannot be recorded without it", exception);
+        }
+    }
+}

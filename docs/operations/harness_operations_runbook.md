@@ -69,6 +69,16 @@ bash platform/spark/compose-cluster/scripts/lib/spark-compose-resolve-artifacts.
 docker build -f platform/spark/image/Dockerfile -t stratus/spark-runtime:dev platform/spark/image
 ```
 
+Startup also mounts the platform job jar and refuses to start without it. The
+harness never builds it, for the same reason it never builds the image:
+
+```bash
+./mvnw -pl :stratus-spark-jobs -am package -DskipTests
+```
+
+Rebuild the jar after any change under `jobs/spark/` and restart the cluster;
+the mount is read at container creation.
+
 Expected end state: `READY bucket=` lines for all five buckets,
 `PUBLISH openbao path=stratus/service-identities/svc-polaris`,
 `READY catalog=stratus`, four `READY namespace=` lines, and
@@ -159,11 +169,25 @@ bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets
 bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
 ```
 
-Submits real statements to the standalone cluster and proves worker
-registration, the runtime image contents, catalog namespace resolution, an
-Iceberg write and read landing in the governed zone, an S3A raw object round
-trip, and a forged principal secret being refused. Requires Ceph, OpenBao,
-Polaris, and Spark up, and the `svc-spark` identity provisioned.
+Submits real statements and real jobs to the standalone cluster. It proves
+worker registration, the runtime image contents, catalog namespace resolution,
+an Iceberg write and read landing in the governed zone, an S3A raw object
+round trip, a forged principal secret being refused, and the whole batch
+pipeline: a landing file ingested to bronze, quality rules recorded, a
+blocking rule stopping promotion, deduplication into silver, materialisation
+into gold, and maintenance on a live table. Requires Ceph, OpenBao, Polaris,
+and Spark up, the `svc-spark` identity provisioned, and the job jar built.
+
+Submitting one job by hand follows the same shape the suite uses:
+
+```bash
+docker compose --project-name stratus-spark-local exec -T spark-master   /opt/spark/bin/spark-submit   --master spark://spark-master.stratus.local:7077   --class dev.stratus.jobs.spark.IngestionJob   /opt/stratus/jobs/stratus-spark-jobs.jar   --sourceFile s3a://stratus-landing/customers/customers.csv   --targetTable stratus.bronze.customers --sourceSystem crm
+```
+
+Pass quality rules as `--checksBase64` rather than `--checks` when submitting
+from Windows: the container runtime strips the double quotes out of a JSON
+argument, and the job then fails on a document that was correct when you wrote
+it.
 
 ### 3.6 Full Ceph harness sequence in one command
 
@@ -296,7 +320,8 @@ docker ps --format '{{.Names}}' | grep stratus
 | Ceph harness transcripts | `platform/ceph/compose-cluster/logs/` |
 | Live Ceph JVM test transcripts | `platform/ceph/tests/logs/` |
 | Catalog conformance transcripts | `platform/polaris/compose-service/logs/` |
-| Spark conformance transcripts | `platform/spark/compose-cluster/logs/` |
+| Spark conformance and pipeline transcripts | `platform/spark/compose-cluster/logs/` |
+| Quality check results (a governed table, not a file) | `stratus.platform.quality_check_results`, queryable by `run_id` |
 | Storage verification evidence (JSON) | `platform/ceph/compose-cluster/evidence/` |
 | Spark cluster verification evidence (JSON) | `platform/spark/compose-cluster/evidence/` |
 | Per-test reports | each module's `target/surefire-reports/` |
@@ -328,6 +353,9 @@ lists and table properties). Filter one channel with
 | Polaris cannot fetch `svc-polaris` | OpenBao was restarted; re-run `ceph-compose-provision-service-identities.sh` |
 | Rotation preflight refuses to run | `.env` and RGW disagree after a failed rotation; run `ceph-compose-rotate-secrets.sh --repair-keys` (§4), then re-run `--preflight` |
 | `Another secret rotation appears to be active` | a rotation really is running; a lock from a killed run is reclaimed automatically (§4) |
+| Spark startup says the platform job jar is missing | build it with `./mvnw -pl :stratus-spark-jobs -am package -DskipTests`; the harness never builds it |
+| A quality job fails with `--checks is not valid JSON` | the JSON lost its quotes in transit; submit the same document with `--checksBase64` |
+| The promotion gate blocks with `checksExamined=0` | no results were recorded for that run id, so the quality job did not complete. This is deliberate: an unrecorded run is never treated as a pass |
 | Spark startup says the runtime image does not exist | resolve the artifacts and build it once (§2); the harness never builds an image |
 | Spark fails with `Failed to create any local dir` | the event-log or scratch volume predates the image that owns those directories; `spark-compose-shutdown.sh --volumes` then start again |
 | Spark resolves the catalog but every write fails on PKIX | the executors are missing the truststore — check both `spark.driver.extraJavaOptions` and `spark.executor.extraJavaOptions` in the rendered `config/spark-defaults.conf` |

@@ -23,6 +23,7 @@ if [[ ! -f "$HARNESS_DIR/.env" ]]; then
 fi
 
 require_provider_harnesses
+require_jobs_jar
 load_environment
 mkdir -p "$HARNESS_DIR/evidence" "$HARNESS_DIR/logs" "$HARNESS_DIR/certs"
 

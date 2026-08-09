@@ -5,7 +5,7 @@ The repository is organized by stable capability, not implementation sequence. P
 | Directory | Ownership | Current contents |
 |---|---|---|
 | `applications/` | Stratus-owned long-running services | Placeholder — no application modules yet |
-| `jobs/` | Spark and Flink workloads | Placeholder — no job modules yet |
+| `jobs/` | Spark and Flink workloads | `jobs/spark/` holds the platform batch jobs — ingestion, transform, materialisation, quality, maintenance — and the promotion gate |
 | `verification/` | executable component conformance suites | One suite directory per capability (`storage`, `catalog`, `compute`, `orchestration`, `query`, `governance`, `identity`). `verification/storage/` holds the storage conformance verifier, the current executable module |
 | `platform/` | open-source product integration, deployment assets, and technology-owned tests | `platform/ceph/compose-cluster/` is the genuine Ceph Compose cluster and `platform/ceph/tests/` its conformance suite and guardrails; `platform/polaris/compose-service/` is the Polaris catalog harness; `platform/openbao/compose-service/` is the developer secret store (ADR-P1-004) |
 | `environments/` | environment inventory and overlays without secrets | `developer`, `acceptance`, and `production` |
@@ -31,7 +31,7 @@ The table describes what each directory is; this section is the placement rule f
 | Third-party product integration: images, configuration templates, Compose harnesses, bootstrap automation | `platform/<product>/` | `platform/ceph/compose-cluster/` |
 | Tests owned by a specific product or its harness | `platform/<product>/tests/` | `platform/ceph/tests/` |
 | Product-neutral capability conformance suites | `verification/<capability>/` | `verification/storage/` |
-| Stratus-authored Spark or Flink workload code | `jobs/` | — |
+| Stratus-authored Spark or Flink workload code | `jobs/` | `jobs/spark/` |
 | Stratus-authored long-running services | `applications/` | — |
 | Cross-component end-to-end and non-functional suites | `testing/` | `testing/repo-guardrails/` |
 | Environment inventory and overlays (no secrets) | `environments/<environment>/<product>/` | `environments/developer/ceph/` |
