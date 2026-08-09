@@ -79,10 +79,19 @@ final class SparkPipelineVerificationTest {
 
     @AfterAll
     static void removeProbeTablesAndObjects() {
+        // Asserted, not assumed. A cleanup whose result is discarded fails
+        // silently and leaves probe tables in a governed zone while the suite
+        // still reports green — which is exactly how the S3A cleanup went
+        // unnoticed until a bucket listing showed the residue.
         for (String table : new String[] {GOLD, SILVER, BRONZE}) {
-            LiveSparkCluster.sparkSql("DROP TABLE IF EXISTS " + table + " PURGE", JOB);
+            var dropped = LiveSparkCluster.sparkSql("DROP TABLE IF EXISTS " + table + " PURGE", JOB);
+            assertTrue(dropped.succeeded(), "probe table " + table + " must be dropped: "
+                    + dropped.describe());
         }
-        LiveSparkCluster.removeObjectPrefix("stratus-landing/" + LANDING_PREFIX, JOB);
+        String prefix = "stratus-landing/" + LANDING_PREFIX;
+        LiveSparkCluster.removeObjectPrefix(prefix, JOB);
+        assertEquals("", LiveSparkCluster.listObjectPrefix(prefix, JOB),
+                "the landing fixture must be gone after cleanup");
     }
 
     @Test
@@ -121,16 +130,13 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("\"type\": \"INGESTION\""),
                 "the lineage payload must declare its type: " + result.output());
 
-        var rows = LiveSparkCluster.sparkSql("SELECT count(*) FROM " + BRONZE, JOB);
-        assertTrue(rows.output().contains("4"),
-                "all four source rows must land in bronze: " + rows.output());
+        assertEquals("4", LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
+                "all four source rows must land in bronze");
 
         // Normalisation is part of the contract: the blank email must have
         // become a null, or the completeness rule below measures nothing.
-        var nulls = LiveSparkCluster.sparkSql(
-                "SELECT count(*) FROM " + BRONZE + " WHERE email IS NULL", JOB);
-        assertTrue(nulls.output().contains("1"),
-                "the blank email must be normalised to null: " + nulls.output());
+        assertEquals("1", LiveSparkCluster.scalar("count(*)", BRONZE + " WHERE email IS NULL", JOB),
+                "the blank email must be normalised to null");
     }
 
     @Test
@@ -160,11 +166,9 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("QUALITY COMPLETE"),
                 "the job must log its summary: " + result.output());
 
-        var recorded = LiveSparkCluster.sparkSql(
-                "SELECT count(*) FROM stratus.platform.quality_check_results WHERE run_id = '"
-                        + QUALITY_RUN + "'", JOB);
-        assertTrue(recorded.output().contains("5"),
-                "every rule must be recorded, passing or not: " + recorded.output());
+        assertEquals("5", LiveSparkCluster.scalar("count(*)",
+                        "stratus.platform.quality_check_results WHERE run_id = '" + QUALITY_RUN + "'", JOB),
+                "every rule must be recorded, passing or not");
     }
 
     @Test
@@ -227,9 +231,8 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("\"type\": \"TRANSFORM\""),
                 "every job must emit its lineage payload, not only ingestion: " + result.output());
 
-        var rows = LiveSparkCluster.sparkSql("SELECT count(*) FROM " + SILVER, JOB);
-        assertTrue(rows.output().contains("3"),
-                "deduplication must collapse the repeated business key: " + rows.output());
+        assertEquals("3", LiveSparkCluster.scalar("count(*)", SILVER, JOB),
+                "deduplication must collapse the repeated business key");
 
         // Ordering decides which duplicate survives, and a pipeline that
         // cannot say which one is not reproducible.
@@ -275,9 +278,8 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("MAINTENANCE rewrite_data_files"),
                 "file rewrite must report its metrics: " + result.output());
 
-        var readable = LiveSparkCluster.sparkSql("SELECT count(*) FROM " + BRONZE, JOB);
-        assertTrue(readable.output().contains("4"),
-                "maintenance must not change what the table contains: " + readable.output());
+        assertEquals("4", LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
+                "maintenance must not change what the table contains");
     }
 
     @Test

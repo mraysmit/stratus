@@ -52,6 +52,47 @@ final class LiveSparkCluster {
                 "Set STRATUS_SPARK_INTEGRATION=true to run against a live Spark cluster");
     }
 
+    /**
+     * Runs a query whose single result is wrapped in a distinctive marker, and
+     * returns that marker's value.
+     *
+     * <p>Substring-matching a bare number against spark-sql output proves
+     * nothing: the banner, the application id, and the timestamps between them
+     * contain every digit, so {@code output().contains("4")} holds whatever
+     * the query returned. Labelling the value makes the assertion mean what it
+     * says.
+     */
+    static String scalar(String selectExpression, String fromClause, Duration timeout) {
+        String marker = "STRATUS_RESULT";
+        CommandResult result = sparkSql(String.format(
+                "SELECT concat('%s=', %s) FROM %s", marker, selectExpression, fromClause), timeout);
+        if (!result.succeeded()) {
+            throw new IllegalStateException("Query failed: " + result.describe());
+        }
+        var matcher = java.util.regex.Pattern.compile(marker + "=(\\S*)").matcher(result.output());
+        if (!matcher.find()) {
+            throw new IllegalStateException(
+                    "No " + marker + " row in the output: " + result.output());
+        }
+        return matcher.group(1);
+    }
+
+    /** The Polaris catalog endpoint, from the provider's published settings. */
+    static String polarisEndpoint() {
+        Path connection = harnessDirectory().getParent().getParent()
+                .resolve("polaris/compose-service/connection.env");
+        try {
+            for (String line : Files.readAllLines(connection)) {
+                if (line.startsWith("POLARIS_ENDPOINT=")) {
+                    return line.substring("POLARIS_ENDPOINT=".length()).trim();
+                }
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to read " + connection, exception);
+        }
+        throw new IllegalStateException("POLARIS_ENDPOINT is not published in " + connection);
+    }
+
     /** The Spark harness directory, located from the repository root. */
     static Path harnessDirectory() {
         Path here = Path.of("").toAbsolutePath();
