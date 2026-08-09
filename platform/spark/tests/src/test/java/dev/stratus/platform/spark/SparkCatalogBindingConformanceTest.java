@@ -114,12 +114,11 @@ final class SparkCatalogBindingConformanceTest {
         assertTrue(written.succeeded(), "an S3A write must succeed: " + written.describe());
 
         // A headerless CSV names its single column _c0; selecting `id` here
-        // would fail on the column name rather than on the storage path.
-        var read = LiveSparkCluster.sparkSql(
-                "SELECT _c0 FROM csv.`" + location + "`", JOB);
-
-        assertTrue(read.succeeded(), "an S3A read must succeed: " + read.describe());
-        assertTrue(read.output().contains("7"), "the S3A round trip must return the row: " + read.output());
+        // would fail on the column name rather than on the storage path. The
+        // value is read through a labelled marker because every digit appears
+        // somewhere in spark-sql's banner and application id.
+        assertEquals("7", LiveSparkCluster.scalar("_c0", "csv.`" + location + "`", JOB),
+                "the S3A round trip must return the row that was written");
     }
 
     @Test
@@ -131,20 +130,25 @@ final class SparkCatalogBindingConformanceTest {
         assertTrue(control.succeeded() && control.output().contains("bronze"),
                 "the real credential must resolve the catalog: " + control.describe());
 
+        // The catalog endpoint comes from the provider's published connection
+        // settings, not a literal here: ADR-P1-003 keeps one place to change.
         var forged = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, JOB,
                 "/opt/spark/bin/spark-sql",
                 "--master", "spark://spark-master.stratus.local:7077",
                 "--conf", "spark.sql.catalog.forged=org.apache.iceberg.spark.SparkCatalog",
                 "--conf", "spark.sql.catalog.forged.type=rest",
-                "--conf", "spark.sql.catalog.forged.uri=https://polaris.stratus.local:8181/api/catalog",
+                "--conf", "spark.sql.catalog.forged.uri="
+                        + LiveSparkCluster.polarisEndpoint() + "/api/catalog",
                 "--conf", "spark.sql.catalog.forged.warehouse=stratus",
                 "--conf", "spark.sql.catalog.forged.credential=svc-spark:forged-secret-0000000000000000",
                 "-e", "SHOW NAMESPACES IN forged");
 
         assertFalse(forged.succeeded(),
                 "a forged principal secret must be refused, got: " + forged.describe());
-        assertFalse(forged.output().contains("forged-secret-0000000000000000")
-                        && forged.output().contains("silver"),
+        // Asserted on its own rather than combined with another condition: an
+        // `A && B` here passes whenever either half is false, so it would stop
+        // testing the namespaces the moment the other half changed.
+        assertFalse(forged.output().contains("silver"),
                 "a refused catalog must not list governed namespaces: " + forged.output());
     }
 }
