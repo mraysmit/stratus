@@ -32,6 +32,10 @@ x-spark-common: &spark-common
     # validate the catalog without a JVM.
     - ${POLARIS_HARNESS_CA_FILE:?Polaris connection settings not loaded; invoke through the harness scripts}:/opt/stratus/certs/stratus-polaris-ca.crt:ro
     - ${CEPH_HARNESS_CA_FILE:?Ceph connection settings not loaded; invoke through the harness scripts}:/opt/stratus/certs/stratus-ca.crt:ro
+    # The platform job jar, built by the reactor. Mounted rather than baked
+    # into the image so a job change does not require an image rebuild; the
+    # image carries only the runtime the jobs are compiled against.
+    - ${SPARK_JOBS_JAR:?Job jar not resolved; invoke through the harness scripts}:/opt/stratus/jobs/stratus-spark-jobs.jar:ro
     - spark-events:/opt/spark/events
     - spark-scratch:/opt/spark/scratch
   networks:
