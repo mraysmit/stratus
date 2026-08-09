@@ -4,6 +4,7 @@
 package dev.stratus.jobs.spark;
 
 import java.time.Clock;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Logger;
 import org.apache.spark.sql.Dataset;
@@ -32,13 +33,16 @@ import org.apache.spark.sql.SparkSession;
  */
 public final class MaterialisationJob {
 
+    static final Set<String> ARGUMENTS = Set.of(
+            "sourceTables", "targetTable", "sql", "runId", "qualityRunId");
+
     private static final Logger LOGGER = Logger.getLogger(MaterialisationJob.class.getName());
 
     private MaterialisationJob() {
     }
 
     public static void main(String... argv) {
-        JobArguments arguments = JobArguments.parse(argv);
+        JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String[] sourceTables = arguments.requireList("sourceTables");
         String targetTable = arguments.require("targetTable");
         String sql = arguments.require("sql");
@@ -53,7 +57,7 @@ public final class MaterialisationJob {
                 LOGGER.info(decision.describe());
                 if (decision.blocked()) {
                     spark.stop();
-                    System.exit(2);
+                    System.exit(JobExit.PROMOTION_BLOCKED);
                 }
             });
 
@@ -74,7 +78,11 @@ public final class MaterialisationJob {
         }
 
         Dataset<Row> materialised = spark.sql(sql);
-        materialised.writeTo(targetTable).createOrReplace();
+        // A full rebuild is the documented gold write mode (§6.4.6), so replace
+        // is correct here in a way it is not for bronze or silver.
+        ZoneWriteProperties.onCreate(materialised.writeTo(targetTable), ZoneWriteProperties.gold())
+                .createOrReplace();
+        ZoneWriteProperties.align(spark, targetTable, ZoneWriteProperties.gold());
         LineageEvent.emit("MATERIALISATION", String.join(",", sourceTables), targetTable, runId, clock);
         return spark.table(targetTable).count();
     }

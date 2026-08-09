@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -137,18 +139,55 @@ final class LiveSparkCluster {
     }
 
     /**
-     * Places a raw file in the landing zone through the storage owner's own
-     * client, so the pipeline starts from a real object written the way a
-     * source system would deliver one — not from a table Spark made earlier.
+     * Places a landing fixture from the test's own resources into the landing
+     * zone, through the storage owner's own client, so the pipeline starts from
+     * a real object written the way a source system would deliver one — not
+     * from a table Spark made earlier.
      */
-    static CommandResult writeLandingFile(String bucketRelativePath, String content, Duration timeout) {
-        String container = "/tmp/landing-fixture";
+    static CommandResult uploadLandingResource(String resourceName, String bucketRelativePath,
+                                               Duration timeout) {
+        byte[] content;
+        try (var stream = LiveSparkCluster.class.getResourceAsStream("/landing/" + resourceName)) {
+            if (stream == null) {
+                throw new IllegalStateException("Landing fixture not on the classpath: " + resourceName);
+            }
+            content = stream.readAllBytes();
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to read landing fixture " + resourceName, exception);
+        }
+        return writeObject("stratus-landing/" + bucketRelativePath, content, timeout);
+    }
+
+    /** Places a landing file whose content the test states inline. */
+    static CommandResult writeLandingContent(String bucketRelativePath, String content,
+                                             Duration timeout) {
+        return writeObject("stratus-landing/" + bucketRelativePath,
+                content.getBytes(StandardCharsets.UTF_8), timeout);
+    }
+
+    /** Writes a small object to a bucket path the test names. */
+    static CommandResult writeObject(String bucketAndKey, String content, Duration timeout) {
+        return writeObject(bucketAndKey, content.getBytes(StandardCharsets.UTF_8), timeout);
+    }
+
+    /**
+     * Writes bytes to a bucket path through the storage owner's client.
+     *
+     * <p>The content travels base64-encoded and is decoded inside the
+     * container. Text pushed through a shell is at the mercy of every layer
+     * between here and there — commas, quotes, and newlines all mean something
+     * to one of them — and a fixture that arrives subtly different from the file
+     * under version control is a test measuring something nobody wrote down.
+     */
+    private static CommandResult writeObject(String bucketAndKey, byte[] content, Duration timeout) {
+        String encoded = Base64.getEncoder().encodeToString(content);
+        String container = "/tmp/stratus-" + Integer.toHexString(bucketAndKey.hashCode());
         return run(timeout, List.of("docker", "compose", "--project-name", "stratus-ceph-local",
                 "exec", "-T", "s3client",
                 "sh", "-c",
-                "printf '" + content + "\\n' > " + container
+                "printf '%s' '" + encoded + "' | base64 -d > " + container
                         + " && rclone --ca-cert /certs/stratus-ca.crt copyto " + container
-                        + " cephrgw:stratus-landing/" + bucketRelativePath));
+                        + " cephrgw:" + bucketAndKey));
     }
 
     /** Lists whatever remains under a prefix; blank output means nothing does. */

@@ -1,0 +1,4 @@
+customer_id,email,country,updated_at
+9, ,GB,2026-08-05T09:00:00Z
+10,kim@example.com,ZZ,2026-08-05T09:00:00Z
+10,kim.b@example.com,ZZ,2026-08-05T09:10:00Z

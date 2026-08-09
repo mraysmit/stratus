@@ -1073,6 +1073,13 @@ Sizing figures must be measured on the installed hardware rather than taken from
 | Gold | copy-on-write upsert, or full rebuild | read-optimised and consumer-facing; write cost is acceptable in exchange for read simplicity |
 | `platform.quality_check_results` | append-only | permanent audit trail (§5.3) |
 
+Bronze has one named exception to append-only, recorded in
+[ADR-P1-006](../decisions/ADR-P1-006-bronze-batch-replay.md): a delivery that
+arrives a second time may be replaced in place, scoped to that batch alone and
+opt-in per invocation. The default remains a refusal, so the exception cannot be
+taken by accident, and `stratus.append-only=true` stays on the table as the
+marker of the contract Iceberg does not itself enforce.
+
 Write mode is set explicitly per table rather than left to engine defaults:
 
 | Property | Values | Iceberg default | Set when |
