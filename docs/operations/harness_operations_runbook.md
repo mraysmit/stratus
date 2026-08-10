@@ -175,8 +175,30 @@ an Iceberg write and read landing in the governed zone, an S3A raw object
 round trip, a forged principal secret being refused, and the whole batch
 pipeline: a landing file ingested to bronze, quality rules recorded, a
 blocking rule stopping promotion, deduplication into silver, materialisation
-into gold, and maintenance on a live table. Requires Ceph, OpenBao, Polaris,
-and Spark up, the `svc-spark` identity provisioned, and the job jar built.
+into gold, and maintenance on a live table. It then runs the same platform over
+successive batches — a second batch accumulating, a replay refused, a late
+correction ignored, a schema change absorbed or refused, a failed batch fixed
+and re-sent. Requires Ceph, OpenBao, Polaris, and Spark up, the `svc-spark`
+identity provisioned, and the job jar built.
+
+`STRATUS_LOG_LEVEL` defaults to `DEBUG` here, as it does for the catalog and
+secrets runners, and it governs the run end to end: the suite reads it directly,
+and passes it into the container so the jobs it submits emit at the same level.
+A Spark job logs inside the cluster, so its records arrive as the output of a
+submission; the suite relays them at DEBUG. Without that relay a transcript can
+say a pipeline passed while containing no account of what it did.
+
+Transcripts therefore carry two vocabularies. The harness reports what it ran
+(`Cluster command completed action=… exitCode=… durationMs=…`), and the
+platform reports what happened (`Batch ingested table=… batchId=…
+rowsInTable=…`, `Stale replay ignored table=… key=… valueHeld=…`, `Promotion
+decided runId=… verdict=BLOCK`). Read the second to review a run; read the
+first when the second stops making sense.
+
+Command arguments are redacted by key before they are recorded. The
+forged-principal check hands spark-sql a catalog credential on the command
+line, and `SparkVerificationLoggingTest` is what keeps it out of the
+transcript.
 
 Submitting one job by hand follows the same shape the suite uses:
 

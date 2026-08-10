@@ -85,6 +85,7 @@ public final class IngestionJob {
     }
 
     public static void main(String... argv) {
+        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String sourceFile = arguments.require("sourceFile");
         String targetTable = arguments.require("targetTable");

@@ -57,6 +57,7 @@ public final class TransformJob {
     }
 
     public static void main(String... argv) {
+        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String sourceTable = arguments.require("sourceTable");
         String targetTable = arguments.require("targetTable");

@@ -15,6 +15,15 @@
     <name>Stratus Spark Tests</name>
     <description>Live Spark cluster conformance and Spark harness guardrails</description>
 
+    <properties>
+        <!-- The approved Spark runtime image is built on Java 17. This module
+             holds a driver that submits to it and exchanges serialised closures
+             with its executors, so it must target the same release for the same
+             reason jobs/spark does: a newer class file is refused at submission
+             time, not at build time. -->
+        <maven.compiler.release>17</maven.compiler.release>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -29,6 +38,44 @@
         <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The driver runs here, in the test JVM, and submits to the live
+             standalone master. This is the path a client of the platform
+             actually uses; running spark-submit inside the master container
+             exercises the cluster's own copy of Spark and nothing about
+             reaching it (docs/implementation/spark_client_submission.md). -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_2.13</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <!-- This module binds SLF4J to JUL (slf4j-jdk14), the platform
+                     convention. Spark brings the bridge that routes JUL back
+                     into SLF4J, and the two together form a loop: every record
+                     is handed from one to the other until the stack is
+                     exhausted. It fails as a StackOverflowError inside
+                     SparkSession creation, which looks like anything but a
+                     logging problem. -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>jul-to-slf4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-aws-bundle</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

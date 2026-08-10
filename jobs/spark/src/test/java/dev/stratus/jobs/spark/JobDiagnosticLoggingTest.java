@@ -161,6 +161,46 @@ final class JobDiagnosticLoggingTest {
     }
 
     @Test
+    void theDiagnosticLevelIsOffUntilItIsAskedFor() {
+        // The JDK discards FINE by default, so without this every diagnostic
+        // record a job emits is dropped before anything can read it — the job
+        // would carry diagnostics no operator could ever turn on.
+        Logger jobs = Logger.getLogger(JobLogging.LOGGER_NAME);
+        Level original = jobs.getLevel();
+        try {
+            JobLogging.configure("INFO");
+            assertEquals(Level.INFO, jobs.getLevel());
+
+            JobLogging.configure("DEBUG");
+            assertEquals(Level.FINE, jobs.getLevel(),
+                    "operators configure DEBUG; the JDK backend calls it FINE");
+        } finally {
+            jobs.setLevel(original);
+        }
+    }
+
+    @Test
+    void onlyTheTwoOperationalLevelsAreAccepted() {
+        // The same switch and the same message as every other Stratus
+        // component, so one setting governs a run end to end.
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> JobLogging.configure("TRACE"));
+
+        assertEquals("STRATUS_LOG_LEVEL must be INFO or DEBUG", failure.getMessage());
+    }
+
+    @Test
+    void aJobsDiagnosticRecordIsRenderedAsDebugRatherThanFine() {
+        var record = new LogRecord(Level.FINE, "TRANSFORM MERGE ...");
+        record.setLoggerName(JobLogging.LOGGER_NAME);
+
+        String rendered = new JobLogging.OperationalLevelFormatter().format(record);
+
+        assertTrue(rendered.contains(" DEBUG "), rendered);
+        assertTrue(rendered.contains("TRANSFORM MERGE"), rendered);
+    }
+
+    @Test
     void everyJobDeclaresTheArgumentsItReads() {
         // A job with no declared set would accept anything, and rejectUnknown
         // would be a call that could never fail.

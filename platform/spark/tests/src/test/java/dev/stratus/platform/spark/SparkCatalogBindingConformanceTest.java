@@ -71,6 +71,8 @@ final class SparkCatalogBindingConformanceTest {
             assertTrue(result.output().contains(zone),
                     "the " + zone + " namespace must resolve through Polaris: " + result.output());
         }
+        SparkVerificationLogging.namespacesResolved(
+                java.util.List.of("bronze", "silver", "gold", "platform"));
     }
 
     @Test
@@ -97,6 +99,9 @@ final class SparkCatalogBindingConformanceTest {
         assertTrue(files.succeeded(), "the files metadata table must be queryable: " + files.describe());
         assertTrue(files.output().contains("s3://stratus-bronze/bronze/"),
                 "data files must land inside the governed bronze location: " + files.output());
+
+        SparkVerificationLogging.scenarioPassed("catalog write and read",
+                "rows read back and files landed under s3://stratus-bronze/bronze/");
     }
 
     @Test
@@ -150,5 +155,8 @@ final class SparkCatalogBindingConformanceTest {
         // testing the namespaces the moment the other half changed.
         assertFalse(forged.output().contains("silver"),
                 "a refused catalog must not list governed namespaces: " + forged.output());
+
+        SparkVerificationLogging.negativeConfirmed("forged principal secret", forged.exitCode(),
+                "the catalog refused and listed no governed namespace");
     }
 }

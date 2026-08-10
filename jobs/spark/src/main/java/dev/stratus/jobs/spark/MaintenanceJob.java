@@ -42,6 +42,7 @@ public final class MaintenanceJob {
     }
 
     public static void main(String... argv) {
+        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String[] operations = arguments.requireList("operations");

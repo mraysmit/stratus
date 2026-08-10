@@ -54,6 +54,8 @@ final class SparkClusterConformanceTest {
         assertTrue(cores.find(), "the master must report core capacity: " + result.output());
         assertTrue(Integer.parseInt(cores.group(1)) > 0,
                 "the cluster must offer at least one core, got: " + cores.group(1));
+
+        SparkVerificationLogging.clusterInspected((int) alive, Integer.parseInt(cores.group(1)));
     }
 
     @Test

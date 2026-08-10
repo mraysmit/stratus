@@ -307,6 +307,19 @@ job ran with the default the caller was trying to replace.
 | `2` | A blocking quality check failed, so nothing was written |
 | `3` | The incoming schema conflicts with the table's, so nothing was written |
 
+**Logging.** INFO records each job's outcome with stable identifiers. DEBUG
+records the schema comparison, the batch predicate, the upsert statement, the
+maintenance call, and each quality rule's measurement. `JobLogging` reads
+`STRATUS_LOG_LEVEL` — the same switch the Ceph, catalog and secrets verifiers
+use — and renders one record per line with a UTC timestamp, naming the
+diagnostic level DEBUG rather than the JDK's FINE.
+
+The level must be set explicitly or the diagnostics are unreachable: the JDK
+discards FINE by default, so a job would carry records no operator could ever
+turn on. The live suite passes the level into the container and relays each
+job's output into its own transcript, which is what makes those records visible
+rather than merely present in the source.
+
 **Write mode per zone** follows the architecture (§6.4.6): bronze appends,
 silver upserts copy-on-write, gold is rebuilt in full. Each zone's write
 properties — `write.{delete,update,merge}.mode`, the matching isolation levels,

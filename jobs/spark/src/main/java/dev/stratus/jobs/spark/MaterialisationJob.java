@@ -42,6 +42,7 @@ public final class MaterialisationJob {
     }
 
     public static void main(String... argv) {
+        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String[] sourceTables = arguments.requireList("sourceTables");
         String targetTable = arguments.require("targetTable");
