@@ -16,6 +16,10 @@ source "$(dirname "$0")/../lib/spark-compose-common.sh"
 load_environment
 
 export STRATUS_SPARK_INTEGRATION=true
+# The suite and the jobs it submits both read this. A transcript recorded at
+# INFO alone says a pipeline passed without saying what it did, so the default
+# here is DEBUG, matching the catalog and secrets runners.
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
 
 cd "$REPO_DIR"
 test_log_dir="$HARNESS_DIR/logs"

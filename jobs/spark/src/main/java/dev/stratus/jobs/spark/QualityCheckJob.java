@@ -60,6 +60,7 @@ public final class QualityCheckJob {
     }
 
     public static void main(String... argv) {
+        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String checks = checkDefinitions(arguments);

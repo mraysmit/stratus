@@ -20,6 +20,13 @@
         <hadoop.version>3.4.1</hadoop.version>
         <iceberg.version>1.11.0</iceberg.version>
         <junit.version>6.1.0</junit.version>
+        <!-- The versions the approved Spark runtime image is built from. A
+             client that submits to that cluster must match it: the driver and
+             the executors exchange serialised closures, and a mismatch surfaces
+             at submission rather than at build time. The authoritative set is
+             platform/spark/image/artifact-lock.txt. -->
+        <spark.version>4.1.2</spark.version>
+        <spark.scala.binary>2.13</spark.scala.binary>
         <!-- 2.x required: Iceberg brings slf4j-api 2.x, which ignores 1.7-style
              bindings and would silently rout logging to the NOP logger. -->
         <slf4j.version>2.0.17</slf4j.version>
@@ -88,6 +95,26 @@
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-aws-bundle</artifactId>
                 <version>${iceberg.version}</version>
+            </dependency>
+            <!-- The client side of the Spark cluster: a driver that runs
+                 outside the containers and submits to the standalone master.
+                 Versions match platform/spark/image/artifact-lock.txt, which is
+                 what the executors run; hadoop-aws is the S3A connector for the
+                 raw-file path, separate from Iceberg's own S3FileIO. -->
+            <dependency>
+                <groupId>org.apache.spark</groupId>
+                <artifactId>spark-sql_${spark.scala.binary}</artifactId>
+                <version>${spark.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-spark-runtime-4.1_${spark.scala.binary}</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-aws</artifactId>
+                <version>${hadoop.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.slf4j</groupId>
