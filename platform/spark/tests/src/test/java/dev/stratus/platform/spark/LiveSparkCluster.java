@@ -76,6 +76,7 @@ final class LiveSparkCluster {
             throw new IllegalStateException(
                     "No " + marker + " row in the output: " + result.output());
         }
+        SparkVerificationLogging.measurement(selectExpression, fromClause, matcher.group(1));
         return matcher.group(1);
     }
 
@@ -107,10 +108,20 @@ final class LiveSparkCluster {
         throw new IllegalStateException("Could not locate platform/spark/compose-cluster from " + here);
     }
 
+    /** The diagnostic level the suite and the jobs it submits both run at. */
+    static String logLevel() {
+        return System.getenv().getOrDefault("STRATUS_LOG_LEVEL", "INFO");
+    }
+
     /** Runs a command in a cluster container and returns its combined output. */
     static CommandResult exec(String service, Duration timeout, String... command) {
+        // The level is passed into the container, not inherited: compose exec
+        // starts a fresh process in the container's own environment, so a job
+        // asked to run at DEBUG on the workstation would otherwise log at INFO
+        // and every diagnostic record would be discarded before it could reach
+        // the transcript.
         var argv = new ArrayList<>(List.of("docker", "compose", "--project-name", PROJECT,
-                "exec", "-T", service));
+                "exec", "-T", "-e", "STRATUS_LOG_LEVEL=" + logLevel(), service));
         argv.addAll(List.of(command));
         return run(timeout, argv);
     }
@@ -227,6 +238,33 @@ final class LiveSparkCluster {
     }
 
     private static CommandResult run(Duration timeout, List<String> argv) {
+        return run(timeout, argv, describe(argv));
+    }
+
+    /**
+     * A short name for what a command was doing, taken from the argv itself so
+     * a transcript reads as a sequence of actions rather than of process
+     * invocations.
+     */
+    private static String describe(List<String> argv) {
+        for (String argument : argv) {
+            if (argument.endsWith("spark-submit")) {
+                int mainClass = argv.indexOf("--class");
+                return mainClass < 0 || mainClass + 1 >= argv.size()
+                        ? "spark-submit" : "submit " + argv.get(mainClass + 1);
+            }
+            if (argument.endsWith("spark-sql")) {
+                return "spark-sql";
+            }
+            if (argument.equals("rclone")) {
+                return "rclone " + argv.get(argv.indexOf("rclone") + 3);
+            }
+        }
+        return "exec";
+    }
+
+    private static CommandResult run(Duration timeout, List<String> argv, String description) {
+        long startedAt = System.nanoTime();
         var builder = new ProcessBuilder(argv).redirectErrorStream(true);
         builder.directory(harnessDirectory().toFile());
         Process process;
@@ -249,6 +287,8 @@ final class LiveSparkCluster {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted waiting for " + String.join(" ", argv), exception);
         }
+        SparkVerificationLogging.commandCompleted(description, argv, process.exitValue(),
+                (System.nanoTime() - startedAt) / 1_000_000L, output);
         return new CommandResult(process.exitValue(), output);
     }
 

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -91,8 +92,9 @@ final class SparkPipelineVerificationTest {
         }
         String prefix = "stratus-landing/" + LANDING_PREFIX;
         LiveSparkCluster.removeObjectPrefix(prefix, JOB);
-        assertEquals("", LiveSparkCluster.listObjectPrefix(prefix, JOB),
-                "the landing fixture must be gone after cleanup");
+        String remaining = LiveSparkCluster.listObjectPrefix(prefix, JOB);
+        SparkVerificationLogging.objectPrefixListed(prefix, remaining);
+        assertEquals("", remaining, "the landing fixture must be gone after cleanup");
     }
 
     @Test
@@ -114,6 +116,7 @@ final class SparkPipelineVerificationTest {
         for (String zone : new String[] {"bronze", "silver", "gold", "platform"}) {
             assertTrue(result.output().contains(zone), zone + " must resolve: " + result.output());
         }
+        SparkVerificationLogging.namespacesResolved(List.of("bronze", "silver", "gold", "platform"));
     }
 
     @Test
@@ -139,6 +142,11 @@ final class SparkPipelineVerificationTest {
         // become a null, or the completeness rule below measures nothing.
         assertEquals("1", LiveSparkCluster.scalar("count(*)", BRONZE + " WHERE email IS NULL", JOB),
                 "the blank email must be normalised to null");
+
+        SparkVerificationLogging.batchIngested(BRONZE, BATCH,
+                LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
+                LiveSparkCluster.scalar("count(*)", BRONZE + ".partitions", JOB),
+                SOURCE_FILE, "inferred");
     }
 
     @Test
@@ -171,6 +179,11 @@ final class SparkPipelineVerificationTest {
         assertEquals("5", LiveSparkCluster.scalar("count(*)",
                         "stratus.platform.quality_check_results WHERE run_id = '" + QUALITY_RUN + "'", JOB),
                 "every rule must be recorded, passing or not");
+
+        SparkVerificationLogging.qualityRunRecorded(QUALITY_RUN, BRONZE, "5",
+                LiveSparkCluster.scalar("count(*)",
+                        "stratus.platform.quality_check_results WHERE run_id = '" + QUALITY_RUN
+                                + "' AND status = 'FAILED'", JOB));
     }
 
     @Test
@@ -203,6 +216,13 @@ final class SparkPipelineVerificationTest {
                         + QUALITY_RUN + "' AND check_name = 'email_mostly_present'", JOB);
         assertTrue(warning.output().contains("WARNING"),
                 "a failing non-blocking rule must be a warning: " + warning.output());
+
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "customer_id_unique", "FAILED",
+                result.output());
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mandatory", "FAILED",
+                mandatory.output());
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mostly_present", "WARNING",
+                warning.output());
     }
 
     @Test
@@ -217,6 +237,8 @@ final class SparkPipelineVerificationTest {
                 "the gate must record its verdict: " + result.output());
         assertTrue(result.output().contains("customer_id_unique"),
                 "the verdict must name the failing rule: " + result.output());
+
+        SparkVerificationLogging.promotionDecided(QUALITY_RUN, BRONZE, "BLOCK", result.exitCode());
     }
 
     @Test
@@ -242,6 +264,10 @@ final class SparkPipelineVerificationTest {
                 "SELECT email FROM " + SILVER + " WHERE customer_id = 2", JOB);
         assertTrue(kept.output().contains("bob.updated@example.com"),
                 "the most recent row must be the one kept: " + kept.output());
+
+        SparkVerificationLogging.silverUpserted(SILVER, BATCH,
+                LiveSparkCluster.scalar("count(*)", SILVER, JOB), "customer_id=2",
+                LiveSparkCluster.scalar("email", SILVER + " WHERE customer_id = 2", JOB));
     }
 
     @Test
@@ -282,6 +308,10 @@ final class SparkPipelineVerificationTest {
 
         assertEquals("4", LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
                 "maintenance must not change what the table contains");
+
+        SparkVerificationLogging.maintenanceOutcome(BRONZE, "expire_snapshots,rewrite_data_files",
+                "before maintenance", LiveSparkCluster.scalar("count(*)", BRONZE + ".snapshots", JOB),
+                LiveSparkCluster.scalar("count(*)", BRONZE, JOB));
     }
 
     @Test
@@ -298,6 +328,9 @@ final class SparkPipelineVerificationTest {
                 "orphan deletion without --olderThan must be refused: " + result.describe());
         assertTrue(result.output().contains("requires an explicit --olderThan"),
                 "the refusal must say what is missing: " + result.output());
+
+        SparkVerificationLogging.negativeConfirmed("orphan deletion without a retention",
+                result.exitCode(), "the destructive operation must not inherit a default");
     }
 
     @Test
@@ -333,6 +366,11 @@ final class SparkPipelineVerificationTest {
                 "a run whose blocking rules all pass must be promoted: " + gate.describe());
         assertTrue(gate.output().contains("PROMOTION PROMOTE"),
                 "the gate must record the promote verdict: " + gate.output());
+
+        SparkVerificationLogging.qualityRunRecorded(cleanRun, SILVER, "2", "0");
+        SparkVerificationLogging.promotionDecided(cleanRun, SILVER, "PROMOTE", gate.exitCode());
+        SparkVerificationLogging.scenarioPassed("gate can promote",
+                "the same rules that blocked bronze passed on the deduplicated table");
     }
 
     @Test
