@@ -139,6 +139,9 @@ mkdir -p "$HARNESS_DIR/evidence"
 compose config --quiet
 compose up --detach --remove-orphans --wait
 
+# Containers being healthy is not the cluster being usable; see require_osds_up.
+require_osds_up
+
 # The Dashboard's RGW pages and its /api/rgw REST endpoints need an RGW identity
 # of their own. This runs here rather than in ceph/configure.sh because the
 # command requires a running RGW daemon, and configure.sh completes before the

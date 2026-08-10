@@ -1,6 +1,6 @@
 # Spark Client Submission — the gap between what is verified and what is used
 
-- Status: Problem statement and proposed remediation. Not yet accepted.
+- Status: External client built and proven; conversion of the existing suite outstanding (§10).
 - Raised: 2026-08-09
 - Affects: `platform/spark/tests`, `docs/implementation/spark_compute.md` §10
 
@@ -132,6 +132,63 @@ Replace the container-exec transport with a real client, per §10.
    change.
 5. **Keep container exec only where it belongs** — inspecting the cluster from
    the inside, which is a different question from whether a client can use it.
+
+## 7a. What was built, and what building it discovered
+
+An external client exists and is proven against the live platform:
+`SparkClientConfig`, `StratusSparkClient`, `HarnessConnection`,
+`HarnessTruststore` and `PolarisPrincipals` under `platform/spark/tests`, with
+`SparkClientConformanceTest` (3) and `SparkPrincipalSeparationTest` (3).
+
+Six findings, none of which was written down anywhere before, and four of which
+cost real time to diagnose:
+
+- **The external driver works, and needs less than expected.** No hosts-file
+  entry: `spark://127.0.0.1:7077` is enough, because the master's port is
+  published on loopback. No firewall exception either. What it does need is
+  `spark.driver.host=host.docker.internal`, `bindAddress=0.0.0.0`, and fixed
+  `driver.port` / `blockManager.port`, because executors run inside the bridge
+  and dial back.
+- **SLF4J and Spark form a logging loop.** This module binds SLF4J to JUL;
+  Spark brings the bridge routing JUL back to SLF4J. Together they recurse
+  until the stack is exhausted, and it surfaces as a `StackOverflowError`
+  inside `SparkSession` creation — which looks like anything but logging.
+  `jul-to-slf4j` is excluded in the module's POM.
+- **Setting `javax.net.ssl.trustStore` is not enough.** The JVM builds its
+  default `SSLContext` once and caches it, and merely constructing an
+  `HttpClient` fixes it. A truststore installed after that point is ignored,
+  and every TLS call fails PKIX against a store that plainly contains the right
+  CA. `HarnessTruststore` replaces the default context outright.
+- **The driver and the executors need different paths to the same truststore.**
+  The driver's is a workstation path; the executors' is the container path the
+  compose file mounts. Setting only the driver's lets the catalog resolve and
+  then fails every write.
+- **A JVM holds one `SparkContext`.** `getOrCreate()` returns any existing
+  session whatever configuration it is asked for, so two clients in one fork
+  would silently share an identity. `connect` refuses when a session already
+  exists, and the `spark-integration-tests` profile runs one fork per class.
+  Two principals in one driver is therefore a test of *authorisation*; two
+  drivers means two processes.
+- **A Java 25 client cannot use the S3A connector.** Hadoop's
+  `UserGroupInformation` asks for the `Subject` of the current access control
+  context, and a JDK that has removed the security manager refuses:
+  `getSubject is not supported`. Java 17 and 21 answer it; 24 onwards do not,
+  and Java 25 rejects `-Djava.security.manager=allow` at VM startup, so the
+  usual workaround is gone. This reaches only the raw-object path — every
+  catalog operation uses Iceberg's own S3 client and is unaffected — and it is a
+  constraint on the *client's* JVM, not the platform's: the cluster runs Java
+  17. The repository default is 25, so the S3A check states an assumption
+  naming the JVM it declined on, and proving that path means running the client
+  suite on Java 17 or 21.
+- **Polaris refuses rather than filters.** A principal granted nothing does not
+  receive an empty list; it receives
+  `not authorized for op LIST_NAMESPACES`, naming the principal and the roles
+  it presented. That is the stronger behaviour — an empty answer is
+  indistinguishable from an empty catalog.
+
+The separation assertions were proven load-bearing by granting the probe
+principal `catalog_admin`: both fail with `ALLOWED` where a refusal is
+required.
 
 ## 8. What the fix does not cover
 

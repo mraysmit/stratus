@@ -78,6 +78,17 @@
             <artifactId>hadoop-aws</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- The platform jobs, run in this client's own driver. A client of the
+             platform runs job code the same way: submitted to the cluster from
+             its own process. Shelling out to spark-submit inside the master
+             container ran the cluster's copy of Spark and proved nothing about
+             the path a client takes. -->
+        <dependency>
+            <groupId>dev.stratus</groupId>
+            <artifactId>stratus-spark-jobs</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
