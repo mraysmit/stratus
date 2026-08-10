@@ -62,7 +62,7 @@ public final class MaintenanceJob {
         }
     }
 
-    static List<String> run(SparkSession spark, String targetTable, String[] operations,
+    public static List<String> run(SparkSession spark, String targetTable, String[] operations,
                             String olderThan, String retainLast) {
         String catalog = QualityCheckJob.splitIdentifier(targetTable)[0];
         var metrics = new ArrayList<String>();

@@ -171,6 +171,25 @@ final class SparkVerificationLogging {
                 safeToken(masterUrl));
     }
 
+    /** Records a platform job's outcome, as the status code it reports. */
+    static void jobCompleted(String principal, int exitCode, String detail) {
+        LOGGER.info("Platform job completed principal={} exitCode={}",
+                safeToken(principal), exitCode);
+        LOGGER.debug("Platform job detail principal={} detail={}",
+                safeToken(principal), safeToken(detail, 2048));
+    }
+
+    /** Records a principal a test provisioned, and what it was granted. */
+    static void principalProvisioned(String principal, String principalRole, String catalogRole) {
+        LOGGER.info("Principal provisioned principal={} principalRole={} catalogRole={}",
+                safeToken(principal), safeToken(principalRole), safeToken(catalogRole));
+    }
+
+    /** Records a principal removed, so a run leaves the catalog as it found it. */
+    static void principalRemoved(String principal) {
+        LOGGER.info("Principal removed principal={}", safeToken(principal));
+    }
+
     /** Records the standalone cluster's registered capacity. */
     static void clusterInspected(int workersAlive, int cores) {
         LOGGER.info("Cluster inspected workersAlive={} cores={}", workersAlive, cores);

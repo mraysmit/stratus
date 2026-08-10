@@ -89,6 +89,18 @@ principal=svc-spark`, and `PASS spark-cluster workers=2/2`.
 Every step is idempotent — re-running converges and reports
 `(already exists)`.
 
+**Confirm the OSDs are up before trusting a green start.** Container health is
+not the same as cluster health: an OSD whose process is running and whose
+container reports `Up` can still be marked down by the monitors, and every
+write then hangs rather than failing.
+
+```bash
+docker compose --project-name stratus-ceph-local exec -T mon1 ceph -s
+```
+
+`osd: 3 osds: 3 up` is the line that matters. Anything less means storage is
+not usable, whatever the rest of the platform says (§7).
+
 **After any Polaris restart, re-run the catalog bootstrap.** Polaris 1.5.0
 runs an in-memory metastore in this harness: the catalog, namespaces, and
 table registrations are discarded on shutdown while the underlying Ceph
@@ -371,6 +383,7 @@ lists and table properties). Filter one channel with
 | `POLARIS_ALLOW_HTTP=true in .env` on startup | an `.env` generated before TLS termination landed; delete it and re-run `polaris-compose-startup.sh` to regenerate from the template |
 | Live JVM tests fail on TLS or unknown host | missing hosts-file entry — run `ceph-compose-configure-hostname.sh`; the truststore itself is supplied by the wrapper |
 | `verify-storage` reports a stale image | rebuild the verifier image (§3.2) |
+| Every write hangs and then times out, while nothing reports an error | the OSDs have lost their monitor peering. See below — this one costs an hour if you look anywhere else first |
 | `NoSuchTable: platform.quality_check_results` | Polaris was restarted; re-run the catalog bootstrap (§2) |
 | Polaris cannot fetch `svc-polaris` | OpenBao was restarted; re-run `ceph-compose-provision-service-identities.sh` |
 | Rotation preflight refuses to run | `.env` and RGW disagree after a failed rotation; run `ceph-compose-rotate-secrets.sh --repair-keys` (§4), then re-run `--preflight` |
@@ -383,6 +396,52 @@ lists and table properties). Filter one channel with
 | Spark resolves the catalog but every write fails on PKIX | the executors are missing the truststore — check both `spark.driver.extraJavaOptions` and `spark.executor.extraJavaOptions` in the rendered `config/spark-defaults.conf` |
 | `rclone` reports a Windows path for `--ca-cert` | Git Bash path conversion — prefix the command with `MSYS_NO_PATHCONV=1` |
 | `Did not find winutils.exe` in a catalog transcript | benign Hadoop probe on Windows workstations; see [the catalog verifier README](../../verification/catalog/README.md) for the assessment |
+
+### OSDs marked down while their containers look healthy
+
+Observed 2026-08-10 on a harness that had been up for twenty hours. Every write
+hung; nothing said why.
+
+**What it looks like from above.** A Spark or catalog client waits and then
+reports a read timeout. Polaris logs an AWS SDK timeout with four retries,
+because Polaris is itself blocked writing table metadata. The RGW proxy logs
+the request as `499` — client gone — after thirty seconds, repeatedly:
+
+```text
+"PUT /stratus-bronze/bronze/<table>/metadata/00000-....metadata.json HTTP/1.1" 499
+```
+
+Read from the top down, this looks like a client fault, then a Polaris fault,
+then an RGW fault. It is none of them.
+
+**What it is.** The monitors have marked the OSDs down while the OSD processes
+are still alive:
+
+```text
+health: HEALTH_WARN
+        3 osds down
+osd: 3 osds: 0 up (since 7h), 3 in (since 27h)
+```
+
+Nothing else advertises this. `docker ps` shows the OSD containers `Up`, their
+logs show ordinary activity — scrubs completing, RocksDB statistics — and the
+data is intact. Only the container healthcheck reports `unhealthy`, which is
+easy to miss beside twelve healthy peers.
+
+**The remedy**, non-destructive; the data volumes are untouched:
+
+```bash
+docker compose --project-name stratus-ceph-local restart osd1 osd2 osd3
+docker compose --project-name stratus-ceph-local exec -T mon1 ceph -s
+```
+
+Wait for `3 up` before running anything. Recovery took under a minute, and the
+cluster returned to `HEALTH_OK` with all 594 objects present.
+
+**Why it is worth its own entry.** A daemon that is down reports itself. A
+daemon that is up but unreachable by its monitors reports nothing, and the
+symptom surfaces three services away from the cause. `ceph -s` is the cheap
+check and belongs in any diagnosis of a hang, before the client is suspected.
 
 ---
 

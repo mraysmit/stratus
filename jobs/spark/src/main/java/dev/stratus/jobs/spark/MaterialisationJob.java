@@ -70,7 +70,7 @@ public final class MaterialisationJob {
         }
     }
 
-    static long run(SparkSession spark, String[] sourceTables, String targetTable,
+    public static long run(SparkSession spark, String[] sourceTables, String targetTable,
                     String sql, String runId, Clock clock) {
         // Resolving each source first turns a typo into an error naming the
         // missing table, rather than an analysis failure inside the query.

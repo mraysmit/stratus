@@ -122,7 +122,12 @@ public final class IngestionJob {
         }
     }
 
-    static long run(SparkSession spark, String sourceFile, String targetTable, String sourceSystem,
+    /**
+     * The job, as a call. {@code main} is the command-line entry point and ends
+     * in a status code; this is what a client runs in its own driver, and what
+     * the live suite exercises.
+     */
+    public static long run(SparkSession spark, String sourceFile, String targetTable, String sourceSystem,
                     String batchId, String onExistingBatch, String schema, String runId, Clock clock) {
         Dataset<Row> batch = stamp(normalise(read(spark, sourceFile, schema)),
                 batchId, sourceFile, clock);

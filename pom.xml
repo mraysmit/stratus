@@ -78,6 +78,24 @@
                 <coverage.skip>true</coverage.skip>
                 <spark.integration.required>true</spark.integration.required>
             </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- One JVM per test class. A JVM holds a single
+                                 SparkContext, so a reused fork would hand the
+                                 next class the previous class's driver and its
+                                 identity — a suite testing two principals would
+                                 quietly test one twice. A fork per class also
+                                 matches what a client is: its own process. -->
+                            <reuseForks>false</reuseForks>
+                            <forkCount>1</forkCount>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
         <profile>
             <id>all-tests</id>
