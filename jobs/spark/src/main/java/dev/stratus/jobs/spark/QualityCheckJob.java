@@ -115,7 +115,7 @@ public final class QualityCheckJob {
         }
     }
 
-    static List<Row> run(SparkSession spark, String targetTable, String checksJson,
+    public static List<Row> run(SparkSession spark, String targetTable, String checksJson,
                          String runId, String pipelineRunId, Clock clock) {
         JsonNode definitions = readDefinitions(checksJson);
         Dataset<Row> target = spark.table(targetTable);

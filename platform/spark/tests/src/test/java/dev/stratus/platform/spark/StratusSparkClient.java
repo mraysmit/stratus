@@ -45,6 +45,19 @@ final class StratusSparkClient implements AutoCloseable {
         // the one it keeps, and the catalog client is created during startup.
         HarnessTruststore.installed();
 
+        // A JVM holds one SparkContext, and getOrCreate hands back whatever
+        // session already exists — with its identity, not the one asked for
+        // here. Two test classes in one fork would silently share a principal,
+        // and a suite that believes it is testing separation would be testing
+        // one client twice. Refusing is the only way that failure is visible.
+        var active = SparkSession.getActiveSession();
+        if (active.isDefined() || SparkSession.getDefaultSession().isDefined()) {
+            throw new IllegalStateException("A Spark session already exists in this JVM, and "
+                    + config.applicationName() + " would silently inherit its identity. Use "
+                    + "asAnotherPrincipal for a second client in the same driver, or run this "
+                    + "class in its own fork.");
+        }
+
         String catalog = "spark.sql.catalog." + config.catalogName();
         SparkSession session = SparkSession.builder()
                 .appName(config.applicationName())
@@ -91,6 +104,45 @@ final class StratusSparkClient implements AutoCloseable {
         var client = new StratusSparkClient(config, session);
         SparkVerificationLogging.clientConnected(config.applicationName(), config.principalId(),
                 client.applicationId(), config.masterUrl());
+        return client;
+    }
+
+    /**
+     * A second client of the same cluster, authenticating as another principal.
+     *
+     * <p>A JVM has one {@code SparkContext}, and
+     * {@code SparkSession.builder().getOrCreate()} hands back the existing
+     * session whatever configuration it is asked for. Calling {@code connect}
+     * twice would therefore produce two objects sharing one identity, and a
+     * test for principal separation would pass while using a single principal —
+     * the worst kind of green.
+     *
+     * <p>{@code newSession} gives an isolated SQL configuration over the shared
+     * context, which is what lets a second catalog client authenticate as
+     * someone else. The two share the cluster application, so this proves
+     * per-principal authorisation rather than two independent drivers; two
+     * drivers means two JVMs, which is a property of the cluster rather than of
+     * a client.
+     */
+    StratusSparkClient asAnotherPrincipal(SparkClientConfig other) {
+        SparkSession isolated = session.newSession();
+        String catalog = "spark.sql.catalog." + other.catalogName();
+        isolated.conf().set(catalog, "org.apache.iceberg.spark.SparkCatalog");
+        isolated.conf().set(catalog + ".type", "rest");
+        isolated.conf().set(catalog + ".uri", other.catalogUri());
+        isolated.conf().set(catalog + ".credential", other.principalCredential());
+        isolated.conf().set(catalog + ".scope", "PRINCIPAL_ROLE:ALL");
+        isolated.conf().set(catalog + ".warehouse", other.catalogName());
+        isolated.conf().set(catalog + ".header.X-Iceberg-Access-Delegation", "none");
+        isolated.conf().set(catalog + ".io-impl", "org.apache.iceberg.aws.s3.S3FileIO");
+        isolated.conf().set(catalog + ".s3.endpoint", other.storageEndpoint());
+        isolated.conf().set(catalog + ".s3.access-key-id", other.storageAccessKey());
+        isolated.conf().set(catalog + ".s3.secret-access-key", other.storageSecretKey());
+        isolated.conf().set(catalog + ".s3.path-style-access", "true");
+
+        var client = new StratusSparkClient(other, isolated);
+        SparkVerificationLogging.clientConnected(other.applicationName(), other.principalId(),
+                client.applicationId(), other.masterUrl());
         return client;
     }
 

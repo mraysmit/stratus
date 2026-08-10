@@ -92,6 +92,33 @@ harden_windows_acl() {
   done
 }
 
+# Container health is not cluster health. An OSD whose process is alive and
+# whose container reports healthy can still be marked down by the monitors, and
+# every write then hangs for thirty seconds and fails as a client timeout —
+# three services away from the cause. 'compose up --wait' cannot see this: it
+# waits on healthchecks, and asks the cluster nothing.
+#
+# Observed 2026-08-10 on a harness that had been up for twenty hours. Nothing
+# reported it: the containers said Up, the OSD logs showed scrubs completing,
+# and only 'ceph -s' knew. So startup asks the cluster directly, and refuses to
+# report success until the storage is usable.
+require_osds_up() {
+  local expected="${CEPH_EXPECTED_OSDS:-3}"
+  local deadline=$(( SECONDS + ${CEPH_OSD_READY_DEADLINE_SECONDS:-180} ))
+  local status up
+  while (( SECONDS < deadline )); do
+    # 'ceph osd stat' answers in one line: "3 osds: 3 up (since 1m), 3 in ...".
+    status="$(compose exec -T mon1 ceph osd stat 2>/dev/null || true)"
+    up="$(printf '%s' "$status" | sed -nE 's/.*: *([0-9]+) up.*/\1/p')"
+    if [[ "$up" == "$expected" ]]; then
+      log "READY osds=$up/$expected"
+      return 0
+    fi
+    sleep 5
+  done
+  fail "Only ${up:-0} of $expected OSDs are up after ${CEPH_OSD_READY_DEADLINE_SECONDS:-180}s, so every write will hang rather than fail. Check 'ceph -s'; if the OSD processes are alive but marked down, restart them: $(compose_runtime) compose --project-name $CEPH_COMPOSE_PROJECT restart osd1 osd2 osd3"
+}
+
 # The harness pins its network to 172.28.0.0/24. A foreign network on that
 # subnet (for example a cluster left running under an old project name) makes
 # 'compose up' fail with a cryptic pool-overlap error; fail early and name it.

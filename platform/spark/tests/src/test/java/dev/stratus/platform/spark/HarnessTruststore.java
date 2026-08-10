@@ -15,6 +15,8 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 
 /**
  * A truststore carrying the harness certificate authorities, built in this JVM.
@@ -71,14 +73,41 @@ final class HarnessTruststore {
         authorities.put("stratus-ceph-lab-ca", HarnessConnection.cephCertificateAuthority());
         authorities.put("stratus-polaris-lab-ca", HarnessConnection.polarisCertificateAuthority());
 
-        build(target, authorities);
+        KeyStore store = build(target, authorities);
+
+        // Both, and in this order, because they reach different things.
+        //
+        // The properties are read when the JVM first builds its default
+        // SSLContext, and are all a library that constructs its own context
+        // will see. But the default context is built once and cached, and
+        // anything that has already made an HTTPS connection — or merely
+        // constructed an HttpClient, which resolves the default eagerly — has
+        // fixed it. Replacing the default outright is what makes this work
+        // regardless of what ran first, and PKIX failures against a truststore
+        // that plainly contains the right CA are what happens without it.
         System.setProperty("javax.net.ssl.trustStore", target.toString());
         System.setProperty("javax.net.ssl.trustStorePassword", PASSWORD);
+        replaceDefaultContext(store);
+
         built = target;
         return target;
     }
 
-    private static void build(Path target, Map<String, Path> authorities) {
+    private static void replaceDefaultContext(KeyStore store) {
+        try {
+            var trustManagers = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            trustManagers.init(store);
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, trustManagers.getTrustManagers(), null);
+            SSLContext.setDefault(context);
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException(
+                    "Failed to trust the harness certificate authorities", exception);
+        }
+    }
+
+    private static KeyStore build(Path target, Map<String, Path> authorities) {
         try {
             KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
             Path defaults = Path.of(System.getProperty("java.home"), "lib", "security", "cacerts");
@@ -102,6 +131,7 @@ final class HarnessTruststore {
             try (OutputStream out = Files.newOutputStream(target)) {
                 store.store(out, PASSWORD.toCharArray());
             }
+            return store;
         } catch (IOException exception) {
             throw new UncheckedIOException("Failed to build " + target, exception);
         } catch (GeneralSecurityException exception) {

@@ -93,7 +93,7 @@ public final class TransformJob {
         }
     }
 
-    static long run(SparkSession spark, String sourceTable, String targetTable, String[] businessKey,
+    public static long run(SparkSession spark, String sourceTable, String targetTable, String[] businessKey,
                     String sequenceColumn, String sourceBatch, String runId, Clock clock) {
         Dataset<Row> source = spark.table(sourceTable);
         for (String column : businessKey) {
