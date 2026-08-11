@@ -345,44 +345,53 @@ per check (`name` / `passed` / `detail`):
 evidence to `storage-verification-<timestamp>-FAILED.json`, and stops with a
 non-zero status.
 
-**`ceph-compose-verify-security`** — [ceph-compose-verify-security.sh](scripts/verify/ceph-compose-verify-security.sh) — runs three *negative* tests
-where **failure of the operation is the expected, asserted outcome**. Each run
-is bracketed with an `EXPECTED`-failure banner so the transcript self-documents;
-authentication errors, access-denied errors, and PKIX certificate errors in this
-output are supposed to be there.
+**`ceph-compose-verify-security`** — [ceph-compose-verify-security.sh](scripts/verify/ceph-compose-verify-security.sh) — runs one *negative* test
+where **failure of the operation is the expected, asserted outcome**. The run is
+bracketed with an `EXPECTED`-failure banner so the transcript self-documents;
+PKIX certificate errors in this output are supposed to be there.
 
 | # | Mode / service | What must happen | Evidence file |
 |---|---|---|---|
-| 1 | `AUTH_FAILURE` (deliberately invalid secret) | RGW rejects the bad credentials | `storage-invalid-credentials-<ts>.json` |
-| 2 | `ACCESS_DENIED` | The verifier is denied listing a bucket owned by a separate identity | `storage-cross-identity-denial-<ts>.json` |
-| 3 | `verifier-untrusted` service (no Compose CA) | The JVM rejects the RGW certificate (fails closed on TLS) | `storage-untrusted-tls-<ts>.log` |
+| 1 | `verifier-untrusted` service (no Compose CA) | The JVM rejects the RGW certificate (fails closed on TLS) | `storage-untrusted-tls-<ts>.log` |
 
-The script asserts on evidence **content**, not just exit codes. For tests 1 and
-2 it requires the report to contain `"name":"...","passed":true` (meaning the
-denial genuinely occurred); a verifier that merely exits 0 without denial
-evidence is rejected. For test 3 it requires exit code `2` **and** the output to
-match `PKIX`, `SSLHandshake`, or `certification path`.
+The script asserts more than an exit code: it requires exit code `2` **and**
+output matching `PKIX`, `SSLHandshake`, or `certification path`. Requiring `2`
+rather than merely non-zero is what rejects a vacuous verifier that exits
+cleanly without proving anything — the regression
+`ceph-compose-verify-harness` exercises.
 
-**Expected result:** three `PASS ...` lines, each naming its evidence file, and a
-`NEGATIVE TESTS COMPLETE` banner. If a negative test's *denial* does not occur —
-for example RGW accepts bad credentials, or Java trusts an untrusted cert — the
-script fails loudly; that is a real security regression, not a flaky test.
+This is the only security negative left in a script, because the trust store
+belongs to the image and the Compose service and no JVM test on the workstation
+can express it. The credential and cross-identity negatives are product
+behavior; they are asserted by `CephRgwConformanceTest` against the same
+verifier modes, and were removed from this script on 2026-08-11 under code style
+rules 10.1. Run `verify/ceph-compose-run-live-tests` for those.
+
+**Expected result:** one `PASS untrusted-tls ...` line naming its evidence file,
+and a `NEGATIVE TEST COMPLETE` banner. If the denial does not occur — Java
+trusts an untrusted cert — the script fails loudly; that is a real security
+regression, not a flaky test.
 
 **`ceph-compose-verify-dashboard`** — [ceph-compose-verify-dashboard.sh](scripts/verify/ceph-compose-verify-dashboard.sh) —
 verifies the REST API for the Ceph admin console (Ceph Dashboard), published on
 port `8444`. This management interface is distinct from the S3 API on `8443`.
 The checks run with curl and jq inside `mon1`, so they cross the same nginx TLS
 proxy a browser or API client uses, and the dashboard credentials plus the CA
-travel over stdin — never on a command line or into the evidence. Six checks,
-one result per check:
+travel over stdin — never on a command line or into the evidence.
 
-`dashboard-authentication` (`POST /api/auth` answers 201 with a session token)
-→ `unauthenticated-request-rejected` (`GET /api/summary` without a token
-answers 401 — real product behavior, not a simulation) → `cluster-health`
-(`GET /api/health/minimal` reports `HEALTH_OK`) → `daemon-inventory` (three
-monitors in the map, three OSDs up and in) → `reported-version` (the summary
-identifies a Ceph version) → `session-logout` (`POST /api/auth/logout` revokes
-the session the test created).
+Three checks, all of them properties of this deployment rather than of the
+product: `cluster-health` (`GET /api/health/minimal` reports `HEALTH_OK`) →
+`daemon-inventory` (three monitors in the map, three OSDs up and in) →
+`reported-version` (the summary identifies a Ceph version).
+
+Signing in through `POST /api/auth` is recorded as a **precondition**, because
+those three endpoints need a token, and `POST /api/auth/logout` as **cleanup**,
+so no run leaves a live session behind. Neither is a conformance check.
+
+Dashboard API behavior — that an unauthenticated caller is rejected, that the
+dashboard RGW identity can create and delete a bucket, that logout genuinely
+revokes the token — is asserted by `CephDashboardRestConformanceTest`. Those
+checks were removed from this script on 2026-08-11 under code style rules 10.1.
 
 **Expected result:** the script prints the evidence JSON, which must contain
 `"success": true` with every check `"passed": true`, and ends with a
@@ -611,10 +620,8 @@ inverted meaning for the negatives, where `"success":true` means the denial
 | `storage-verification-<ts>-FAILED.json` | `ceph-compose-verify-storage` on failure | At least one conformance check failed; open it to see which |
 | `environment-<ts>.json` | `ceph-compose-verify-storage` | Snapshot of runtime, image digests, and cluster state for the same run |
 | `storage-verifier-<ts>.0.log` | `ceph-compose-verify-storage` | Per-run verifier log; single-line ISO-8601 timestamped records |
-| `storage-invalid-credentials-<ts>.json` | `ceph-compose-verify-security` | RGW rejected invalid credentials |
-| `storage-cross-identity-denial-<ts>.json` | `ceph-compose-verify-security` | RGW denied cross-identity bucket access |
 | `storage-untrusted-tls-<ts>.log` | `ceph-compose-verify-security` | Captured output showing the JVM rejected the untrusted certificate (this is a log, not JSON) |
-| `dashboard-verification-<ts>.json` | `ceph-compose-verify-dashboard` | Every Ceph Dashboard REST API check passed, including the 401 for unauthenticated requests |
+| `dashboard-verification-<ts>.json` | `ceph-compose-verify-dashboard` | This cluster is `HEALTH_OK` and matches its declared three-monitor, three-OSD topology |
 | `dataset-verification-<ts>.json` | `ceph-compose-verify-dataset` | The generated dataset uploaded, read back byte-for-byte identical, and was purged |
 
 Evidence must never contain RGW secret keys, CA private keys, or the TLS server

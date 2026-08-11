@@ -81,6 +81,12 @@ final class SparkPipelineVerificationTest {
 
     @AfterAll
     static void removeProbeTablesAndObjects() {
+        if (!LiveSparkCluster.enabled()) {
+            // Nothing ran, so there is nothing to clean. JUnit runs this even
+            // when @BeforeAll aborted, and dropping a table on a cluster that
+            // was never up reports a cleanup failure for a suite that skipped.
+            return;
+        }
         // Asserted, not assumed. A cleanup whose result is discarded fails
         // silently and leaves probe tables in a governed zone while the suite
         // still reports green — which is exactly how the S3A cleanup went

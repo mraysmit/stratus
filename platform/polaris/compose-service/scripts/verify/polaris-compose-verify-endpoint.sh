@@ -6,8 +6,10 @@ source "$(dirname "$0")/../lib/polaris-compose-common.sh"
 
 # Liveness smoke check only: proves the Polaris API is listening on the
 # loopback port. It is NOT the catalog conformance; catalog behavior is proven
-# by the live verification suite planned under verification/catalog. An
-# unauthenticated 401/403 still proves liveness, so both count as listening.
+# by IcebergRestCatalogConformanceTest and the rest of the live suite under
+# verification/catalog, run through verify/polaris-compose-run-catalog-tests.sh
+# (code style rules 10.1). An unauthenticated 401/403 still proves liveness, so
+# both count as listening.
 
 load_environment
 [[ "$(compose ps --services --status running)" == *polaris* ]] \

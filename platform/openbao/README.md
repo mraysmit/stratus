@@ -26,7 +26,7 @@ bash scripts/lifecycle/openbao-compose-shutdown.sh
 | Script | What it does |
 |---|---|
 | `lifecycle/openbao-compose-startup.sh` | Generates `.env` once with a per-machine dev root token, writes the token to `private/root-token` (owner-only) for consumer scripts, starts the store, waits for health |
-| `verify/openbao-compose-verify-endpoint.sh` | Health check plus an authenticated KV v2 write/read/delete round trip |
+| `verify/openbao-compose-verify-endpoint.sh` | Liveness only: the store answers on the loopback port and the token file is on disk. KV behavior belongs to the conformance suite below |
 | `verify/openbao-compose-run-secrets-tests.sh` | Runs the live secret-store conformance suite (`stratus-secrets-verifier`): KV round trips, rotation versioning, forged/missing-token refusals, and the published service-identity layout; per-run transcripts land in `logs/` |
 | `lifecycle/openbao-compose-shutdown.sh` | Idempotent stop; dev-mode secrets are discarded by design |
 

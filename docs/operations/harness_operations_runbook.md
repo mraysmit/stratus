@@ -58,8 +58,10 @@ harnesses above and never starts them itself:
 ```bash
 bash platform/spark/compose-cluster/scripts/lifecycle/spark-compose-startup.sh
 bash platform/spark/compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
-bash platform/spark/compose-cluster/scripts/verify/spark-compose-verify-cluster.sh
 ```
+
+Worker registration is proven by `SparkClusterConformanceTest` in the live
+suite below, not by a separate script (code style rules 10.1).
 
 The first Spark start needs the runtime image, which the harness never builds
 for you (P1-0.1). Resolve its artifacts and build it once:
@@ -319,7 +321,7 @@ exits before any rotation state is generated. Re-run `--preflight` afterwards
 to confirm the cluster is ready.
 
 The original observations are recorded in
-[harness_verification_handover-5-Aug-2026.md](harness_verification_handover-5-Aug-2026.md).
+[harness_verification_handover-5-Aug-2026.md](archive/harness_verification_handover-5-Aug-2026.md).
 
 ---
 

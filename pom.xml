@@ -106,6 +106,7 @@
                 <ceph.integration.required>true</ceph.integration.required>
                 <catalog.integration.required>true</catalog.integration.required>
                 <secrets.integration.required>true</secrets.integration.required>
+                <spark.integration.required>true</spark.integration.required>
             </properties>
         </profile>
         <profile>

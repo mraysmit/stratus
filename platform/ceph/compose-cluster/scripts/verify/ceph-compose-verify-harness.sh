@@ -78,7 +78,7 @@ openssl_run verify -CAfile "$staged_certificate_root/certs/stratus-ca.crt" \
   || fail "The staged replacement endpoint certificate does not verify against its CA"
 log "PASS isolated-forced-ca-rotation"
 
-scenario "ceph-compose-verify-security rejects a verifier that exits 0 without denial evidence"
+scenario "ceph-compose-verify-security rejects a verifier that exits 0 instead of failing the untrusted-TLS handshake"
 if [[ ! -f "$HARNESS_DIR/.env" ]]; then
   sed 's/generated-at-first-startup/harness-check-placeholder/' "$HARNESS_DIR/.env.template" >"$HARNESS_DIR/.env"
   created_env=true
@@ -97,9 +97,11 @@ cp "$tmp_dir/env-original" "$HARNESS_DIR/.env"
 rm -f "$tmp_dir/env-original"
 find "$HARNESS_DIR/evidence" -maxdepth 1 -name 'storage-*' -newer "$tmp_dir/marker" -delete 2>/dev/null || true
 if [[ "$status" -eq 0 ]]; then
-  fail "ceph-compose-verify-security accepted a verifier that exits 0 without denial evidence"
+  fail "ceph-compose-verify-security accepted a verifier that exits 0 without proving anything"
 fi
-printf '%s\n' "$output" | grep -q "does not show invalid credentials being rejected" \
+# The exit code is what exposes the vacuous verifier: the untrusted-TLS
+# negative requires 2, and a verifier that proves nothing exits 0.
+printf '%s\n' "$output" | grep -q "Expected untrusted TLS verifier exit code 2 but received 0" \
   || fail "ceph-compose-verify-security failed for an unexpected reason: $output"
 log "PASS vacuous-verifier-rejected"
 

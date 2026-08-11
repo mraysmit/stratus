@@ -11,11 +11,16 @@ The default invocation applies these properties to every Java module:
 | Property | Default | Meaning |
 |---|---|---|
 | `test.groups` | empty | Do not positively filter tests; run tagged and untagged tests unless explicitly excluded |
-| `test.excludedGroups` | `ceph-integration` | Exclude tests requiring a live secured Ceph RGW endpoint |
+| `test.excludedGroups` | `ceph-integration \| catalog-integration \| secrets-integration \| spark-integration` | Exclude every suite that requires a live product harness |
 | `coverage.skip` | `false` | Generate the JaCoCo coverage report |
 | `ceph.integration.required` | `false` | Permit the live Ceph tests to remain unselected |
+| `catalog.integration.required` | `false` | Permit the live catalog tests to remain unselected |
+| `secrets.integration.required` | `false` | Permit the live secret-store tests to remain unselected |
+| `spark.integration.required` | `false` | Permit the live Spark tests to remain unselected |
 
-Therefore, `mvnw clean verify` is the complete local regression command. It runs every test that does not require the live Ceph environment, including any accidentally untagged test, builds the deployable artifact, and generates the JaCoCo report. Coverage is reported, never gated: simulated product endpoints are prohibited (code_style_rules.md 7.2), so storage behavior — and the coverage it produces — is proven against the live local Ceph cluster instead.
+The approved tags are exactly `unit`, `ceph-integration`, `catalog-integration`, `secrets-integration`, and `spark-integration`. Every test class carries one.
+
+Therefore, `mvnw clean verify` is the complete local regression command. It runs every test that does not require a live product harness, including any accidentally untagged test, builds the deployable artifact, and generates the JaCoCo report. Coverage is reported, never gated: simulated product endpoints are prohibited (code_style_rules.md 7.2), so product behavior — and the coverage it produces — is proven against the live local harnesses instead.
 
 ## Available Profiles
 
@@ -27,10 +32,16 @@ Therefore, `mvnw clean verify` is the complete local regression command. It runs
 | `-Pcatalog-integration-tests` | `catalog-integration` | no | running local Ceph and Polaris harnesses | Targeted live catalog conformance run (use `verify/polaris-compose-run-catalog-tests.sh`) |
 | `-Psecrets-integration-tests` | `secrets-integration` | no | running local OpenBao harness | Targeted live secret-store conformance run (use `verify/openbao-compose-run-secrets-tests.sh`) |
 | `-Pspark-integration-tests` | `spark-integration` | no | running local Ceph, OpenBao, Polaris and Spark harnesses | Targeted live Spark cluster and batch pipeline run (use `verify/spark-compose-run-live-tests.sh`) |
-| `-Pall-tests` | all tags | yes | running local Ceph, Polaris and Spark harnesses | Full offline plus live regression and acceptance boundary |
+| `-Pall-tests` | all tags | yes | running local Ceph, OpenBao, Polaris and Spark harnesses | Removes every tag filter; see the warning below before using it |
 | `-Puntagged-tests` | no known tag | no | none | Audit for tests missing an approved tag |
 
 Targeted profiles deliberately skip the aggregate coverage report because they execute only part of the production code. They are diagnostic commands, not completion evidence.
+
+## No Single Command Runs Everything
+
+`-Pall-tests` only removes the tag filters. It supplies no endpoint, credential, or truststore, so invoking `./mvnw ... -Pall-tests` bare will fail. Each live layer obtains its environment from its own harness wrapper script, and no single wrapper supplies the environment of another — the Ceph wrapper knows nothing of Polaris.
+
+A complete sweep is therefore the offline regression followed by each live layer through its own wrapper, as set out in [harness_operations_runbook.md](../operations/harness_operations_runbook.md) section 3. `-Pall-tests` is useful passed *through* a wrapper, to widen that layer's run (see Running Live Profiles Through a Wrapper below).
 
 ## Validation Rules
 
@@ -42,9 +53,31 @@ clean verify
 
 Use `clean` to prevent stale compiled classes from contaminating the result. `test` alone is useful while diagnosing a known failure but is not a completion command because it does not execute packaging and the `verify` quality gates.
 
-Changes affecting Ceph endpoint behavior, TLS, credentials, request signing, path-style routing, bucket policy, object operations, multipart behavior, or cleanup MUST additionally pass `-Pall-tests` against the approved live Ceph environment.
+A change MUST additionally pass the live layer it affects, run through that layer's wrapper:
 
-The live profile requires all of the following:
+| A change affecting | must also pass | wrapper |
+|---|---|---|
+| Ceph endpoint behavior, TLS, credentials, request signing, path-style routing, bucket policy, object operations, multipart behavior, cleanup | `ceph-integration` | `platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh` |
+| Iceberg table behavior, zone namespaces, schema evolution, snapshot expiry, partition layout, catalog credentials | `catalog-integration` | `platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh` |
+| Secret storage, retrieval, or the secret-store client | `secrets-integration` | `platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh` |
+| Spark jobs, batch pipeline semantics, client submission, principal separation | `spark-integration` | `platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh` |
+
+A change spanning several layers must pass each of them.
+
+## Live Environment
+
+Each wrapper supplies its own layer's environment and asserts its own enabling flag, so a live suite can never silently report success after skipping:
+
+| Layer | Enabling flag the wrapper sets | Module it selects |
+|---|---|---|
+| Ceph | `CEPH_RGW_INTEGRATION=true` | `:stratus-ceph-tests` |
+| Catalog | `STRATUS_CATALOG_INTEGRATION` | `:stratus-catalog-verifier` |
+| Secrets | `STRATUS_SECRETS_INTEGRATION` | `:stratus-secrets-verifier` |
+| Spark | `STRATUS_SPARK_INTEGRATION` | `:stratus-spark-tests` |
+
+The catalog, secrets, and Spark wrappers also default `STRATUS_LOG_LEVEL=DEBUG`, so their transcripts prove both operational log levels.
+
+The Ceph live profile requires all of the following:
 
 ```dotenv
 CEPH_RGW_INTEGRATION=true
@@ -72,19 +105,22 @@ The Admin Operations identity is scoped to `buckets=read` and `usage=read` caps 
 
 The endpoint hostname must resolve on the machine executing Maven, and the endpoint CA must be trusted by the JVM executing Maven. Both are the caller's responsibility: these tests run in the Maven JVM on the workstation, not inside a container, so a Ceph harness whose own verification scripts pass from inside containers satisfies neither. For the Compose cluster this means a one-time hosts-file entry; see [platform/ceph/compose-cluster/README.md](../../platform/ceph/compose-cluster/README.md).
 
-Against the Compose cluster, do not wire the variables above by hand. Its `verify/ceph-compose-run-live-tests` script supplies them, builds the CA truststore, and passes its arguments through to Maven:
+## Running Live Profiles Through a Wrapper
+
+Against the Compose cluster, do not wire the variables above by hand. Each wrapper supplies its layer's environment — for Ceph, that includes building the CA truststore — and passes its arguments through to Maven, so a targeted or widened run keeps that environment:
 
 ```bash
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh clean verify -Pall-tests
+bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh test -Pcatalog-integration-tests
 ```
 
-To run the complete harness verification sequence — including the live Maven
+To run the complete Ceph harness verification sequence — including the live Maven
 conformance tests — as one command with a per-step transcript, use
 `verify/ceph-compose-validate-cluster.sh` (add `--full` to wrap the run in
 startup and shutdown).
 
-A selected live profile fails when `CEPH_RGW_INTEGRATION=true` is absent; it must never silently report success after skipping the Ceph test.
+A selected live profile fails when its enabling flag is absent; it must never silently report success after skipping the live test.
 
 ## PowerShell Commands
 
@@ -102,25 +138,18 @@ $timestamp = Get-Date -Format yyyyMMdd-HHmmss
     Tee-Object -FilePath "logs\local-regression-$timestamp.txt"
 ```
 
-### Full local and live Ceph regression
+### Live layers
 
-```powershell
-.\mvnw.cmd clean verify -Pall-tests 2>&1 |
-    Tee-Object -FilePath "logs\all-tests-$timestamp.txt"
-```
+Live suites are not run from PowerShell. The harness wrappers are bash-only
+(ADR-P1-002) and are the only supported way to supply a live environment; invoke
+them from Git Bash. `.\mvnw.cmd clean verify -Pall-tests` from PowerShell selects
+the live tests without any endpoint or credential and fails.
 
 ### Targeted unit diagnosis
 
 ```powershell
 .\mvnw.cmd test -Punit-tests -pl :stratus-storage-verifier 2>&1 |
     Tee-Object -FilePath "logs\storage-verifier-unit-$timestamp.txt"
-```
-
-### Targeted live Ceph diagnosis
-
-```powershell
-.\mvnw.cmd test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 |
-    Tee-Object -FilePath "logs\ceph-conformance-$timestamp.txt"
 ```
 
 ### Resume after a known reactor failure
@@ -163,23 +192,32 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 ./mvnw clean verify 2>&1 | tee "logs/local-regression-${timestamp}.txt"
 ```
 
-### Full local and live Ceph regression
+### Live layers, each through its own wrapper
+
+The wrappers write their own transcripts into the component's `logs/` directory; the repository-root `logs/` is for Maven build logs only.
 
 ```bash
-./mvnw clean verify -Pall-tests 2>&1 | tee "logs/all-tests-${timestamp}.txt"
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
+bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh
+bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh
+bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
 ```
 
-### Targeted profiles
+### Targeted offline profiles
 
 ```bash
 ./mvnw test -Punit-tests -pl :stratus-storage-verifier 2>&1 \
   | tee "logs/storage-verifier-unit-${timestamp}.txt"
 
-./mvnw test -Pceph-integration-tests -pl :stratus-ceph-tests -am 2>&1 \
-  | tee "logs/ceph-conformance-${timestamp}.txt"
-
 ./mvnw test -Puntagged-tests 2>&1 \
   | tee "logs/untagged-audit-${timestamp}.txt"
+```
+
+To narrow a live run to one module, append the Maven arguments to the wrapper rather than calling `./mvnw` directly:
+
+```bash
+bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh \
+  test -Pceph-integration-tests -pl :stratus-ceph-tests -am
 ```
 
 ### Inspect the result
@@ -217,7 +255,7 @@ Expected values:
 
 ```text
 test.groups=(empty)
-test.excludedGroups=ceph-integration
+test.excludedGroups=ceph-integration | catalog-integration | secrets-integration | spark-integration
 coverage.skip=false
 ```
 
@@ -225,16 +263,16 @@ coverage.skip=false
 
 ```powershell
 .\mvnw.cmd help:effective-pom -pl :stratus-ceph-tests -Pall-tests 2>&1 |
-    Select-String -Pattern 'test.groups|test.excludedGroups|ceph.integration.required'
+    Select-String -Pattern 'test.groups|test.excludedGroups|integration.required'
 ```
 
-Expected behavior: included and excluded group values are empty, and `ceph.integration.required=true`.
+Expected behavior: included and excluded group values are empty, and each `<layer>.integration.required` is `true`.
 
 ### Confirm profiles exist only in the root POM
 
 ```powershell
 Get-ChildItem -Recurse -Filter pom.xml |
-    Select-String -Pattern '<id>(unit-tests|ceph-integration-tests|all-tests|untagged-tests)</id>'
+    Select-String -Pattern '<id>(unit-tests|ceph-integration-tests|catalog-integration-tests|secrets-integration-tests|spark-integration-tests|all-tests|untagged-tests)</id>'
 ```
 
 Every match MUST refer to the repository root `pom.xml`. A match in a module POM means test-selection policy has been decentralized and must be corrected.
@@ -242,30 +280,41 @@ Every match MUST refer to the repository root `pom.xml`. A match in a module POM
 ### Confirm every test class has an approved tag
 
 ```powershell
+$approved = 'unit|ceph-integration|catalog-integration|secrets-integration|spark-integration'
 Get-ChildItem -Recurse -Filter '*Test.java' |
     ForEach-Object {
-        if (-not (Select-String -Quiet -LiteralPath $_.FullName -Pattern '@Tag\("(unit|ceph-integration)"\)')) {
+        if (-not (Select-String -Quiet -LiteralPath $_.FullName -Pattern "@Tag\(`"($approved)`"\)")) {
             $_.FullName
         }
     }
 ```
 
-Expected output: none.
+Expected output: none. This is a static cross-check on the source; `-Puntagged-tests` is the executing equivalent and must report zero tests.
 
 ## Current Module Notes
 
 - `stratus-storage-verifier` owns the executable verifier and its offline unit
   tests: pure logic and real environmental failures only.
+- `stratus-catalog-verifier` and `stratus-secrets-verifier` own the
+  product-neutral catalog and secret-store conformance suites.
 - `stratus-ceph-tests` under `platform/ceph/tests` owns
   `CephRgwConformanceTest`, the implementation-neutral product-compatibility
   boundary. It runs the full S3 conformance, missing-bucket detection, both
   security negatives, consistency, pagination, multipart cleanup, evidence
   writing, and exit semantics against whichever live Ceph RGW implementation
   the environment supplies. It is not selected by the default local regression.
-- Mockito, all other mocking frameworks, and simulated S3 endpoints of any
-  kind are prohibited. Tests against a simulated Ceph are worthless as
+- `stratus-spark-tests` under `platform/spark/tests` owns the live cluster,
+  client-submission, batch-pipeline, incremental-load, and principal-separation
+  suites. Under `-Pspark-integration-tests` Surefire sets `reuseForks=false`:
+  a JVM holds one `SparkContext`, so a reused fork would hand the next class the
+  previous class's driver and identity.
+- `stratus-spark-jobs` under `jobs/spark` owns the platform job code and its
+  offline unit tests.
+- Mockito, all other mocking frameworks, and simulated product endpoints of any
+  kind are prohibited. Tests against a simulated product are worthless as
   verification (code_style_rules.md 7.2).
-- JaCoCo reports are generated under `verification/storage/target/site/jacoco/`.
+- JaCoCo reports are generated under each verifier module's
+  `target/site/jacoco/`.
 - Surefire reports are generated under each module's `target/surefire-reports/`,
   including `platform/ceph/tests/target/surefire-reports/`.
 
@@ -276,7 +325,7 @@ Expected output: none.
 - [ ] The saved Maven log contains no build, logging-binding, packaging, or test-fixture warnings.
 - [ ] INFO and DEBUG logging assertions passed.
 - [ ] The untagged audit executes zero tests after adding or moving test classes.
-- [ ] `-Pall-tests` passed when the change affects the live Ceph conformance suite.
+- [ ] Every live layer the change affects passed through its own wrapper, per the Validation Rules table.
 - [ ] No test was silently skipped by a selected profile.
 - [ ] No module POM contains a test-selection profile.
 - [ ] No child POM pins dependency or plugin versions.
