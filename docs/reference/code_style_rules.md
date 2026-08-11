@@ -149,9 +149,9 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Health checks MUST validate component contracts where possible, not merely process existence.
 - Persistent data, logs, and evidence MUST use explicit mounts with documented ownership and retention.
 
-## 10. Shell and PowerShell
+## 10. Shell Scripts
 
-- Supported operational workflows MUST provide equivalent Bash and PowerShell entry points unless the target environment is explicitly OS-specific.
+- Harness scripts are Bash only (ADR-P1-002). PowerShell twins MUST NOT be added; on Windows the scripts are invoked from Git Bash.
 - Scripts MUST be idempotent: repeating startup, shutdown, bootstrap, or prerequisite installation must converge safely.
 - Bash scripts MUST use `set -euo pipefail`.
 - PowerShell scripts MUST use `$ErrorActionPreference = 'Stop'`.
@@ -160,6 +160,22 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. A devia
 - Scripts MUST return a non-zero exit status on failure.
 - Destructive operations MUST validate their resolved target before deletion or movement.
 - Secrets MUST NOT be printed, passed in command history unnecessarily, or written to world-readable files.
+
+### 10.1 Scripts operate the platform; tests verify it
+
+A harness script starts, stops, bootstraps, provisions, and probes liveness. It
+does not assert product behavior. Where a JUnit suite could make an assertion,
+the JUnit suite owns it — a check written twice drifts, and the bash copy is
+always the weaker one, because it has no test framework behind it.
+
+- A script MAY probe liveness: the endpoint answers, the service is registered, the port is open. It MAY assert its own preconditions and the success of its own cleanup.
+- A script MUST NOT assert product behavior that a tagged JUnit suite covers or could cover — round trips, authorization outcomes, protocol responses, data correctness.
+- A script MAY assert what no JVM test can express: container topology, image contents, daemon-level failover, and the behavior of the scripts themselves.
+- Test-selection policy stays in the root POM. A wrapper script MAY supply the live environment a suite needs and pass its arguments to Maven; it MUST NOT interpret the result or reimplement what the suite checks.
+- When a script and a suite overlap, delete the script's copy and say in the script's header comment what it deliberately does not check, naming the suite that does.
+
+The model is `polaris-compose-verify-endpoint.sh`, which states in its header
+that it proves liveness only and names the suite that proves catalog behavior.
 
 ## 11. Documentation Style
 

@@ -249,8 +249,8 @@ In the order you meet them:
 | `verify/ceph-compose-provision-service-identities` | Provisions the platform service identities declared in [`service-identities.conf`](service-identities.conf): generates credentials into `.env`, creates the RGW users and same-named STS roles, applies one merged bucket policy per bucket, publishes each identity to the OpenBao store when it is running (ADR-P1-004, with an explicit skip when it is not), and probes each identity positively and negatively. Developer harness only — production provisions identities through the approved secret-management process | After bucket bootstrap, once per cluster |
 | `verify/ceph-compose-verify-buckets` | Smoke check: lists every Stratus bucket through the TLS endpoint | Any time the cluster is up |
 | `verify/ceph-compose-verify-storage` | Runs the prebuilt Java verifier against the cluster; writes evidence reports, logs, and an environment snapshot | Verification runs |
-| `verify/ceph-compose-verify-security` | Runs the three security negatives: invalid credentials, cross-identity denial, untrusted TLS | Verification runs |
-| `verify/ceph-compose-verify-dashboard` | Verifies the Ceph admin console (Ceph Dashboard) REST API on port 8444: authentication, 401 for unauthenticated requests, `HEALTH_OK`, daemon inventory, version, and logout | Verification runs |
+| `verify/ceph-compose-verify-security` | Runs the untrusted-TLS negative, the one only a container can express. Credential rejection and cross-identity denial belong to `CephRgwConformanceTest` | Verification runs |
+| `verify/ceph-compose-verify-dashboard` | Reads this cluster's state through the admin console on port 8444: `HEALTH_OK`, daemon inventory, version. Dashboard API behavior belongs to `CephDashboardRestConformanceTest` | Verification runs |
 | `verify/ceph-compose-verify-dataset` | Generates a multi-file dataset, uploads it, reads every byte back (download compare plus a hash-matched copy), then purges the probe prefix | Verification runs |
 | `verify/ceph-compose-run-live-tests` | Runs the live Maven conformance tests in [../tests](../tests/README.md) against this cluster, supplying the environment, the live opt-in switch, and a CA truststore the workstation JVM needs. Arguments pass through to Maven | Verifying Java changes against the live cluster |
 | `verify/ceph-compose-validate-cluster` | Runs the whole verification sequence above in order — `bootstrap-buckets` through `run-live-tests` — with per-step results and a timestamped transcript in `logs/`. With `--full` it also wraps the run in `startup` and `shutdown`; after any failed step the cluster is left running for diagnosis | One-command comprehensive validation |
@@ -515,7 +515,7 @@ Verifier reports (pure JSON, written directly by the verifier via `STRATUS_EVIDE
 - RGW endpoint hostname without credentials
 - verifier image digest
 - bucket, object semantics, forced pagination, concurrency, multipart, and cleanup results
-- invalid-credential, cross-identity denial, and untrusted-TLS negative results
+- untrusted-TLS negative result (credential and cross-identity negatives are asserted by the live JVM suite, not by a script)
 - DEBUG operation/attempt logs when `STRATUS_LOG_LEVEL=DEBUG`
 
 Never include RGW secret keys, CA private keys, or the TLS server private key in evidence.

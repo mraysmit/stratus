@@ -56,6 +56,7 @@
                             <ceph.integration.required>${ceph.integration.required}</ceph.integration.required>
                             <catalog.integration.required>${catalog.integration.required}</catalog.integration.required>
                             <secrets.integration.required>${secrets.integration.required}</secrets.integration.required>
+                            <spark.integration.required>${spark.integration.required}</spark.integration.required>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
