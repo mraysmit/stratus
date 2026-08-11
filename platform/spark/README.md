@@ -46,7 +46,8 @@ docker build -f image/Dockerfile -t stratus/spark-runtime:dev image
 
 bash compose-cluster/scripts/lifecycle/spark-compose-startup.sh
 bash compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
-bash compose-cluster/scripts/verify/spark-compose-verify-cluster.sh
+
+# worker registration and everything else is proven by the live suite
 bash compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
 ```
 

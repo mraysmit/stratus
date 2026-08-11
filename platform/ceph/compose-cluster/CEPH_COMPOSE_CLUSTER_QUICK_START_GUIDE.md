@@ -248,18 +248,24 @@ JSON result must contain:
 "success": true
 ```
 
-`ceph-compose-verify-security` deliberately tries invalid credentials, cross-identity bucket
-access, and a TLS connection without the local CA. Error output during these
-three scenarios is expected; the script succeeds only when all three attempts
-are rejected for the intended reason.
+`ceph-compose-verify-security` deliberately opens a TLS connection without the
+local CA. Error output during that scenario is expected; the script succeeds
+only when the attempt is rejected for the intended reason — exit code 2 and a
+PKIX error, not merely a non-zero exit.
+
+Invalid credentials and cross-identity bucket access are negatives too, but
+they are product behavior and are asserted by `CephRgwConformanceTest` in the
+live JVM suite. Run `verify/ceph-compose-run-live-tests` for those.
 
 `ceph-compose-verify-dashboard` exercises the Ceph admin console (Ceph Dashboard) REST API
 on port `8444` — the management interface, distinct from the S3 API on `8443` —
 using the generated credentials from `.env`. It signs in through
-`POST /api/auth`, confirms an
-unauthenticated request is rejected with HTTP `401`, asserts `HEALTH_OK` and
+`POST /api/auth` as a precondition, asserts `HEALTH_OK` and
 the three-monitor, three-OSD inventory through `GET /api/health/minimal`,
-reads the cluster version, and logs the session out again. Its JSON result
+reads the cluster version, and logs the session out again as cleanup.
+Dashboard API behavior itself — the 401 for unauthenticated callers, the RGW
+write path, token revocation on logout — belongs to
+`CephDashboardRestConformanceTest` in the live suite. Its JSON result
 must contain `"success": true`.
 
 `ceph-compose-verify-dataset` generates a 24-file dataset inside the `s3client` container,
@@ -283,10 +289,8 @@ The scripts write ignored, persistent artifacts under `evidence/`:
 | `storage-verification-<timestamp>.json` | twelve-check S3 result |
 | `environment-<timestamp>.json` | runtime, image, Ceph status, and OSD snapshot |
 | `storage-verifier-<timestamp>.0.log` | timestamped rolling verifier log |
-| `storage-invalid-credentials-<timestamp>.json` | invalid credentials were rejected |
-| `storage-cross-identity-denial-<timestamp>.json` | cross-identity access was denied |
 | `storage-untrusted-tls-<timestamp>.log` | untrusted certificate was rejected |
-| `dashboard-verification-<timestamp>.json` | six-check Ceph Dashboard REST API result |
+| `dashboard-verification-<timestamp>.json` | cluster health, daemon inventory, and version as reported by the dashboard |
 | `dataset-verification-<timestamp>.json` | dataset upload, read-back, and cleanup result |
 
 Do not commit `.env`, private keys, or generated evidence. Do not put RGW secret
@@ -736,7 +740,7 @@ section, then continue to the full validation guide if the problem remains.
 | Startup reports `172.28.0.0/24` in use | Remove or reconfigure the other Docker network named by the startup error |
 | Git Bash rewrites `/certs` as `C:/Program Files/Git/certs` | Run the supplied scripts rather than reconstructing their raw Compose commands |
 | Script reports `bash\r` or `^M` | Restore LF endings; keep the repository `.gitattributes` rule for `*.sh` |
-| Security verification prints authentication, access-denied, or PKIX errors | These are expected inside the three negative scenarios; judge the final script result and evidence file |
+| Security verification prints PKIX errors | These are expected inside the untrusted-TLS negative; judge the final script result and evidence file |
 | Self-test refuses to run | Shut down and destructively reset the disposable cluster first |
 | `ceph-compose-verify-dashboard` reports an authentication failure | Read the current `CEPH_DASHBOARD_USER`/`CEPH_DASHBOARD_PASSWORD` from `.env` and require `mgr1` and `mgr2` to be healthy; the credentials are applied by `ceph-configure` during startup |
 | Dashboard name does not resolve | Add the workstation hosts-file entry from [Step 2](#step-2-make-the-dashboard-hostname-resolve-on-the-workstation); do not modify a container hosts file |

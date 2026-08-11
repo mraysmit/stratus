@@ -41,16 +41,26 @@ final class LiveSparkCluster {
     }
 
     /**
+     * Whether the live opt-in switch is set. A cleanup callback must consult
+     * this before touching the cluster: JUnit runs {@code @AfterAll} even when
+     * {@code @BeforeAll} aborted, so a suite that skipped for want of a cluster
+     * would otherwise fail on the cleanup rather than skip.
+     */
+    static boolean enabled() {
+        return Boolean.parseBoolean(System.getenv("STRATUS_SPARK_INTEGRATION"));
+    }
+
+    /**
      * Skips the calling test unless the live opt-in switch is set; under the
      * spark-integration profile the switch is required instead, so the profile
      * can never silently pass by skipping.
      */
     static void require() {
         if (Boolean.getBoolean("spark.integration.required")) {
-            assertTrue(Boolean.parseBoolean(System.getenv("STRATUS_SPARK_INTEGRATION")),
+            assertTrue(enabled(),
                     "STRATUS_SPARK_INTEGRATION=true is required by the selected Maven profile");
         }
-        assumeTrue(Boolean.parseBoolean(System.getenv("STRATUS_SPARK_INTEGRATION")),
+        assumeTrue(enabled(),
                 "Set STRATUS_SPARK_INTEGRATION=true to run against a live Spark cluster");
     }
 

@@ -4,12 +4,19 @@ set -euo pipefail
 # Date: 2026-07-22
 source "$(dirname "$0")/../lib/ceph-compose-common.sh"
 
-# Three negative tests against the live cluster: invalid credentials, a
-# cross-identity access attempt, and an untrusted TLS trust store. The
-# failures are real product behavior, not simulations, and each must fail
-# for the asserted reason. A verifier exit code alone is never trusted —
-# the recorded evidence is grepped for the specific denial, so a vacuous
-# verifier that exits cleanly without proving anything is rejected
+# One negative that only a container can express: a verifier run without the
+# harness CA must die in the TLS handshake. The trust store belongs to the
+# image and the Compose service, so no JVM test on the workstation can state
+# this — the verifier-untrusted service exists for exactly this check.
+#
+# It deliberately does NOT check that Ceph rejects invalid credentials or
+# denies cross-identity access. Those are product behavior and belong to
+# CephRgwConformanceTest.liveRgwRejectsInvalidCredentials and
+# liveRgwDeniesListingTheSeparateOwnersBucket, which drive the same verifier
+# modes and assert the same evidence (code style rules 10.1).
+#
+# A verifier exit code alone is never trusted: requiring exit code 2 and a
+# PKIX error means a vacuous verifier that exits cleanly is still rejected
 # (ceph-compose-verify-harness.sh exercises exactly that regression).
 
 load_environment
@@ -18,26 +25,7 @@ evidence_dir="${HARNESS_DIR}/evidence"
 mkdir -p "$evidence_dir"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
-log "=== NEGATIVE TEST 1/3: invalid credentials — authentication failures below are EXPECTED ==="
-auth_evidence="${evidence_dir}/storage-invalid-credentials-${timestamp}.json"
-compose run --rm --no-deps -T \
-  -e STRATUS_VERIFICATION_MODE=AUTH_FAILURE \
-  -e CEPH_RGW_SECRET_KEY=deliberately-invalid-local-secret \
-  -e "STRATUS_EVIDENCE_FILE=/evidence/storage-invalid-credentials-${timestamp}.json" \
-  verifier java -jar /opt/stratus/storage-verifier.jar
-grep -qs '"name":"invalid-credentials-rejected","passed":true' "$auth_evidence" \
-  || fail "Verifier exited successfully but the evidence does not show invalid credentials being rejected: $auth_evidence"
-
-log "=== NEGATIVE TEST 2/3: cross-identity access — access-denied errors below are EXPECTED ==="
-policy_evidence="${evidence_dir}/storage-cross-identity-denial-${timestamp}.json"
-compose run --rm --no-deps -T \
-  -e STRATUS_VERIFICATION_MODE=ACCESS_DENIED \
-  -e "STRATUS_EVIDENCE_FILE=/evidence/storage-cross-identity-denial-${timestamp}.json" \
-  verifier java -jar /opt/stratus/storage-verifier.jar
-grep -qs '"name":"cross-identity-access-denied","passed":true' "$policy_evidence" \
-  || fail "Verifier exited successfully but the evidence does not show the cross-identity denial: $policy_evidence"
-
-log "=== NEGATIVE TEST 3/3: untrusted TLS — PKIX certificate errors below are EXPECTED ==="
+log "=== NEGATIVE TEST: untrusted TLS — PKIX certificate errors below are EXPECTED ==="
 # The verifier reserves exit code 2 for transport-layer failure. Requiring 2
 # (not just non-zero) plus the PKIX pattern proves the run died in the TLS
 # handshake and not on credentials, buckets, or a crash.
@@ -57,7 +45,6 @@ if ! printf '%s\n' "$tls_output" | grep -Eq 'PKIX|SSLHandshake|certification pat
   fail "Verifier failed, but not because Java rejected the untrusted TLS certificate"
 fi
 
-log "=== NEGATIVE TESTS COMPLETE: all three failures occurred as required and were asserted ==="
-log "PASS invalid-credentials evidence=$auth_evidence"
-log "PASS cross-identity-denial evidence=$policy_evidence"
+log "=== NEGATIVE TEST COMPLETE: the failure occurred as required and was asserted ==="
 log "PASS untrusted-tls evidence=${evidence_dir}/storage-untrusted-tls-${timestamp}.log"
+log "Credential rejection and cross-identity denial are proven by CephRgwConformanceTest in the live suite"
