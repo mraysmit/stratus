@@ -32,6 +32,13 @@ import org.apache.spark.sql.SparkSession;
  */
 final class StratusSparkClient implements AutoCloseable {
 
+    /**
+     * Cores this client asks the cluster for, leaving the rest for the platform
+     * jobs a test submits alongside it. See the {@code spark.cores.max} note in
+     * {@link #connect}.
+     */
+    private static final int CLIENT_CORES = 1;
+
     private final SparkClientConfig config;
     private final SparkSession session;
 
@@ -79,6 +86,15 @@ final class StratusSparkClient implements AutoCloseable {
                 .config("spark.sql.extensions",
                         "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
                 .config("spark.sql.defaultCatalog", config.catalogName())
+                // A standalone application with no ceiling takes every core in
+                // the cluster. The developer cluster has four, so a client that
+                // holds its session for a whole test class starves any job that
+                // class submits: the job registers and then waits forever for
+                // an executor that will never be offered. Observed 2026-08-12,
+                // an ingestion job sat at cores=0 state=WAITING for 42 minutes
+                // while this client held all four. A client reads counts and
+                // metadata, so one core is ample and leaves three for the jobs.
+                .config("spark.cores.max", String.valueOf(CLIENT_CORES))
                 // The raw-object path, configured separately from the catalog's
                 // own storage client because it is a separate client: a working
                 // catalog says nothing about whether S3A works.

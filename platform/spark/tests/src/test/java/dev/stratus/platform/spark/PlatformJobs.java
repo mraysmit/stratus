@@ -58,8 +58,32 @@ final class PlatformJobs {
         }
     }
 
+    /**
+     * Reloads the catalog's view of the tables a job is about to touch.
+     *
+     * <p>A job submitted as its own application always begins with fresh
+     * metadata. A job running inside a long-lived client session begins with
+     * whatever that session last cached, so writes made by another application
+     * since can be invisible to it. Asked to keep one snapshot of eight,
+     * {@code expire_snapshots} found only the one snapshot the session
+     * remembered, expired nothing, and reported success — while a read in the
+     * same suite correctly reported eight. Observed 2026-08-12.
+     *
+     * <p>Refreshing here rather than in the tests keeps the two submission
+     * paths behaving the same way, which is the whole point of running the
+     * jobs in the driver.
+     */
+    private void refresh(String... tables) {
+        for (String table : tables) {
+            if (table != null && client.session().catalog().tableExists(table)) {
+                client.session().catalog().refreshTable(table);
+            }
+        }
+    }
+
     Outcome ingest(String sourceFile, String targetTable, String sourceSystem, String batchId,
                    String onExistingBatch, String schema, String runId) {
+        refresh(targetTable);
         return run(() -> {
             IngestionJob.run(client.session(), sourceFile, targetTable, sourceSystem, batchId,
                     onExistingBatch, schema, runId, Clock.systemUTC());
@@ -70,6 +94,7 @@ final class PlatformJobs {
     Outcome transform(String sourceTable, String targetTable, String[] businessKey,
                       String sequenceColumn, String sourceBatch, String runId,
                       String qualityRunId) {
+        refresh(sourceTable, targetTable);
         // The gate is consulted first, exactly as the job's main does, so a
         // blocked run writes nothing and reports the documented status code.
         if (qualityRunId != null) {
@@ -86,6 +111,8 @@ final class PlatformJobs {
     }
 
     Outcome materialise(String[] sourceTables, String targetTable, String sql, String runId) {
+        refresh(sourceTables);
+        refresh(targetTable);
         return run(() -> {
             MaterialisationJob.run(client.session(), sourceTables, targetTable, sql, runId,
                     Clock.systemUTC());
@@ -94,6 +121,7 @@ final class PlatformJobs {
     }
 
     Outcome checkQuality(String targetTable, String checksJson, String runId) {
+        refresh(targetTable);
         return run(() -> {
             List<?> results = QualityCheckJob.run(client.session(), targetTable, checksJson, runId,
                     null, Clock.systemUTC());
@@ -102,11 +130,13 @@ final class PlatformJobs {
     }
 
     Outcome maintain(String targetTable, String[] operations, String olderThan, String retainLast) {
+        refresh(targetTable);
         return run(() -> String.join("; ", MaintenanceJob.run(client.session(), targetTable,
                 operations, olderThan, retainLast)));
     }
 
     Outcome gate(String runId, String targetTable) {
+        refresh(targetTable);
         var decision = PromotionGate.evaluate(client.session(), runId, targetTable);
         return new Outcome(decision.blocked() ? JobExit.PROMOTION_BLOCKED : JobExit.SUCCESS,
                 decision.describe());
