@@ -7,17 +7,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -93,13 +96,74 @@ final class SparkIncrementalLoadVerificationTest {
     /** Recorded so the orphan probe can be removed even if its own test fails. */
     private static String bronzeDataPrefix;
 
+    /**
+     * The session every read in this class goes through.
+     *
+     * <p>Reads used to run {@code spark-sql} in the master container, one
+     * Spark application per value. This class reads 84 values, so it paid for
+     * 84 applications — and each one stood up a Hive metastore the platform
+     * has no use for. One session, built the way the jobs build theirs, reads
+     * them all (code style rules 10.1).
+     */
+    private static StratusSparkClient client;
+
+    /**
+     * The jobs, run in this client's driver.
+     *
+     * <p>Ingestion is the exception and still goes to the cluster: it reads a
+     * raw object over {@code s3a://}, which reaches Hadoop's
+     * {@code UserGroupInformation} and its call to {@code Subject.getSubject}.
+     * JDK 24 removed the Security Manager for good (JEP 486), so that throws on
+     * a modern workstation JVM and no flag restores it. The cluster image runs
+     * Java 17, where it works.
+     */
+    private static PlatformJobs jobs;
+
+    /**
+     * The jobs' own log records, so the lineage payload can be asserted on.
+     *
+     * <p>{@code LineageEvent.emit} is called from inside each job's
+     * {@code run}, so a job running in this driver still produces it — through
+     * {@code java.util.logging} rather than a subprocess's stdout.
+     */
+    private static final List<String> JOB_LOG = new ArrayList<>();
+
+    /**
+     * Held deliberately: {@code LogManager} keeps only a weak reference to a
+     * logger, so one nothing else refers to is collected and takes its handlers
+     * with it, leaving the capture silently empty.
+     */
+    private static Logger jobLogger;
+
     @BeforeAll
     static void placeTheReferenceData() {
         LiveSparkCluster.require();
-        var created = LiveSparkCluster.sparkSql(
-                "CREATE TABLE " + COUNTRIES + " (country STRING) USING iceberg; "
-                        + "INSERT INTO " + COUNTRIES + " VALUES ('GB'), ('US'), ('DE'), ('FR')", JOB);
-        assertTrue(created.succeeded(), "the country reference table must exist: " + created.describe());
+        client = StratusSparkClient.connect(
+                SparkClientConfig.serviceIdentity("stratus-incremental-verification", 17085, 17086));
+        jobs = new PlatformJobs(client);
+
+        jobLogger = Logger.getLogger("dev.stratus.jobs.spark");
+        jobLogger.setLevel(Level.ALL);
+        Handler capture = new Handler() {
+            @Override public void publish(LogRecord record) {
+                synchronized (JOB_LOG) {
+                    JOB_LOG.add(record.getMessage());
+                }
+            }
+
+            @Override public void flush() {
+            }
+
+            @Override public void close() {
+            }
+        };
+        capture.setLevel(Level.ALL);
+        jobLogger.addHandler(capture);
+
+        client.sql("CREATE TABLE " + COUNTRIES + " (country STRING) USING iceberg");
+        client.sql("INSERT INTO " + COUNTRIES + " VALUES ('GB'), ('US'), ('DE'), ('FR')");
+        assertEquals("4", client.scalar("SELECT count(*) FROM " + COUNTRIES),
+                "the country reference table must hold its four codes");
     }
 
     @BeforeEach
@@ -115,13 +179,19 @@ final class SparkIncrementalLoadVerificationTest {
             // was never up reports a cleanup failure for a suite that skipped.
             return;
         }
-        // Asserted, not assumed: a cleanup whose result is discarded fails
-        // silently and leaves probe tables in a governed zone while the suite
-        // still reports green.
-        for (String table : new String[] {SILVER, COUNTRIES, BRONZE}) {
-            var dropped = LiveSparkCluster.sparkSql("DROP TABLE IF EXISTS " + table + " PURGE", JOB);
-            assertTrue(dropped.succeeded(), "probe table " + table + " must be dropped: "
-                    + dropped.describe());
+        // Asserted by execution: session.sql throws if a drop fails, so a
+        // cleanup that silently left probe tables in a governed zone cannot
+        // report green.
+        try {
+            if (client != null) {
+                for (String table : new String[] {SILVER, COUNTRIES, BRONZE}) {
+                    client.sql("DROP TABLE IF EXISTS " + table + " PURGE");
+                }
+            }
+        } finally {
+            if (client != null) {
+                client.close();
+            }
         }
         String landing = "stratus-landing/" + LANDING_PREFIX;
         LiveSparkCluster.removeObjectPrefix(landing, JOB);
@@ -233,16 +303,18 @@ final class SparkIncrementalLoadVerificationTest {
         var result = transform(BATCH_1);
 
         assertTrue(result.succeeded(), "the first transform must succeed: " + result.describe());
-        assertTrue(result.output().contains("\"type\": \"TRANSFORM\""),
-                "every job must emit its lineage payload: " + result.output());
+        assertTrue(jobLog().contains("\"type\": \"TRANSFORM\""),
+                "every job must emit its lineage payload: " + jobLog());
         assertEquals("5", scalar("count(*)", SILVER), "silver must hold the first batch's customers");
 
         // Bronze provenance belongs to a row that arrived once. A silver row is
         // rewritten by whichever batch last corrected it, so carrying the batch
         // id forward would state something that stops being true.
-        var columns = LiveSparkCluster.sparkSql("DESCRIBE TABLE " + SILVER, JOB);
-        assertFalse(columns.output().contains("stratus_batch_id"),
-                "silver must not carry the ingestion audit columns: " + columns.output());
+        List<String> columns = client.sql("DESCRIBE TABLE " + SILVER).stream()
+                .map(row -> row.getString(0))
+                .toList();
+        assertFalse(columns.contains("stratus_batch_id"),
+                "silver must not carry the ingestion audit columns: " + columns);
 
         SparkVerificationLogging.silverUpserted(SILVER, BATCH_1, scalar("count(*)", SILVER),
                 "customer_id=2", scalar("email", SILVER + " WHERE customer_id = 2"));
@@ -391,11 +463,13 @@ final class SparkIncrementalLoadVerificationTest {
 
         // The gate consulted from inside the job, which is how Airflow will run
         // it in Increment 4 — one task, one status code.
-        var blocked = transform(BATCH_6_DEFECTIVE, "--qualityRunId", BLOCKED_RUN);
+        var blocked = transform(BATCH_6_DEFECTIVE, BLOCKED_RUN);
         assertEquals(EXIT_PROMOTION_BLOCKED, blocked.exitCode(),
                 "a failed blocking rule must stop the transform: " + blocked.describe());
-        assertTrue(blocked.output().contains("PROMOTION BLOCK"),
-                "the gate must record its verdict: " + blocked.output());
+        assertTrue(blocked.detail().startsWith("PROMOTION BLOCK"),
+                "the gate must record its verdict: " + blocked.detail());
+        assertFalse(blocked.detail().contains("failing=none"),
+                "a blocked verdict must name the rules that failed: " + blocked.detail());
         assertEquals("8", scalar("count(*)", SILVER), "a blocked transform must write nothing");
         SparkVerificationLogging.promotionDecided(BLOCKED_RUN, BRONZE, "BLOCK", blocked.exitCode());
 
@@ -411,7 +485,7 @@ final class SparkIncrementalLoadVerificationTest {
         assertEquals("0", scalar("count(*)", results(cleanRun) + " AND status = 'FAILED'"),
                 "the same rules must pass once the data is corrected");
 
-        var promoted = transform(BATCH_6_DEFECTIVE, "--qualityRunId", cleanRun);
+        var promoted = transform(BATCH_6_DEFECTIVE, cleanRun);
         assertTrue(promoted.succeeded(), "the corrected batch must transform: " + promoted.describe());
         assertEquals("10", scalar("count(*)", SILVER), "the two corrected customers must reach silver");
         assertEquals("liam@example.com", scalar("email", SILVER + " WHERE customer_id = 10"),
@@ -445,10 +519,10 @@ final class SparkIncrementalLoadVerificationTest {
         assertEquals("2", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"),
                 "and must not edit the verdict it overrides");
 
-        var who = LiveSparkCluster.sparkSql("SELECT failure_detail FROM "
-                + results(BLOCKED_RUN) + " AND status = 'overridden'", JOB);
-        assertTrue(who.output().contains("data-steward"),
-                "the record must name who overrode it: " + who.output());
+        String who = client.scalar("SELECT failure_detail FROM "
+                + results(BLOCKED_RUN) + " AND status = 'overridden'");
+        assertTrue(who.contains("data-steward"),
+                "the record must name who overrode it: " + who);
 
         SparkVerificationLogging.overrideRecorded(BLOCKED_RUN, "data-steward",
                 scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"));
@@ -470,34 +544,32 @@ final class SparkIncrementalLoadVerificationTest {
         var result = runQualityChecks(run, checks);
         assertTrue(result.succeeded(), "the freshness run must complete: " + result.describe());
 
-        var stale = LiveSparkCluster.sparkSql("SELECT status, failure_detail FROM "
-                + results(run) + " AND check_name = 'business_time_recent'", JOB);
-        assertTrue(stale.output().contains("FAILED"),
-                "business time is days behind and must fail an hourly SLA: " + stale.output());
-        assertTrue(stale.output().contains("minutes old"),
-                "the record must quantify the staleness: " + stale.output());
+        Row stale = onlyRow("SELECT status, failure_detail FROM "
+                + results(run) + " AND check_name = 'business_time_recent'");
+        assertEquals("FAILED", stale.getString(0),
+                "business time is days behind and must fail an hourly SLA");
+        assertTrue(stale.getString(1).contains("minutes old"),
+                "the record must quantify the staleness: " + stale.getString(1));
 
-        var fresh = LiveSparkCluster.sparkSql("SELECT status FROM "
-                + results(run) + " AND check_name = 'ingest_time_recent'", JOB);
-        assertTrue(fresh.output().contains("PASSED"),
-                "the rows were ingested minutes ago and must pass a daily SLA: " + fresh.output());
+        assertEquals("PASSED", client.scalar("SELECT status FROM "
+                        + results(run) + " AND check_name = 'ingest_time_recent'"),
+                "the rows were ingested minutes ago and must pass a daily SLA");
 
         SparkVerificationLogging.qualityRuleOutcome(run, "business_time_recent", "FAILED",
-                stale.output());
+                stale.getString(1));
         SparkVerificationLogging.qualityRuleOutcome(run, "ingest_time_recent", "PASSED",
-                fresh.output());
+                "within the daily SLA");
     }
 
     @Test
     @Order(14)
     void theReferentialIntegrityRuleNamesTheReferenceItCouldNotFind() {
-        var broken = LiveSparkCluster.sparkSql("SELECT status, failure_detail FROM "
-                + results(BLOCKED_RUN) + " AND check_name = 'country_known'", JOB);
+        Row broken = onlyRow("SELECT status, failure_detail FROM "
+                + results(BLOCKED_RUN) + " AND check_name = 'country_known'");
 
-        assertTrue(broken.output().contains("FAILED"),
-                "an unknown country code must fail: " + broken.output());
-        assertTrue(broken.output().contains(COUNTRIES),
-                "the record must name the reference table: " + broken.output());
+        assertEquals("FAILED", broken.getString(0), "an unknown country code must fail");
+        assertTrue(broken.getString(1).contains(COUNTRIES),
+                "the record must name the reference table: " + broken.getString(1));
 
         // The control. Without it a rule that failed on every table would have
         // passed the assertion above.
@@ -508,7 +580,7 @@ final class SparkIncrementalLoadVerificationTest {
                 "every country in silver is in the reference table, so the rule must pass");
 
         SparkVerificationLogging.qualityRuleOutcome(BLOCKED_RUN, "country_known", "FAILED",
-                broken.output());
+                broken.getString(1));
         SparkVerificationLogging.qualityRuleOutcome(run, "country_known", "PASSED",
                 "every country in " + SILVER + " is present in " + COUNTRIES);
     }
@@ -523,11 +595,8 @@ final class SparkIncrementalLoadVerificationTest {
 
         // Expiry alone, so nothing else can commit a snapshot while this is
         // being counted.
-        var expiry = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "expire_snapshots",
-                "--retainLast", "1",
-                "--olderThan", aMomentFromNow());
+        var expiry = jobs.maintain(BRONZE, new String[] {"expire_snapshots"},
+                aMomentFromNow(), "1");
 
         assertTrue(expiry.succeeded(), "snapshot expiry must succeed: " + expiry.describe());
         assertEquals("1", scalar("count(*)", BRONZE + ".snapshots"),
@@ -536,9 +605,7 @@ final class SparkIncrementalLoadVerificationTest {
         // Compaction is not asserted to reduce the file count: bronze holds one
         // file per batch partition and there is nothing for it to merge. What
         // must hold either way is that maintenance changed no data.
-        var compaction = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "rewrite_data_files");
+        var compaction = jobs.maintain(BRONZE, new String[] {"rewrite_data_files"}, null, null);
 
         assertTrue(compaction.succeeded(), "compaction must succeed: " + compaction.describe());
         assertEquals(rows, scalar("count(*)", BRONZE), "maintenance must not change the row count");
@@ -578,6 +645,16 @@ final class SparkIncrementalLoadVerificationTest {
                         .contains("stratus-orphan-probe"),
                 "the probe must be in place, or the assertions below prove nothing");
 
+        // Submitted, not run in this driver.
+        //
+        // Observed 2026-08-12: CALL stratus.system.remove_orphan_files fails in
+        // the workstation driver with "getSubject is not supported", the JDK 24+
+        // removal of the Security Manager (JEP 486), and succeeds in the
+        // cluster's Java 17 image. Which call inside the procedure reaches
+        // Subject.getSubject was not established — the exception is caught and
+        // only its message recorded — so this is a measured fact about this
+        // operation, not a rule about a category of them. The other maintenance
+        // operations were tried in the driver and work.
         var refused = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
                 "--targetTable", BRONZE,
                 "--operations", "delete_orphan_files",
@@ -655,30 +732,27 @@ final class SparkIncrementalLoadVerificationTest {
         return LiveSparkCluster.submitJob(JOBS + "IngestionJob", JOB, argv.toArray(new String[0]));
     }
 
-    private static LiveSparkCluster.CommandResult transform(String batchId, String... extra) {
-        var argv = new ArrayList<>(List.of(
-                "--sourceTable", BRONZE,
-                "--targetTable", SILVER,
-                "--businessKey", "customer_id",
-                "--sequenceColumn", "updated_at",
-                "--sourceBatch", batchId,
-                "--runId", "transform-" + batchId + "-" + SUFFIX));
-        argv.addAll(List.of(extra));
-        return LiveSparkCluster.submitJob(JOBS + "TransformJob", JOB, argv.toArray(new String[0]));
+    private static PlatformJobs.Outcome transform(String batchId) {
+        return transform(batchId, null);
     }
 
-    private static LiveSparkCluster.CommandResult runQualityChecks(String runId, String checks) {
+    private static PlatformJobs.Outcome transform(String batchId, String qualityRunId) {
+        return jobs.transform(BRONZE, SILVER, new String[] {"customer_id"}, "updated_at",
+                batchId, "transform-" + batchId + "-" + SUFFIX, qualityRunId);
+    }
+
+    private static PlatformJobs.Outcome runQualityChecks(String runId, String checks) {
         return runQualityChecks(runId, checks, BRONZE);
     }
 
-    private static LiveSparkCluster.CommandResult runQualityChecks(String runId, String checks,
-                                                                   String table) {
-        // Base64 rather than raw JSON: submitting through the container runtime
-        // on Windows strips the double quotes, and the job then fails on a
-        // document that was correct when this test wrote it.
-        String encoded = Base64.getEncoder().encodeToString(checks.getBytes(StandardCharsets.UTF_8));
-        return LiveSparkCluster.submitJob(JOBS + "QualityCheckJob", JOB,
-                "--targetTable", table, "--checksBase64", encoded, "--runId", runId);
+    /**
+     * The rules travel as a Java string. They used to be Base64-encoded because
+     * the container runtime on Windows stripped the double quotes out of a JSON
+     * command-line argument; nothing is on a command line now.
+     */
+    private static PlatformJobs.Outcome runQualityChecks(String runId, String checks,
+                                                         String table) {
+        return jobs.checkQuality(table, checks, runId);
     }
 
     /**
@@ -708,22 +782,43 @@ final class SparkIncrementalLoadVerificationTest {
         return "stratus.platform.quality_check_results WHERE run_id = '" + runId + "'";
     }
 
-    private static String scalar(String expression, String from) {
-        return LiveSparkCluster.scalar(expression, from, JOB);
+    /** Every job log record emitted so far, as one searchable block. */
+    private static String jobLog() {
+        synchronized (JOB_LOG) {
+            return String.join("\n", JOB_LOG);
+        }
     }
 
-    /** The properties the catalog actually holds for a table, by name. */
+    private static String scalar(String expression, String from) {
+        return client.scalar("SELECT " + expression + " FROM " + from);
+    }
+
+    /**
+     * The single row a check expects, failing if the query matched none or
+     * several. Reading {@code get(0)} without this passes on a duplicated
+     * record and throws something unhelpful on an absent one.
+     */
+    private static Row onlyRow(String statement) {
+        List<Row> rows = client.sql(statement);
+        assertEquals(1, rows.size(), "expected exactly one row from: " + statement);
+        return rows.get(0);
+    }
+
+    /**
+     * The properties the catalog actually holds for a table, by name.
+     *
+     * <p>{@code SHOW TBLPROPERTIES} returns a two-column result, so the pairs
+     * are read from the columns. This used to split the console output of
+     * {@code spark-sql} on tab characters, which asserted on a display format:
+     * a property value containing a tab, or any change to how the CLI aligns
+     * its columns, produced a wrong answer silently.
+     */
     private static Map<String, String> tableProperties(String table) {
-        var result = LiveSparkCluster.sparkSql("SHOW TBLPROPERTIES " + table, JOB);
-        assertTrue(result.succeeded(), "the table's properties must be readable: " + result.describe());
         var properties = new LinkedHashMap<String, String>();
-        for (String line : result.output().split("\\R")) {
-            int tab = line.indexOf('\t');
-            if (tab > 0) {
-                properties.put(line.substring(0, tab).trim(), line.substring(tab + 1).trim());
-            }
+        for (Row row : client.sql("SHOW TBLPROPERTIES " + table)) {
+            properties.put(row.getString(0), row.getString(1));
         }
-        assertFalse(properties.isEmpty(), "no properties were parsed from: " + result.output());
+        assertFalse(properties.isEmpty(), "the table must report properties: " + table);
         SparkVerificationLogging.tablePropertiesInspected(table, properties);
         return properties;
     }
