@@ -15,6 +15,14 @@ source "$(dirname "$0")/../lib/spark-compose-common.sh"
 
 load_environment
 
+# Checked here as well as at startup, because the jar can disappear after the
+# cluster is up: any `mvnw clean` on the jobs module removes it, and the
+# container mounts it from the workstation. Without this the suite still runs
+# and every job answers "Failed to load class dev.stratus.jobs.spark....",
+# which arrives as a dozen unrelated-looking test failures instead of one line
+# saying the jar is missing. Observed 2026-08-12.
+require_jobs_jar
+
 export STRATUS_SPARK_INTEGRATION=true
 # The suite and the jobs it submits both read this. A transcript recorded at
 # INFO alone says a pipeline passed without saying what it did, so the default

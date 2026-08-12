@@ -7,9 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.stratus.jobs.spark.IngestionJob;
+import dev.stratus.jobs.spark.JobExit;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,11 +41,24 @@ import org.junit.jupiter.api.TestMethodOrder;
  * fixture carries a deliberate duplicate so the quality gate has something
  * real to block on — a gate only tested on clean data proves nothing.
  *
+ * <p>Two different things happen here and they use different mechanisms.
+ * <b>Doing</b> is a platform job: submitted with {@code spark-submit}, exactly
+ * as production runs it. <b>Observing</b> is a query through
+ * {@link StratusSparkClient}, a real {@code SparkSession} built the way the
+ * jobs build theirs, returning typed rows.
+ *
+ * <p>Observation used to run {@code spark-sql} in the master container and
+ * assert on substrings of its console output. That was wrong twice over: the
+ * platform has no Hive anywhere, yet the Hive CLI stood up a Derby metastore on
+ * every call, and an assertion against printed text passes or fails on a
+ * display format rather than on a value. Reading a typed {@code Row} removes
+ * both (code style rules 10.1).
+ *
  * This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-09
- * @version 1.0.0
+ * @version 2.0.0
  */
 @Tag("spark-integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -53,6 +76,31 @@ final class SparkPipelineVerificationTest {
     private static final String GOLD = "stratus.gold.pipeline_customers_by_country_" + SUFFIX;
     private static final String QUALITY_RUN = "quality-" + SUFFIX;
     private static final String BATCH = "pipeline-" + SUFFIX;
+    private static final String RESULTS = "stratus.platform.quality_check_results";
+
+    private static StratusSparkClient client;
+    private static PlatformJobs jobs;
+
+    /**
+     * The jobs' own log records, captured so the lineage payload can be
+     * asserted on.
+     *
+     * <p>{@code LineageEvent.emit} is called from inside each job's
+     * {@code run}, not its {@code main}, and writes through
+     * {@code java.util.logging}. Running the job in this driver therefore still
+     * produces the payload — it arrives here instead of on a subprocess's
+     * stdout, which is a stronger place to read it from.
+     */
+    private static final List<String> JOB_LOG = new ArrayList<>();
+
+    /**
+     * Held deliberately. {@code LogManager} keeps only a weak reference to a
+     * logger, so a logger nothing else refers to is collected and takes its
+     * handlers with it — the capture then silently returns nothing, which is
+     * exactly what happened on the first live run of this class.
+     */
+    private static Logger jobLogger;
+    private static Handler jobLogHandler;
 
     /**
      * Four rows with one duplicated business key and one blank email, so the
@@ -67,11 +115,43 @@ final class SparkPipelineVerificationTest {
             "3, ,US,2026-08-09T10:00:00Z");
 
     @BeforeAll
-    static void placeTheLandingFile() {
+    static void placeTheLandingFileAndConnect() {
         LiveSparkCluster.require();
+        // The fixture is uploaded with the storage owner's own client, so the
+        // pipeline starts from a real object written the way a source system
+        // would deliver one — not from a table Spark made earlier.
         var written = LiveSparkCluster.writeLandingContent(
                 LANDING_PREFIX + "/customers.csv", FIXTURE_CSV, JOB);
         assertTrue(written.succeeded(), "the landing fixture must upload: " + written.describe());
+
+        client = StratusSparkClient.connect(
+                SparkClientConfig.serviceIdentity("stratus-pipeline-verification", 17083, 17084));
+        jobs = new PlatformJobs(client);
+
+        jobLogger = Logger.getLogger("dev.stratus.jobs.spark");
+        jobLogger.setLevel(Level.ALL);
+        jobLogHandler = new Handler() {
+            @Override public void publish(LogRecord record) {
+                synchronized (JOB_LOG) {
+                    JOB_LOG.add(record.getMessage());
+                }
+            }
+
+            @Override public void flush() {
+            }
+
+            @Override public void close() {
+            }
+        };
+        jobLogHandler.setLevel(Level.ALL);
+        jobLogger.addHandler(jobLogHandler);
+    }
+
+    /** Every job log record emitted so far, as one searchable block. */
+    private static String jobLog() {
+        synchronized (JOB_LOG) {
+            return String.join("\n", JOB_LOG);
+        }
     }
 
     @BeforeEach
@@ -87,14 +167,19 @@ final class SparkPipelineVerificationTest {
             // was never up reports a cleanup failure for a suite that skipped.
             return;
         }
-        // Asserted, not assumed. A cleanup whose result is discarded fails
-        // silently and leaves probe tables in a governed zone while the suite
-        // still reports green — which is exactly how the S3A cleanup went
-        // unnoticed until a bucket listing showed the residue.
-        for (String table : new String[] {GOLD, SILVER, BRONZE}) {
-            var dropped = LiveSparkCluster.sparkSql("DROP TABLE IF EXISTS " + table + " PURGE", JOB);
-            assertTrue(dropped.succeeded(), "probe table " + table + " must be dropped: "
-                    + dropped.describe());
+        try {
+            if (client != null) {
+                // Asserted by execution: session.sql throws if the drop fails,
+                // so a cleanup that silently left probe tables in a governed
+                // zone cannot report green.
+                for (String table : new String[] {GOLD, SILVER, BRONZE}) {
+                    client.sql("DROP TABLE IF EXISTS " + table + " PURGE");
+                }
+            }
+        } finally {
+            if (client != null) {
+                client.close();
+            }
         }
         String prefix = "stratus-landing/" + LANDING_PREFIX;
         LiveSparkCluster.removeObjectPrefix(prefix, JOB);
@@ -105,34 +190,53 @@ final class SparkPipelineVerificationTest {
 
     @Test
     @Order(1)
-    void sparkConnectsToCluster() {
-        var result = LiveSparkCluster.sparkSql("SELECT 1 AS connected", JOB);
-
-        assertTrue(result.succeeded(), "a statement must run on the cluster: " + result.describe());
-        assertTrue(result.output().contains("Application Id: app-"),
-                "the statement must run as a cluster application, not locally: " + result.output());
+    void theClientRunsOnTheClusterRatherThanLocally() {
+        // A session that fell back to running in this JVM answers every other
+        // assertion in this class just as happily, so the application id is
+        // checked before anything is read from it.
+        assertTrue(client.applicationId().startsWith("app-"),
+                "the client must run as a cluster application, got: " + client.applicationId());
+        assertEquals("1", client.scalar("SELECT 1 AS connected"),
+                "a statement must execute on the cluster");
     }
 
     @Test
     @Order(2)
     void sparkCanResolvePolarisNamespaces() {
-        var result = LiveSparkCluster.sparkSql("SHOW NAMESPACES IN stratus", JOB);
+        List<String> zones = client.sql("SHOW NAMESPACES IN stratus").stream()
+                .map(row -> row.get(0).toString())
+                .toList();
 
-        assertTrue(result.succeeded(), "the catalog must resolve: " + result.describe());
         for (String zone : new String[] {"bronze", "silver", "gold", "platform"}) {
-            assertTrue(result.output().contains(zone), zone + " must resolve: " + result.output());
+            assertTrue(zones.contains(zone), zone + " must resolve, got: " + zones);
         }
-        SparkVerificationLogging.namespacesResolved(List.of("bronze", "silver", "gold", "platform"));
+        SparkVerificationLogging.namespacesResolved(zones);
     }
 
     @Test
     @Order(3)
     void ingestionJobWritesBronzeTable() {
+        // Submitted into the cluster rather than run in this driver.
+        //
+        // Ingestion reads a raw object over s3a://, and the captured stack
+        // shows that reaching Hadoop's FileSystem layer:
+        //   Subject.getSubject
+        //     <- UserGroupInformation.getCurrentUser
+        //     <- org.apache.hadoop.fs.viewfs.ViewFileSystem.<init>
+        // JDK 24 permanently disabled the Security Manager (JEP 486), so that
+        // call throws UnsupportedOperationException here and no flag re-enables
+        // it. The cluster image runs Java 17, where it works.
+        //
+        // This is not the only job affected: remove_orphan_files fails the same
+        // way in the driver, and it reads no raw object. Which jobs can run in
+        // a driver was settled by trying them, not by reasoning about which
+        // library they use.
         var result = LiveSparkCluster.submitJob(JOBS + "IngestionJob", JOB,
                 "--sourceFile", SOURCE_FILE,
                 "--targetTable", BRONZE,
                 "--sourceSystem", "crm",
                 "--batchId", BATCH,
+                "--onExistingBatch", IngestionJob.ON_EXISTING_FAIL,
                 "--runId", "ingest-" + SUFFIX);
 
         assertTrue(result.succeeded(), "ingestion must succeed: " + result.describe());
@@ -141,17 +245,17 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("\"type\": \"INGESTION\""),
                 "the lineage payload must declare its type: " + result.output());
 
-        assertEquals("4", LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
+        assertEquals("4", client.scalar("SELECT count(*) FROM " + BRONZE),
                 "all four source rows must land in bronze");
 
         // Normalisation is part of the contract: the blank email must have
         // become a null, or the completeness rule below measures nothing.
-        assertEquals("1", LiveSparkCluster.scalar("count(*)", BRONZE + " WHERE email IS NULL", JOB),
+        assertEquals("1", client.scalar("SELECT count(*) FROM " + BRONZE + " WHERE email IS NULL"),
                 "the blank email must be normalised to null");
 
         SparkVerificationLogging.batchIngested(BRONZE, BATCH,
-                LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
-                LiveSparkCluster.scalar("count(*)", BRONZE + ".partitions", JOB),
+                client.scalar("SELECT count(*) FROM " + BRONZE),
+                client.scalar("SELECT count(*) FROM " + BRONZE + ".partitions"),
                 SOURCE_FILE, "inferred");
     }
 
@@ -169,155 +273,152 @@ final class SparkPipelineVerificationTest {
                 + "{\"type\":\"uniqueness\",\"name\":\"customer_id_unique\",\"severity\":\"blocking\","
                 + "\"columns\":[\"customer_id\"]}]";
 
-        // Base64 rather than raw JSON: submitting through the container
-        // runtime on Windows strips the double quotes, and the job then fails
-        // on a document that was correct when this test wrote it.
-        String encoded = java.util.Base64.getEncoder()
-                .encodeToString(checks.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        var result = LiveSparkCluster.submitJob(JOBS + "QualityCheckJob", JOB,
-                "--targetTable", BRONZE, "--checksBase64", encoded, "--runId", QUALITY_RUN);
+        // The rules travel as a Java string. Base64 was only ever needed
+        // because the container runtime on Windows stripped the double quotes
+        // out of a JSON command-line argument; nothing is on a command line
+        // now.
+        var outcome = jobs.checkQuality(BRONZE, checks, QUALITY_RUN);
 
-        assertTrue(result.succeeded(),
-                "the quality job must complete even when rules fail: " + result.describe());
-        assertTrue(result.output().contains("QUALITY COMPLETE"),
-                "the job must log its summary: " + result.output());
+        assertTrue(outcome.succeeded(),
+                "the quality job must complete even when rules fail: " + outcome.describe());
+        assertTrue(outcome.detail().contains("5"),
+                "the job must report how many results it recorded: " + outcome.describe());
 
-        assertEquals("5", LiveSparkCluster.scalar("count(*)",
-                        "stratus.platform.quality_check_results WHERE run_id = '" + QUALITY_RUN + "'", JOB),
+        assertEquals("5", client.scalar(
+                        "SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + QUALITY_RUN + "'"),
                 "every rule must be recorded, passing or not");
 
         SparkVerificationLogging.qualityRunRecorded(QUALITY_RUN, BRONZE, "5",
-                LiveSparkCluster.scalar("count(*)",
-                        "stratus.platform.quality_check_results WHERE run_id = '" + QUALITY_RUN
-                                + "' AND status = 'FAILED'", JOB));
+                client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + QUALITY_RUN
+                        + "' AND status = 'FAILED'"));
     }
 
     @Test
     @Order(5)
     void uniquenessCheckDetectsDuplicates() {
-        var result = LiveSparkCluster.sparkSql(
-                "SELECT status, failure_detail FROM stratus.platform.quality_check_results "
-                        + "WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'customer_id_unique'", JOB);
+        Row unique = onlyRow("SELECT status, failure_detail FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'customer_id_unique'");
 
-        assertTrue(result.succeeded(), "the result must be queryable: " + result.describe());
-        assertTrue(result.output().contains("FAILED"),
-                "the duplicated business key must fail a blocking uniqueness rule: " + result.output());
-        assertTrue(result.output().contains("duplicate"),
-                "the record must say what failed: " + result.output());
+        assertEquals("FAILED", unique.getString(0),
+                "the duplicated business key must fail a blocking uniqueness rule");
+        assertTrue(unique.getString(1).contains("duplicate"),
+                "the record must say what failed: " + unique.getString(1));
 
         // Nulls in a mandatory column must fail with a detail that says how
         // far off it was, which is the Phase 1 plan's own quality-fail row.
-        var mandatory = LiveSparkCluster.sparkSql(
-                "SELECT status, failure_detail FROM stratus.platform.quality_check_results "
-                        + "WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'email_mandatory'", JOB);
-        assertTrue(mandatory.output().contains("FAILED"),
-                "a mandatory column with nulls must fail a blocking rule: " + mandatory.output());
-        assertTrue(mandatory.output().contains("null rate"),
-                "the record must quantify the failure: " + mandatory.output());
+        Row mandatory = onlyRow("SELECT status, failure_detail FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'email_mandatory'");
+        assertEquals("FAILED", mandatory.getString(0),
+                "a mandatory column with nulls must fail a blocking rule");
+        assertTrue(mandatory.getString(1).contains("null rate"),
+                "the record must quantify the failure: " + mandatory.getString(1));
 
         // The warning rule must not be recorded as a failure: the difference
         // is exactly what the promotion gate acts on.
-        var warning = LiveSparkCluster.sparkSql(
-                "SELECT status FROM stratus.platform.quality_check_results WHERE run_id = '"
-                        + QUALITY_RUN + "' AND check_name = 'email_mostly_present'", JOB);
-        assertTrue(warning.output().contains("WARNING"),
-                "a failing non-blocking rule must be a warning: " + warning.output());
+        Row warning = onlyRow("SELECT status FROM " + RESULTS + " WHERE run_id = '"
+                + QUALITY_RUN + "' AND check_name = 'email_mostly_present'");
+        assertEquals("WARNING", warning.getString(0),
+                "a failing non-blocking rule must be a warning, not a failure");
 
-        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "customer_id_unique", "FAILED",
-                result.output());
-        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mandatory", "FAILED",
-                mandatory.output());
-        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mostly_present", "WARNING",
-                warning.output());
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "customer_id_unique",
+                unique.getString(0), unique.getString(1));
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mandatory",
+                mandatory.getString(0), mandatory.getString(1));
+        SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mostly_present",
+                warning.getString(0), "a warning rule is recorded, not enforced");
     }
 
     @Test
     @Order(6)
     void promotionGateBlocksOnFailedUniquenesCheck() {
-        var result = LiveSparkCluster.submitJob(JOBS + "PromotionGate", JOB,
-                "--runId", QUALITY_RUN, "--targetTable", BRONZE);
+        var outcome = jobs.gate(QUALITY_RUN, BRONZE);
 
-        assertFalse(result.succeeded(),
-                "a failed blocking rule must stop promotion with a non-zero exit: " + result.describe());
-        assertTrue(result.output().contains("PROMOTION BLOCK"),
-                "the gate must record its verdict: " + result.output());
-        assertTrue(result.output().contains("customer_id_unique"),
-                "the verdict must name the failing rule: " + result.output());
+        // The documented status code, not merely "non-zero": an orchestrator
+        // retries a failure and escalates a refusal, so the two must differ.
+        assertEquals(JobExit.PROMOTION_BLOCKED, outcome.exitCode(),
+                "a failed blocking rule must stop promotion with the documented code: "
+                        + outcome.describe());
+        assertTrue(outcome.detail().contains("customer_id_unique"),
+                "the verdict must name the failing rule: " + outcome.detail());
 
-        SparkVerificationLogging.promotionDecided(QUALITY_RUN, BRONZE, "BLOCK", result.exitCode());
+        SparkVerificationLogging.promotionDecided(QUALITY_RUN, BRONZE, "BLOCK", outcome.exitCode());
     }
 
     @Test
     @Order(7)
     void transformJobWritesSilverTableAfterDeduplication() {
-        var result = LiveSparkCluster.submitJob(JOBS + "TransformJob", JOB,
-                "--sourceTable", BRONZE,
-                "--targetTable", SILVER,
-                "--businessKey", "customer_id",
-                "--sequenceColumn", "updated_at",
-                "--runId", "transform-" + SUFFIX);
+        // No quality run is passed, so the gate is not consulted — this test
+        // is about deduplication, and the gate has its own tests either side.
+        var outcome = jobs.transform(BRONZE, SILVER, new String[] {"customer_id"},
+                "updated_at", null, "transform-" + SUFFIX, null);
 
-        assertTrue(result.succeeded(), "the transform must succeed: " + result.describe());
-        assertTrue(result.output().contains("\"type\": \"TRANSFORM\""),
-                "every job must emit its lineage payload, not only ingestion: " + result.output());
+        assertTrue(outcome.succeeded(), "the transform must succeed: " + outcome.describe());
+        assertTrue(jobLog().contains("\"type\": \"TRANSFORM\""),
+                "every job must emit its lineage payload, not only ingestion: " + jobLog());
 
-        assertEquals("3", LiveSparkCluster.scalar("count(*)", SILVER, JOB),
+        assertEquals("3", client.scalar("SELECT count(*) FROM " + SILVER),
                 "deduplication must collapse the repeated business key");
 
         // Ordering decides which duplicate survives, and a pipeline that
         // cannot say which one is not reproducible.
-        var kept = LiveSparkCluster.sparkSql(
-                "SELECT email FROM " + SILVER + " WHERE customer_id = 2", JOB);
-        assertTrue(kept.output().contains("bob.updated@example.com"),
-                "the most recent row must be the one kept: " + kept.output());
+        String kept = client.scalar("SELECT email FROM " + SILVER + " WHERE customer_id = 2");
+        assertEquals("bob.updated@example.com", kept,
+                "the most recent row must be the one kept");
 
         SparkVerificationLogging.silverUpserted(SILVER, BATCH,
-                LiveSparkCluster.scalar("count(*)", SILVER, JOB), "customer_id=2",
-                LiveSparkCluster.scalar("email", SILVER + " WHERE customer_id = 2", JOB));
+                client.scalar("SELECT count(*) FROM " + SILVER), "customer_id=2", kept);
     }
 
     @Test
     @Order(8)
     void materialisationJobWritesGoldTable() {
-        var result = LiveSparkCluster.submitJob(JOBS + "MaterialisationJob", JOB,
-                "--sourceTables", SILVER,
-                "--targetTable", GOLD,
-                "--sql", "SELECT country, count(*) AS customers FROM " + SILVER + " GROUP BY country",
-                "--runId", "gold-" + SUFFIX);
+        var outcome = jobs.materialise(new String[] {SILVER}, GOLD,
+                "SELECT country, count(*) AS customers FROM " + SILVER + " GROUP BY country",
+                "gold-" + SUFFIX);
 
-        assertTrue(result.succeeded(), "materialisation must succeed: " + result.describe());
-        assertTrue(result.output().contains("\"type\": \"MATERIALISATION\""),
-                "every job must emit its lineage payload: " + result.output());
+        assertTrue(outcome.succeeded(), "materialisation must succeed: " + outcome.describe());
+        assertTrue(jobLog().contains("\"type\": \"MATERIALISATION\""),
+                "every job must emit its lineage payload: " + jobLog());
 
-        var rows = LiveSparkCluster.sparkSql(
-                "SELECT country, customers FROM " + GOLD + " ORDER BY country", JOB);
-        assertTrue(rows.output().contains("GB") && rows.output().contains("US"),
-                "both country groups must be present: " + rows.output());
+        Map<String, String> byCountry = new LinkedHashMap<>();
+        for (Row row : client.sql("SELECT country, customers FROM " + GOLD + " ORDER BY country")) {
+            byCountry.put(row.get(0).toString(), row.get(1).toString());
+        }
+        // The aggregate is asserted, not merely present: silver holds one GB
+        // customer and two US customers after deduplication.
+        assertEquals(Map.of("GB", "1", "US", "2"), byCountry,
+                "gold must hold the per-country counts of the deduplicated table");
 
-        var files = LiveSparkCluster.sparkSql("SELECT file_path FROM " + GOLD + ".files", JOB);
-        assertTrue(files.output().contains("s3://stratus-gold/gold/"),
-                "gold data must land in the governed gold location: " + files.output());
+        List<String> paths = client.sql("SELECT file_path FROM " + GOLD + ".files").stream()
+                .map(row -> row.getString(0))
+                .toList();
+        assertFalse(paths.isEmpty(), "gold must have data files");
+        for (String path : paths) {
+            assertTrue(path.startsWith("s3://stratus-gold/gold/"),
+                    "gold data must land in the governed gold location, got: " + path);
+        }
     }
 
     @Test
     @Order(9)
     void maintenanceJobRunsOnBronzeTable() {
-        var result = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "expire_snapshots,rewrite_data_files");
+        String snapshotsBefore = client.scalar("SELECT count(*) FROM " + BRONZE + ".snapshots");
 
-        assertTrue(result.succeeded(), "maintenance must succeed: " + result.describe());
-        assertTrue(result.output().contains("MAINTENANCE expire_snapshots"),
-                "snapshot expiry must report its metrics: " + result.output());
-        assertTrue(result.output().contains("MAINTENANCE rewrite_data_files"),
-                "file rewrite must report its metrics: " + result.output());
+        var outcome = jobs.maintain(BRONZE,
+                new String[] {"expire_snapshots", "rewrite_data_files"}, null, null);
 
-        assertEquals("4", LiveSparkCluster.scalar("count(*)", BRONZE, JOB),
+        assertTrue(outcome.succeeded(), "maintenance must succeed: " + outcome.describe());
+        assertTrue(outcome.detail().contains("expire_snapshots"),
+                "snapshot expiry must report its metrics: " + outcome.detail());
+        assertTrue(outcome.detail().contains("rewrite_data_files"),
+                "file rewrite must report its metrics: " + outcome.detail());
+
+        assertEquals("4", client.scalar("SELECT count(*) FROM " + BRONZE),
                 "maintenance must not change what the table contains");
 
         SparkVerificationLogging.maintenanceOutcome(BRONZE, "expire_snapshots,rewrite_data_files",
-                "before maintenance", LiveSparkCluster.scalar("count(*)", BRONZE + ".snapshots", JOB),
-                LiveSparkCluster.scalar("count(*)", BRONZE, JOB));
+                snapshotsBefore, client.scalar("SELECT count(*) FROM " + BRONZE + ".snapshots"),
+                client.scalar("SELECT count(*) FROM " + BRONZE));
     }
 
     @Test
@@ -326,17 +427,15 @@ final class SparkPipelineVerificationTest {
         // The destructive operation is the one that must not inherit a
         // default: without a retention age it can remove files a concurrent
         // write has staged but not yet committed.
-        var result = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "delete_orphan_files");
+        var outcome = jobs.maintain(BRONZE, new String[] {"delete_orphan_files"}, null, null);
 
-        assertFalse(result.succeeded(),
-                "orphan deletion without --olderThan must be refused: " + result.describe());
-        assertTrue(result.output().contains("requires an explicit --olderThan"),
-                "the refusal must say what is missing: " + result.output());
+        assertFalse(outcome.succeeded(),
+                "orphan deletion without a retention must be refused: " + outcome.describe());
+        assertTrue(outcome.detail().contains("requires an explicit --olderThan"),
+                "the refusal must say what is missing: " + outcome.detail());
 
         SparkVerificationLogging.negativeConfirmed("orphan deletion without a retention",
-                result.exitCode(), "the destructive operation must not inherit a default");
+                outcome.exitCode(), "the destructive operation must not inherit a default");
     }
 
     @Test
@@ -350,30 +449,23 @@ final class SparkPipelineVerificationTest {
                 + "{\"type\":\"row_count_min\",\"name\":\"has_rows\",\"severity\":\"blocking\",\"minRows\":1},"
                 + "{\"type\":\"uniqueness\",\"name\":\"customer_id_unique\",\"severity\":\"blocking\","
                 + "\"columns\":[\"customer_id\"]}]";
-        String encoded = java.util.Base64.getEncoder()
-                .encodeToString(checks.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-
         // Silver is the deduplicated table, so the same rules that failed on
         // bronze pass here — the data changed, not the rules.
-        var quality = LiveSparkCluster.submitJob(JOBS + "QualityCheckJob", JOB,
-                "--targetTable", SILVER, "--checksBase64", encoded, "--runId", cleanRun);
+        var quality = jobs.checkQuality(SILVER, checks, cleanRun);
         assertTrue(quality.succeeded(), "the clean quality run must succeed: " + quality.describe());
 
-        var passed = LiveSparkCluster.sparkSql(
-                "SELECT status FROM stratus.platform.quality_check_results WHERE run_id = '"
-                        + cleanRun + "' AND status <> 'PASSED'", JOB);
-        assertFalse(passed.output().contains("FAILED"),
-                "no rule may fail on the deduplicated table: " + passed.output());
+        assertEquals("0", client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '"
+                        + cleanRun + "' AND status <> 'PASSED'"),
+                "no rule may fail on the deduplicated table");
 
-        var gate = LiveSparkCluster.submitJob(JOBS + "PromotionGate", JOB,
-                "--runId", cleanRun, "--targetTable", SILVER);
+        var gate = jobs.gate(cleanRun, SILVER);
 
-        assertTrue(gate.succeeded(),
+        assertEquals(JobExit.SUCCESS, gate.exitCode(),
                 "a run whose blocking rules all pass must be promoted: " + gate.describe());
-        assertTrue(gate.output().contains("PROMOTION PROMOTE"),
-                "the gate must record the promote verdict: " + gate.output());
 
-        SparkVerificationLogging.qualityRunRecorded(cleanRun, SILVER, "2", "0");
+        SparkVerificationLogging.qualityRunRecorded(cleanRun, SILVER,
+                client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + cleanRun + "'"),
+                "0");
         SparkVerificationLogging.promotionDecided(cleanRun, SILVER, "PROMOTE", gate.exitCode());
         SparkVerificationLogging.scenarioPassed("gate can promote",
                 "the same rules that blocked bronze passed on the deduplicated table");
@@ -382,23 +474,30 @@ final class SparkPipelineVerificationTest {
     @Test
     @Order(12)
     void qualityResultsTableContainsAllRunRecords() {
-        var result = LiveSparkCluster.sparkSql(
-                "SELECT check_name, severity, status FROM stratus.platform.quality_check_results "
-                        + "WHERE run_id = '" + QUALITY_RUN + "' ORDER BY check_name", JOB);
+        List<String> names = client.sql("SELECT check_name FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "' ORDER BY check_name").stream()
+                .map(row -> row.getString(0))
+                .toList();
 
-        assertTrue(result.succeeded(), "the results table must be queryable: " + result.describe());
-        for (String checkName : new String[] {
-                "customer_id_unique", "email_mostly_present", "expected_columns", "has_rows"}) {
-            assertTrue(result.output().contains(checkName),
-                    checkName + " must be in the run's history: " + result.output());
-        }
+        assertEquals(List.of("customer_id_unique", "email_mandatory", "email_mostly_present",
+                        "expected_columns", "has_rows"), names,
+                "every rule of the run must be in its history, once each");
 
         // The zone partition is what makes this table queryable per zone; a
         // record written without it would still read back here.
-        var zone = LiveSparkCluster.sparkSql(
-                "SELECT DISTINCT zone FROM stratus.platform.quality_check_results WHERE run_id = '"
-                        + QUALITY_RUN + "'", JOB);
-        assertEquals(true, zone.output().contains("bronze"),
-                "results must record the zone they were measured in: " + zone.output());
+        assertEquals("bronze", client.scalar("SELECT DISTINCT zone FROM " + RESULTS
+                        + " WHERE run_id = '" + QUALITY_RUN + "'"),
+                "results must record the zone they were measured in");
+    }
+
+    /**
+     * The single row a check expects, failing if the query matched none or
+     * several. A check that reads {@code rows.get(0)} without this passes on a
+     * duplicated record and throws an unhelpful exception on an absent one.
+     */
+    private static Row onlyRow(String statement) {
+        List<Row> rows = client.sql(statement);
+        assertEquals(1, rows.size(), "expected exactly one row from: " + statement);
+        return rows.get(0);
     }
 }
