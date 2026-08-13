@@ -26,9 +26,9 @@ POLARIS_HARNESS_DIR="$REPO_DIR/platform/polaris/compose-service"
 
 set -a
 # shellcheck disable=SC1091
-source "$CEPH_HARNESS_DIR/connection.env"
+source <(sed 's/\r$//' "$CEPH_HARNESS_DIR/connection.env")
 # shellcheck disable=SC1091
-source "$POLARIS_HARNESS_DIR/connection.env"
+source <(sed 's/\r$//' "$POLARIS_HARNESS_DIR/connection.env")
 set +a
 
 : "${CEPH_HARNESS_NETWORK:?connection.env must define CEPH_HARNESS_NETWORK}"
@@ -54,6 +54,21 @@ SPARK_BASE_IMAGE='apache/spark:4.1.2-scala2.13-java17-python3-ubuntu'
 SPARK_IMAGE="${SPARK_IMAGE:-stratus/spark-runtime:dev}"
 export SPARK_BASE_IMAGE SPARK_IMAGE
 
+# A Windows checkout may deliberately use CRLF for the wrapper scripts. Git
+# Bash cannot execute that mvnw shebang, while cmd.exe can execute mvnw.cmd.
+# Keep every harness entry point on the repository wrapper without requiring
+# developers to rewrite tracked files locally.
+repository_maven() {
+  if [[ -n "${MSYSTEM:-}" ]]; then
+    # Git Bash otherwise rewrites cmd.exe's /d and /c switches as paths.
+    MSYS_NO_PATHCONV=1 cmd.exe /d /c mvnw.cmd "$@"
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    cmd.exe /d /c mvnw.cmd "$@"
+  else
+    ./mvnw "$@"
+  fi
+}
+
 # The platform job jar the cluster mounts. Built by the reactor, not by this
 # harness (P1-0.1): the scripts fail with the build command rather than
 # running it.
@@ -75,7 +90,7 @@ load_environment_file() {
     || fail "Create $HARNESS_DIR/.env from .env.template (lifecycle/spark-compose-startup.sh does this)"
   set -a
   # shellcheck disable=SC1091
-  source "$HARNESS_DIR/.env"
+  source <(sed 's/\r$//' "$HARNESS_DIR/.env")
   set +a
 }
 
@@ -103,7 +118,7 @@ fetch_service_identity_from_openbao() {
     || fail "Missing $openbao_dir/connection.env; the OpenBao harness must publish its connection settings"
   set -a
   # shellcheck disable=SC1091
-  source "$openbao_dir/connection.env"
+  source <(sed 's/\r$//' "$openbao_dir/connection.env")
   set +a
   local token_file="$openbao_dir/$OPENBAO_TOKEN_FILE"
   [[ -f "$token_file" ]] \

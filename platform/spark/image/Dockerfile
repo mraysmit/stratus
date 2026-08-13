@@ -9,14 +9,20 @@
 # keeps image assembly out of the harness scripts.
 #
 # Versions are the Increment 3 approved matrix (spark_compute.md section 5):
-#   iceberg-spark-runtime-4.1_2.13  1.11.0
-#   iceberg-aws-bundle              1.11.0
-#   hadoop-aws                      3.4.1  (+ its resolved runtime dependencies)
+#   stratus-iceberg-aws-runtime     Iceberg Spark 4.1 1.11.0, AWS SDK relocated
+#   hadoop-client / hadoop-aws      3.4.3  (+ its resolved runtime dependencies)
 FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
 
 USER root
 
-# One layer, so the jar set is a single reviewable unit.
+# Replace the base image's Hadoop pair as one operation. Keeping either 3.4.2
+# jar would be an unsupported mixed Hadoop classpath; adding 3.4.3 under a
+# second filename would only make the winner depend on classpath ordering.
+RUN rm /opt/spark/jars/hadoop-client-api-3.4.2.jar \
+       /opt/spark/jars/hadoop-client-runtime-3.4.2.jar
+
+# One layer, so the selected Hadoop, S3A, and isolated Iceberg set is a single
+# reviewable unit.
 COPY jars/ /opt/spark/jars/
 
 # The lock manifest travels with the image so a running container can be

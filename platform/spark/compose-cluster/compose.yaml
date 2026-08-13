@@ -21,6 +21,9 @@ x-spark-common: &spark-common
     POLARIS_CATALOG: ${POLARIS_CATALOG:?Polaris connection settings not loaded; invoke through the harness scripts}
     SPARK_POLARIS_CLIENT_ID: ${SPARK_POLARIS_CLIENT_ID:-}
     SPARK_POLARIS_CLIENT_SECRET: ${SPARK_POLARIS_CLIENT_SECRET:-}
+    # Standalone otherwise gives an application every available core when its
+    # own SparkConf forgets a ceiling.
+    SPARK_MASTER_OPTS: -Dspark.deploy.defaultCores=${SPARK_APPLICATION_CORES:-2}
     # Both lab CAs in one JVM truststore: object storage terminates on Ceph's
     # certificate and the catalog on Polaris's, and neither harness signs for
     # the other.
@@ -37,7 +40,12 @@ x-spark-common: &spark-common
     # image carries only the runtime the jobs are compiled against.
     - ${SPARK_JOBS_JAR:?Job jar not resolved; invoke through the harness scripts}:/opt/stratus/jobs/stratus-spark-jobs.jar:ro
     - spark-events:/opt/spark/events
-    - spark-scratch:/opt/spark/scratch
+  # spark.local.dir is executor spill/shuffle state and must be private, fast,
+  # and disposable. A tmpfs declared on the common service is instantiated
+  # separately for every container; unlike the old named volume it is not
+  # shared by both workers.
+  tmpfs:
+    - /opt/spark/scratch:uid=185,gid=185,mode=0700,size=1073741824
   networks:
     - ceph
   restart: unless-stopped
@@ -105,7 +113,6 @@ networks:
     name: ${CEPH_HARNESS_NETWORK:?Ceph connection settings not loaded; invoke through the harness scripts}
 
 volumes:
-  # Local event log and scratch space: the developer-only condition P1-3.6-P1
-  # replaces with Ceph-backed event logs and a history server.
+  # Local event log: the developer-only condition P1-3.6-P1 replaces this with
+  # Ceph-backed event logs and a history server. Scratch is per-container tmpfs.
   spark-events:
-  spark-scratch:

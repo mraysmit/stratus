@@ -74,14 +74,52 @@ final class SparkClusterConformanceTest {
         // base image without them fails much later with a confusing
         // ClassNotFoundException inside a job.
         var result = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, SHORT,
-                "sh", "-c", "ls /opt/spark/jars | grep -E 'iceberg-spark-runtime|iceberg-aws-bundle|hadoop-aws'");
+                "sh", "-c", "ls /opt/spark/jars | grep -E 'stratus-iceberg-aws-runtime|hadoop-aws'");
         assertTrue(result.succeeded(), "the runtime jars must be present: " + result.describe());
 
         for (String artifact : new String[] {
-                "iceberg-spark-runtime-4.1_2.13", "iceberg-aws-bundle", "hadoop-aws"}) {
+                "stratus-iceberg-aws-runtime", "hadoop-aws"}) {
             assertTrue(result.output().contains(artifact),
                     artifact + " must be in the image, found: " + result.output());
         }
+    }
+
+    @Test
+    void hadoopAndBothAwsClientsHaveOneUnambiguousClasspath() {
+        var hadoop = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, SHORT,
+                "sh", "-c", "ls -1 /opt/spark/jars/hadoop-client-api-*.jar "
+                        + "/opt/spark/jars/hadoop-client-runtime-*.jar /opt/spark/jars/hadoop-aws-*.jar");
+        assertTrue(hadoop.succeeded(), "the Hadoop client set must be inspectable: " + hadoop.describe());
+        assertTrue(hadoop.output().contains("hadoop-client-api-3.4.3.jar")
+                        && hadoop.output().contains("hadoop-client-runtime-3.4.3.jar")
+                        && hadoop.output().contains("hadoop-aws-3.4.3.jar"),
+                "every Hadoop client artifact must be 3.4.3: " + hadoop.output());
+        assertTrue(!hadoop.output().contains("3.4.2") && !hadoop.output().contains("3.4.1"),
+                "no older Hadoop client may remain on the runtime classpath: " + hadoop.output());
+
+        var sdkOwners = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, SHORT,
+                "sh", "-c", "for jar in /opt/spark/jars/*.jar; do "
+                        + "if jar tf \"$jar\" | grep -qx 'software/amazon/awssdk/services/s3/S3Client.class'; "
+                        + "then basename \"$jar\"; fi; done");
+        assertTrue(sdkOwners.succeeded(), "AWS SDK ownership must be inspectable: " + sdkOwners.describe());
+        assertEquals(1, sdkOwners.output().lines().filter(line -> !line.isBlank()).count(),
+                "only Hadoop's SDK may own the unrelocated AWS class: " + sdkOwners.output());
+        assertTrue(sdkOwners.output().contains("bundle-2.35.4.jar"),
+                "Hadoop 3.4.3's supported SDK must own the public AWS package: " + sdkOwners.output());
+
+        var iceberg = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, SHORT,
+                "sh", "-c", "entries=$(mktemp); "
+                        + "jar tf /opt/spark/jars/stratus-iceberg-aws-runtime-*.jar >\"$entries\"; "
+                        + "grep -E 'org/apache/iceberg/aws/s3/S3FileIO.class|"
+                        + "dev/stratus/thirdparty/iceberg/amazon/awssdk/services/s3/S3Client.class' \"$entries\"; "
+                        + "if grep -q '^software/amazon/' \"$entries\"; then "
+                        + "echo 'unrelocated Amazon class leaked from Iceberg'; rm -f \"$entries\"; exit 1; fi; "
+                        + "rm -f \"$entries\"");
+        assertTrue(iceberg.succeeded()
+                        && iceberg.output().contains("org/apache/iceberg/aws/s3/S3FileIO.class")
+                        && iceberg.output().contains(
+                                "dev/stratus/thirdparty/iceberg/amazon/awssdk/services/s3/S3Client.class"),
+                "Iceberg must carry only relocated Amazon libraries: " + iceberg.output());
     }
 
     @Test
@@ -91,9 +129,9 @@ final class SparkClusterConformanceTest {
                 "cat", "/opt/stratus/artifact-lock.txt");
 
         assertTrue(result.succeeded(), "the artifact lock must ship in the image: " + result.describe());
-        assertTrue(result.output().contains("iceberg-spark-runtime-4.1_2.13-1.11.0.jar"),
-                "the lock must name the pinned Iceberg runtime: " + result.output());
-        assertTrue(result.output().contains("hadoop-aws-3.4.1.jar"),
+        assertTrue(result.output().contains("stratus-iceberg-aws-runtime-1.0-SNAPSHOT-runtime.jar"),
+                "the lock must name the isolated Iceberg runtime: " + result.output());
+        assertTrue(result.output().contains("hadoop-aws-3.4.3.jar"),
                 "the lock must name the pinned S3A connector: " + result.output());
     }
 }

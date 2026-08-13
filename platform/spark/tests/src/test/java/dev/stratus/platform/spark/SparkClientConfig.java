@@ -25,6 +25,7 @@ import java.util.Map;
  * @param driverHost the address executors dial back on
  * @param driverPort the driver's RPC port, fixed so it is knowable in advance
  * @param blockManagerPort the driver's block transfer port, fixed for the same reason
+ * @param applicationCores maximum cores this application may hold
  *
  * This record is part of the Stratus on-premises data fabric platform.
  *
@@ -43,7 +44,8 @@ record SparkClientConfig(
         String storageSecretKey,
         String driverHost,
         int driverPort,
-        int blockManagerPort) {
+        int blockManagerPort,
+        int applicationCores) {
 
     /**
      * Executors run in containers and connect back to this process. On the
@@ -69,6 +71,9 @@ record SparkClientConfig(
             throw new IllegalArgumentException(
                     "The driver and block manager need separate ports, both were " + driverPort);
         }
+        if (applicationCores < 1) {
+            throw new IllegalArgumentException("Application cores must be at least one");
+        }
     }
 
     /**
@@ -93,7 +98,8 @@ record SparkClientConfig(
                 storage.get("secretKey"),
                 DEVELOPER_DRIVER_HOST,
                 driverPort,
-                blockManagerPort);
+                blockManagerPort,
+                1);
     }
 
     /** The same platform, reached as a different catalog principal. */
@@ -101,7 +107,24 @@ record SparkClientConfig(
                                   int blockManagerPort) {
         return new SparkClientConfig(applicationName, masterUrl, catalogName, catalogUri,
                 credential, storageEndpoint, storageAccessKey, storageSecretKey,
-                driverHost, driverPort, blockManagerPort);
+                driverHost, driverPort, blockManagerPort, applicationCores);
+    }
+
+    /** A client with a different resource request, used to prove worker distribution. */
+    SparkClientConfig withApplicationCores(int cores) {
+        return new SparkClientConfig(applicationName, masterUrl, catalogName, catalogUri,
+                principalCredential, storageEndpoint, storageAccessKey, storageSecretKey,
+                driverHost, driverPort, blockManagerPort, cores);
+    }
+
+    /** The token endpoint paired with the configured Polaris catalog endpoint. */
+    String catalogOAuth2Uri() {
+        String catalogPath = "/api/catalog";
+        if (!catalogUri.endsWith(catalogPath)) {
+            throw new IllegalArgumentException(
+                    "The catalog URI must end with " + catalogPath + ": " + catalogUri);
+        }
+        return catalogUri + "/v1/oauth/tokens";
     }
 
     /** The principal this client authenticates as, without its secret. */

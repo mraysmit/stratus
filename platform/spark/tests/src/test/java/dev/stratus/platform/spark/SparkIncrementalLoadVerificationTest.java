@@ -57,8 +57,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 final class SparkIncrementalLoadVerificationTest {
 
     private static final Duration JOB = Duration.ofMinutes(10);
-    private static final String JOBS = "dev.stratus.jobs.spark.";
-
     /** The status codes the jobs document; see {@code JobExit}. */
     private static final int EXIT_PROMOTION_BLOCKED = 2;
     private static final int EXIT_SCHEMA_DRIFT = 3;
@@ -110,12 +108,11 @@ final class SparkIncrementalLoadVerificationTest {
     /**
      * The jobs, run in this client's driver.
      *
-     * <p>Ingestion is the exception and still goes to the cluster: it reads a
-     * raw object over {@code s3a://}, which reaches Hadoop's
-     * {@code UserGroupInformation} and its call to {@code Subject.getSubject}.
-     * JDK 24 removed the Security Manager for good (JEP 486), so that throws on
-     * a modern workstation JVM and no flag restores it. The cluster image runs
-     * Java 17, where it works.
+     * <p>All scenario steps use this one driver. Hadoop 3.4.3 contains the
+     * current-JDK Subject compatibility fix, so ingestion no longer needs a
+     * fresh container-side driver merely to read {@code s3a://}. A separate
+     * pipeline smoke test retains the real packaged {@code spark-submit}
+     * boundary.
      */
     private static PlatformJobs jobs;
 
@@ -246,10 +243,10 @@ final class SparkIncrementalLoadVerificationTest {
 
         assertFalse(result.succeeded(),
                 "a batch already in the table must be refused: " + result.describe());
-        assertTrue(result.output().contains("append-only"),
-                "the refusal must say why: " + result.output());
-        assertTrue(result.output().contains(BATCH_1),
-                "the refusal must name the batch: " + result.output());
+        assertTrue(result.detail().contains("append-only"),
+                "the refusal must say why: " + result.detail());
+        assertTrue(result.detail().contains(BATCH_1),
+                "the refusal must name the batch: " + result.detail());
         assertEquals("5", scalar("count(*)", BRONZE), "the refused batch must not have been written");
 
         SparkVerificationLogging.batchRefused(BRONZE, BATCH_1, "fail", result.exitCode(),
@@ -402,12 +399,12 @@ final class SparkIncrementalLoadVerificationTest {
         assertEquals(EXIT_SCHEMA_DRIFT, result.exitCode(),
                 "schema drift has its own status code so an orchestrator can escalate rather than "
                         + "retry: " + result.describe());
-        assertTrue(result.output().contains("customer_id"),
-                "the refusal must name the column: " + result.output());
-        assertTrue(result.output().contains("int"),
-                "and the type the table holds: " + result.output());
-        assertTrue(result.output().contains("string"),
-                "and the type the batch carries: " + result.output());
+        assertTrue(result.detail().contains("customer_id"),
+                "the refusal must name the column: " + result.detail());
+        assertTrue(result.detail().contains("int"),
+                "and the type the table holds: " + result.detail());
+        assertTrue(result.detail().contains("string"),
+                "and the type the batch carries: " + result.detail());
 
         assertEquals("12", scalar("count(*)", BRONZE), "a refused batch must write nothing");
         assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '"
@@ -504,15 +501,12 @@ final class SparkIncrementalLoadVerificationTest {
     @Test
     @Order(12)
     void anOverrideIsRecordedAlongsideTheVerdictItOverridesRatherThanReplacingIt() {
-        var result = LiveSparkCluster.submitJob(JOBS + "PromotionGate", JOB,
-                "--runId", BLOCKED_RUN,
-                "--targetTable", BRONZE,
-                "--override-reason", "known upstream defect, tracked as STRATUS-1",
-                "--override-principal", "data-steward");
+        var result = jobs.overrideGate(BLOCKED_RUN, BRONZE, "data-steward",
+                "known upstream defect, tracked as STRATUS-1");
 
         assertTrue(result.succeeded(), "an override must promote: " + result.describe());
-        assertTrue(result.output().contains("PROMOTION OVERRIDDEN"),
-                "an override must never be silent: " + result.output());
+        assertTrue(result.detail().contains("PROMOTION OVERRIDDEN"),
+                "an override must never be silent: " + result.detail());
 
         assertEquals("1", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'overridden'"),
                 "the override must be recorded as its own result");
@@ -645,38 +639,24 @@ final class SparkIncrementalLoadVerificationTest {
                         .contains("stratus-orphan-probe"),
                 "the probe must be in place, or the assertions below prove nothing");
 
-        // Submitted, not run in this driver.
-        //
-        // Observed 2026-08-12: CALL stratus.system.remove_orphan_files fails in
-        // the workstation driver with "getSubject is not supported", the JDK 24+
-        // removal of the Security Manager (JEP 486), and succeeds in the
-        // cluster's Java 17 image. Which call inside the procedure reaches
-        // Subject.getSubject was not established — the exception is caught and
-        // only its message recorded — so this is a measured fact about this
-        // operation, not a rule about a category of them. The other maintenance
-        // operations were tried in the driver and work.
-        var refused = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "delete_orphan_files",
-                "--olderThan", aMomentFromNow());
+        var refused = jobs.maintain(BRONZE, new String[] {"delete_orphan_files"},
+                aMomentFromNow(), null);
 
         assertFalse(refused.succeeded(),
                 "a retention inside the concurrent-write window must be refused: "
                         + refused.describe());
-        assertTrue(refused.output().contains("less than 24 hours"),
-                "the refusal must say what makes the interval unsafe: " + refused.output());
+        assertTrue(refused.detail().contains("less than 24 hours"),
+                "the refusal must say what makes the interval unsafe: " + refused.detail());
 
         // The negative control: the same operation with a retention outside that
         // window runs to completion. Without it, the refusal above is
         // indistinguishable from an operation that never works at all.
-        var ran = LiveSparkCluster.submitJob(JOBS + "MaintenanceJob", JOB,
-                "--targetTable", BRONZE,
-                "--operations", "delete_orphan_files",
-                "--olderThan", aDayAndAHalfAgo());
+        var ran = jobs.maintain(BRONZE, new String[] {"delete_orphan_files"},
+                aDayAndAHalfAgo(), null);
 
         assertTrue(ran.succeeded(), "a safe retention must run: " + ran.describe());
-        assertTrue(ran.output().contains("MAINTENANCE delete_orphan_files"),
-                "and report what it did: " + ran.output());
+        assertTrue(ran.detail().contains("MAINTENANCE delete_orphan_files"),
+                "and report what it did: " + ran.detail());
 
         String remaining = LiveSparkCluster.listObjectPrefix(bronzeDataPrefix, JOB);
         assertTrue(remaining.contains(liveFileName),
@@ -715,21 +695,22 @@ final class SparkIncrementalLoadVerificationTest {
                 "customer_id=11", scalar("email", SILVER + " WHERE customer_id = 11"));
     }
 
-    private static LiveSparkCluster.CommandResult ingest(String resource, String batchId,
-                                                         String schema, String... extra) {
+    private static PlatformJobs.Outcome ingest(String resource, String batchId,
+                                               String schema, String... extra) {
         var uploaded = LiveSparkCluster.uploadLandingResource(resource,
                 LANDING_PREFIX + "/" + resource, JOB);
         assertTrue(uploaded.succeeded(), "the landing fixture must upload: " + uploaded.describe());
 
-        var argv = new ArrayList<>(List.of(
-                "--sourceFile", "s3a://stratus-landing/" + LANDING_PREFIX + "/" + resource,
-                "--targetTable", BRONZE,
-                "--sourceSystem", "crm",
-                "--batchId", batchId,
-                "--schema", schema,
-                "--runId", "ingest-" + batchId + "-" + SUFFIX));
-        argv.addAll(List.of(extra));
-        return LiveSparkCluster.submitJob(JOBS + "IngestionJob", JOB, argv.toArray(new String[0]));
+        if (extra.length != 0
+                && (extra.length != 2 || !"--onExistingBatch".equals(extra[0]))) {
+            throw new IllegalArgumentException(
+                    "The ingestion scenario accepts only --onExistingBatch <mode>");
+        }
+        String existing = extra.length == 0 ? "reject" : extra[1];
+        return jobs.ingest(
+                "s3a://stratus-landing/" + LANDING_PREFIX + "/" + resource,
+                BRONZE, "crm", batchId, existing, schema,
+                "ingest-" + batchId + "-" + SUFFIX);
     }
 
     private static PlatformJobs.Outcome transform(String batchId) {

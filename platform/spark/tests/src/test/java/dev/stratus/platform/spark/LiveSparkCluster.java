@@ -64,32 +64,6 @@ final class LiveSparkCluster {
                 "Set STRATUS_SPARK_INTEGRATION=true to run against a live Spark cluster");
     }
 
-    /**
-     * Runs a query whose single result is wrapped in a distinctive marker, and
-     * returns that marker's value.
-     *
-     * <p>Substring-matching a bare number against spark-sql output proves
-     * nothing: the banner, the application id, and the timestamps between them
-     * contain every digit, so {@code output().contains("4")} holds whatever
-     * the query returned. Labelling the value makes the assertion mean what it
-     * says.
-     */
-    static String scalar(String selectExpression, String fromClause, Duration timeout) {
-        String marker = "STRATUS_RESULT";
-        CommandResult result = sparkSql(String.format(
-                "SELECT concat('%s=', %s) FROM %s", marker, selectExpression, fromClause), timeout);
-        if (!result.succeeded()) {
-            throw new IllegalStateException("Query failed: " + result.describe());
-        }
-        var matcher = java.util.regex.Pattern.compile(marker + "=(\\S*)").matcher(result.output());
-        if (!matcher.find()) {
-            throw new IllegalStateException(
-                    "No " + marker + " row in the output: " + result.output());
-        }
-        SparkVerificationLogging.measurement(selectExpression, fromClause, matcher.group(1));
-        return matcher.group(1);
-    }
-
     /** The Polaris catalog endpoint, from the provider's published settings. */
     static String polarisEndpoint() {
         Path connection = harnessDirectory().getParent().getParent()
@@ -134,18 +108,6 @@ final class LiveSparkCluster {
                 "exec", "-T", "-e", "STRATUS_LOG_LEVEL=" + logLevel(), service));
         argv.addAll(List.of(command));
         return run(timeout, argv);
-    }
-
-    /**
-     * Runs Spark SQL against the standalone master from inside the cluster.
-     * This is a real submission: the driver starts in the master container and
-     * the statement executes on the registered workers.
-     */
-    static CommandResult sparkSql(String sql, Duration timeout) {
-        return exec(MASTER_SERVICE, timeout,
-                "/opt/spark/bin/spark-sql",
-                "--master", "spark://spark-master.stratus.local:7077",
-                "-e", sql);
     }
 
     /**
@@ -262,9 +224,6 @@ final class LiveSparkCluster {
                 int mainClass = argv.indexOf("--class");
                 return mainClass < 0 || mainClass + 1 >= argv.size()
                         ? "spark-submit" : "submit " + argv.get(mainClass + 1);
-            }
-            if (argument.endsWith("spark-sql")) {
-                return "spark-sql";
             }
             if (argument.equals("rclone")) {
                 return "rclone " + argv.get(argv.indexOf("rclone") + 3);

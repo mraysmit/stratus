@@ -1,6 +1,6 @@
 # Spark Client Submission — the gap between what is verified and what is used
 
-- Status: External client built and proven; conversion of the existing suite outstanding (§10).
+- Status: External client and scenario-suite conversion implemented; live revalidation in progress.
 - Raised: 2026-08-09
 - Affects: `platform/spark/tests`, `docs/implementation/spark_compute.md` §10
 
@@ -169,17 +169,13 @@ cost real time to diagnose:
   exists, and the `spark-integration-tests` profile runs one fork per class.
   Two principals in one driver is therefore a test of *authorisation*; two
   drivers means two processes.
-- **A Java 25 client cannot use the S3A connector.** Hadoop's
-  `UserGroupInformation` asks for the `Subject` of the current access control
-  context, and a JDK that has removed the security manager refuses:
-  `getSubject is not supported`. Java 17 and 21 answer it; 24 onwards do not,
-  and Java 25 rejects `-Djava.security.manager=allow` at VM startup, so the
-  usual workaround is gone. This reaches only the raw-object path — every
-  catalog operation uses Iceberg's own S3 client and is unaffected — and it is a
-  constraint on the *client's* JVM, not the platform's: the cluster runs Java
-  17. The repository default is 25, so the S3A check states an assumption
-  naming the JVM it declined on, and proving that path means running the client
-  suite on Java 17 or 21.
+- **The current-JDK failure was Hadoop, not an intrinsic S3A limit.** Hadoop
+  3.4.1 called `Subject.getSubject`, which JDK 24 permanently disabled, so the
+  raw-object path failed on the workstation while Iceberg's S3 client worked.
+  Hadoop 3.4.3 contains HADOOP-19212 and uses the replacement Subject API. The
+  verifier now runs that line on Java 26 and the S3A round trip is mandatory;
+  the version-based assumption was removed. The Spark containers remain on
+  Spark 4.1.2's supported Java 17 component runtime.
 - **Polaris refuses rather than filters.** A principal granted nothing does not
   receive an empty list; it receives
   `not authorized for op LIST_NAMESPACES`, naming the principal and the roles
@@ -209,5 +205,8 @@ it does. This document is the statement that the claim was never made, so that
 nobody later reads "the batch pipeline works end to end" as covering the
 submission path.
 
-Acceptance of the change should carry its own task, and `spark_compute.md` §10
-should stop describing a suite that does not exist.
+The long incremental scenario now runs ingestion and maintenance in its one
+external driver. One pipeline check deliberately remains a packaged
+`spark-submit` smoke test, so jar assembly, argument parsing, process exit and
+the real submission boundary are still exercised without paying that startup
+cost for every tiny fixture.

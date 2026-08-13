@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.stratus</groupId>
+        <artifactId>stratus-build-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../../build-support/stratus-build-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>stratus-iceberg-aws-runtime</artifactId>
+    <name>Stratus Isolated Iceberg AWS Runtime</name>
+    <description>Iceberg S3FileIO with its AWS SDK relocated away from Hadoop S3A</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-aws-bundle</artifactId>
+            <!-- Consumers receive only the relocated artifact produced here,
+                 never the original bundle as a second transitive jar. -->
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <!-- Shade replaces the main artifact. Recreate the thin
+                         input on every package so a second build cannot shade
+                         yesterday's already-shaded output into itself. -->
+                    <forceCreation>true</forceCreation>
+                    <skipIfEmpty>false</skipIfEmpty>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Hadoop S3A and Iceberg S3FileIO require different
+                                 AWS SDK releases. Relocating Iceberg's complete
+                                 upstream bundle gives each client exactly the SDK
+                                 it was built and tested with. -->
+                            <artifactSet>
+                                <includes>
+                                    <include>org.apache.iceberg:iceberg-spark-runtime-4.1_2.13</include>
+                                    <include>org.apache.iceberg:iceberg-aws-bundle</include>
+                                </includes>
+                            </artifactSet>
+                            <relocations>
+                                <relocation>
+                                    <!-- iceberg-aws-bundle also embeds Amazon
+                                         event-stream, analytics-accelerator,
+                                         and CRT-related packages. Isolate the
+                                         whole vendor namespace, not only the
+                                         SDK subtree, or Hadoop S3A can load an
+                                         Iceberg-bundled companion class. -->
+                                    <pattern>software.amazon</pattern>
+                                    <shadedPattern>dev.stratus.thirdparty.iceberg.amazon</shadedPattern>
+                                </relocation>
+                            </relocations>
+                            <filters>
+                                <filter>
+                                    <!-- Both upstream bundles carry copies of
+                                         these generic dependency resources.
+                                         Keep the Spark runtime's copy once;
+                                         services are merged below. -->
+                                    <artifact>org.apache.iceberg:iceberg-aws-bundle</artifact>
+                                    <excludes>
+                                        <exclude>LICENSE</exclude>
+                                        <exclude>NOTICE</exclude>
+                                        <exclude>parquet.thrift</exclude>
+                                        <exclude>META-INF/DEPENDENCIES</exclude>
+                                        <exclude>META-INF/FastDoubleParser-*</exclude>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                        <exclude>META-INF/io.netty.versions.properties</exclude>
+                                        <exclude>META-INF/jandex.idx</exclude>
+                                        <exclude>META-INF/maven/**</exclude>
+                                        <exclude>META-INF/native-image/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/MANIFEST.MF</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/versions/**/module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <!-- Attach instead of replacing the thin module jar.
+                                 Replacement is not reliable on Windows when a
+                                 scanner briefly opens this 100+ MB artifact. -->
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>runtime</shadedClassifierName>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

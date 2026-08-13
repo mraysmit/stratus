@@ -6,7 +6,6 @@ package dev.stratus.platform.spark;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -122,22 +121,10 @@ final class SparkCatalogBindingConformanceTest {
 
     @Test
     void readsAndWritesRawObjectsOverS3a() {
-        // Hadoop's UserGroupInformation asks for the Subject of the current
-        // access control context, and a JDK that has removed the security
-        // manager refuses: "getSubject is not supported". Java 17 and 21 answer
-        // it; 24 onwards do not, and Java 25 rejects the
-        // -Djava.security.manager=allow workaround at VM startup. The cluster
-        // runs Java 17, so this is a constraint on the client's JVM alone, and
-        // it reaches only the S3A connector — every catalog path above uses
-        // Iceberg's own S3 client and is unaffected.
-        //
-        // Stated as an assumption rather than a silent pass: the run says which
-        // JVM it was on and why the check did not happen, and the same suite on
-        // a supported JDK proves the path for real.
-        assumeTrue(Runtime.version().feature() <= 21,
-                "The S3A connector needs a JVM that still answers Subject.getSubject; this is Java "
-                        + Runtime.version().feature() + ". Run the client suite on Java 17 or 21 "
-                        + "to prove the raw-object path.");
+        // Hadoop 3.4.3 contains HADOOP-19212 and obtains the current Subject
+        // without the Security Manager APIs removed by current JDKs. This is an
+        // assertion on every selected verifier JVM now, never an assumption
+        // that silently skips the raw-object half of the storage binding.
 
         // S3A is the path Spark uses for landing files and event logs, and it is
         // configured separately from Iceberg's S3FileIO — a working catalog says

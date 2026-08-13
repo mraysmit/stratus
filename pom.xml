@@ -29,6 +29,7 @@
         <module>verification/catalog</module>
         <module>verification/secrets</module>
         <module>platform/ceph/tests</module>
+        <module>platform/spark/aws-runtime</module>
         <module>platform/spark/tests</module>
         <module>jobs/spark</module>
         <module>testing/repo-guardrails</module>

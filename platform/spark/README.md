@@ -4,9 +4,10 @@ Product integration for Apache Spark, the batch compute engine of the Stratus
 platform. Spark reads and writes Iceberg tables through the Polaris catalog
 and reaches object storage through Ceph RGW.
 
-**Status: developer track complete and verified (2026-08-09).** The reduced
-cluster, its bindings to Polaris and Ceph, and the full batch pipeline are
-proven against live products; transcripts are in `compose-cluster/logs/`. The
+**Status: developer track updated 2026-08-13; live revalidation pending.** The
+reduced cluster, its bindings to Polaris and Ceph, and the full batch pipeline
+have prior live evidence in `compose-cluster/logs/`; the Hadoop/AWS classpath
+and test-driver changes described below require a fresh complete transcript. The
 implementation plan and task track are owned by
 [spark_compute.md](../../docs/implementation/spark_compute.md) (Increment 3),
 whose `P1-3.1-D1`, `P1-3.2-D1`, and `P1-3.3-V1` record the state.
@@ -21,8 +22,9 @@ ready.
 | Directory | Purpose | State |
 |---|---|---|
 | [`compose-cluster/`](compose-cluster/README.md) | Disposable developer harness: one master and two workers attached to the Ceph harness network per [ADR-P1-003](../../docs/decisions/ADR-P1-003-composed-harness-internal-dns.md) | Live-validated |
-| `image/` | Runtime image: the approved Spark base plus the Iceberg and S3A client artifacts, with a checksum lock | Live-validated |
-| `tests/` | Live cluster, binding, and pipeline conformance suites, plus offline harness guardrails | Live-validated |
+| `aws-runtime/` | Iceberg Spark/AWS runtime with Iceberg's AWS SDK isolated from Hadoop S3A | Offline-validated |
+| `image/` | Runtime image: one Hadoop 3.4.3 line plus the isolated Iceberg runtime, with a checksum lock | Image-inspected; live revalidation pending |
+| `tests/` | Live cluster, binding, worker-distribution, latency, and pipeline suites, plus offline guardrails | Offline-validated; live revalidation pending |
 
 The batch jobs themselves are not here. Stratus-authored workload code lives
 under [`jobs/spark/`](../../jobs/spark/) by the repository layout rules; this

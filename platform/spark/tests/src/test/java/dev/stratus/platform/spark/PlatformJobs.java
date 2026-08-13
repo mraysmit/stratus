@@ -142,6 +142,17 @@ final class PlatformJobs {
                 decision.describe());
     }
 
+    Outcome overrideGate(String runId, String targetTable, String principal, String reason) {
+        refresh(targetTable);
+        return run(() -> {
+            var decision = PromotionGate.override(client.session(), runId, targetTable,
+                    principal, reason, Clock.systemUTC());
+            return decision.blocked()
+                    ? "PROMOTION OVERRIDDEN runId=" + runId + " principal=" + principal
+                    : decision.describe();
+        });
+    }
+
     /**
      * Maps an outcome to the status code the job documents.
      *

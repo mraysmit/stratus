@@ -16,6 +16,8 @@ spark.sql.catalog.__CATALOG__             org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.__CATALOG__.type        rest
 spark.sql.catalog.__CATALOG__.uri         __POLARIS_ENDPOINT__/api/catalog
 spark.sql.catalog.__CATALOG__.warehouse   __CATALOG__
+spark.sql.catalog.__CATALOG__.rest.auth.type oauth2
+spark.sql.catalog.__CATALOG__.oauth2-server-uri __POLARIS_ENDPOINT__/api/catalog/v1/oauth/tokens
 spark.sql.catalog.__CATALOG__.scope       PRINCIPAL_ROLE:ALL
 spark.sql.catalog.__CATALOG__.credential  __POLARIS_CREDENTIAL__
 # Polaris vends no subscoped credentials in the developer harness: RGW rejects
@@ -36,8 +38,20 @@ spark.hadoop.fs.s3a.impl                  org.apache.hadoop.fs.s3a.S3AFileSystem
 spark.hadoop.fs.s3a.endpoint              __CEPH_RGW_ENDPOINT__
 spark.hadoop.fs.s3a.path.style.access     true
 spark.hadoop.fs.s3a.aws.credentials.provider org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+# Keep client-mode uploads independent of winutils.exe on Windows. The
+# developer harness writes tiny raw fixtures; production should size this
+# deliberately against its executor/driver memory budget.
+spark.hadoop.fs.s3a.fast.upload           true
+spark.hadoop.fs.s3a.fast.upload.buffer    bytebuffer
 
 spark.sql.defaultCatalog                  __CATALOG__
+
+# The developer cluster has four cores. A default ceiling prevents one
+# forgotten client setting from monopolising both workers; one core per
+# executor also makes a two-core application exercise both workers.
+spark.cores.max                           2
+spark.executor.cores                      1
+spark.executor.memory                     1g
 
 # Both lab CAs must be trusted by every JVM that touches TLS, not just the one
 # that submits. The driver resolves the catalog, but the data path runs on the
@@ -52,3 +66,8 @@ spark.executor.extraJavaOptions           -Djavax.net.ssl.trustStore=/opt/stratu
 spark.eventLog.enabled                    true
 spark.eventLog.dir                        file:///opt/spark/events
 spark.local.dir                           /opt/spark/scratch
+
+# Catalog credentials are Spark configuration keys, so include "credential"
+# explicitly in addition to Spark's normal secret/password/token patterns.
+spark.redaction.regex                     (?i)secret|password|token|access[.]?key|credential
+spark.sql.redaction.options.regex         (?i)secret|password|token|access[.]?key|credential

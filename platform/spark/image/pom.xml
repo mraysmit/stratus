@@ -25,19 +25,41 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Increment 3 approved matrix; see spark_compute.md section 5. -->
         <iceberg.version>1.11.0</iceberg.version>
-        <hadoop.aws.version>3.4.1</hadoop.aws.version>
+        <hadoop.aws.version>3.4.3</hadoop.aws.version>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
-            <version>${iceberg.version}</version>
+            <groupId>dev.stratus</groupId>
+            <artifactId>stratus-iceberg-aws-runtime</artifactId>
+            <version>1.0-SNAPSHOT</version>
+            <classifier>runtime</classifier>
         </dependency>
         <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-aws-bundle</artifactId>
-            <version>${iceberg.version}</version>
+            <!-- The selected Spark image carries 3.4.2. These two artifacts
+                 replace that pair as a unit so the runtime never mixes Hadoop
+                 patch releases. Hadoop 3.4.3 also contains HADOOP-19212, which
+                 removes Subject.getSubject on current workstation JVMs. -->
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-api</artifactId>
+            <version>${hadoop.aws.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-runtime</artifactId>
+            <version>${hadoop.aws.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <!--

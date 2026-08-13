@@ -17,7 +17,7 @@
 
     <properties>
         <aws.sdk.version>2.46.8</aws.sdk.version>
-        <hadoop.version>3.4.1</hadoop.version>
+        <hadoop.version>3.4.3</hadoop.version>
         <iceberg.version>1.11.0</iceberg.version>
         <junit.version>6.1.0</junit.version>
         <!-- The versions the approved Spark runtime image is built from. A
@@ -95,6 +95,12 @@
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-aws-bundle</artifactId>
                 <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.stratus</groupId>
+                <artifactId>stratus-iceberg-aws-runtime</artifactId>
+                <version>${project.version}</version>
+                <classifier>runtime</classifier>
             </dependency>
             <!-- The client side of the Spark cluster: a driver that runs
                  outside the containers and submits to the standalone master.
