@@ -3,6 +3,7 @@
 
 package dev.stratus.platform.spark;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -103,6 +104,84 @@ final class SparkHarnessConformanceTest {
     }
 
     @Test
+    void catalogAuthenticationIsExplicitRatherThanInferred() {
+        String template = read("config/spark-defaults.conf.template");
+
+        assertTrue(template.contains(".rest.auth.type") && template.contains("oauth2"),
+                "the REST catalog must declare OAuth2 instead of relying on credential inference");
+        assertTrue(template.contains(".oauth2-server-uri")
+                        && template.contains("__POLARIS_ENDPOINT__/api/catalog/v1/oauth/tokens"),
+                "the OAuth token endpoint must be rendered explicitly");
+    }
+
+    @Test
+    void everyContainerGetsPrivateScratchAndApplicationsHaveResourceCeilings() {
+        String compose = read("compose.yaml");
+        String defaults = read("config/spark-defaults.conf.template");
+
+        assertFalse(compose.contains("spark-scratch:/opt/spark/scratch"),
+                "workers must not share a named volume for Spark local scratch");
+        assertTrue(compose.contains("tmpfs:") && compose.contains("/opt/spark/scratch"),
+                "each Spark container must receive private ephemeral scratch");
+        assertTrue(defaults.contains("spark.cores.max")
+                        && defaults.contains("spark.executor.cores"),
+                "developer applications need an explicit core ceiling and executor size");
+    }
+
+    @Test
+    void imageBuildReplacesHadoopAsOneVersionAndRelocatesIcebergsAwsSdk() {
+        String imagePom = read("../image/pom.xml");
+        String awsRuntimePom = read("../aws-runtime/pom.xml");
+        String dockerfile = read("../image/Dockerfile");
+
+        assertTrue(imagePom.contains("<hadoop.aws.version>3.4.3</hadoop.aws.version>"),
+                "Hadoop 3.4.3 contains the newer-JDK Subject compatibility fix");
+        assertTrue(awsRuntimePom.contains("<pattern>software.amazon</pattern>"),
+                "all Iceberg-bundled Amazon libraries must be relocated away from Hadoop S3A");
+        assertTrue(dockerfile.contains("hadoop-client-api-3.4.2.jar")
+                        && dockerfile.contains("hadoop-client-runtime-3.4.2.jar"),
+                "the base Hadoop clients must be replaced, never mixed with the selected version");
+    }
+
+    @Test
+    void s3aUploadsDoNotRequireWindowsNativeUtilities() {
+        String defaults = read("config/spark-defaults.conf.template");
+        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+
+        assertTrue(defaults.contains("spark.hadoop.fs.s3a.fast.upload.buffer    bytebuffer")
+                        && client.contains("spark.hadoop.fs.s3a.fast.upload.buffer\", \"bytebuffer"),
+                "client-mode S3A uploads must not depend on winutils.exe for local disk buffering");
+    }
+
+    @Test
+    void onlyThePackagedSubmissionSmokeTestStartsAFreshSparkDriver() {
+        Path tests = HARNESS.resolve("../tests/src/test/java/dev/stratus/platform/spark").normalize();
+        try (Stream<Path> sources = Files.list(tests)) {
+            List<Path> submitters = sources
+                    .filter(path -> path.toString().endsWith("Test.java"))
+                    .filter(path -> !path.getFileName().toString()
+                            .equals("SparkHarnessConformanceTest.java"))
+                    .filter(path -> {
+                        try {
+                            return Files.readString(path).contains("LiveSparkCluster.submitJob(");
+                        } catch (IOException exception) {
+                            throw new UncheckedIOException(exception);
+                        }
+                    })
+                    .toList();
+
+            assertEquals(List.of(tests.resolve("SparkPipelineVerificationTest.java")), submitters,
+                    "scenario tests must reuse their driver; only the packaged submission smoke test may start one");
+            String clusterCommands = Files.readString(tests.resolve("LiveSparkCluster.java"));
+            assertFalse(clusterCommands.contains("/opt/spark/bin/spark-sql")
+                            || clusterCommands.contains("static CommandResult sparkSql"),
+                    "the Hive-oriented SQL CLI must not return to the Polaris client suite");
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to inspect Spark integration tests", exception);
+        }
+    }
+
+    @Test
     void theImageIsPinnedAndNeverLatest() {
         assertFalse(read(".env.template").contains("SPARK_IMAGE=stratus/spark-runtime:latest"),
                 "the runtime image must be a pinned tag");
@@ -120,6 +199,16 @@ final class SparkHarnessConformanceTest {
                 "shutdown must tear down by project name");
         assertFalse(shutdown.contains("load_environment"),
                 "shutdown must not require .env to be loadable");
+    }
+
+    @Test
+    void providerSettingsRemainSourceableAfterAWindowsCheckout() {
+        String common = read("scripts/lib/spark-compose-common.sh");
+
+        assertTrue(common.contains("sed 's/\\r$//'"),
+                "the Bash harness must strip CRLF before sourcing tracked connection files");
+        assertTrue(common.contains("cmd.exe /d /c mvnw.cmd"),
+                "Git Bash must invoke the Windows Maven wrapper without rewriting it");
     }
 
     @Test

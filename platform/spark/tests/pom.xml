@@ -64,13 +64,9 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-spark-runtime-4.1_2.13</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-aws-bundle</artifactId>
+            <groupId>dev.stratus</groupId>
+            <artifactId>stratus-iceberg-aws-runtime</artifactId>
+            <classifier>runtime</classifier>
             <scope>test</scope>
         </dependency>
         <dependency>

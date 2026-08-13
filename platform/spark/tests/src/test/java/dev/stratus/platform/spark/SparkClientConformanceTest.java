@@ -6,6 +6,9 @@ package dev.stratus.platform.spark;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -42,7 +45,8 @@ final class SparkClientConformanceTest {
     static void connect() {
         LiveSparkCluster.require();
         client = StratusSparkClient.connect(
-                SparkClientConfig.serviceIdentity("stratus-client-conformance", 17077, 17078));
+                SparkClientConfig.serviceIdentity("stratus-client-conformance", 17077, 17078)
+                        .withApplicationCores(2));
     }
 
     @AfterAll
@@ -74,6 +78,36 @@ final class SparkClientConformanceTest {
         assertEquals("143", client.scalar(
                         "SELECT count(*) FROM range(0, 1000) WHERE id % 7 = 0"),
                 "the cluster must execute a query that needs executors");
+    }
+
+    @Test
+    void aTwoCoreApplicationPlacesExecutorsOnBothWorkers() {
+        client.scalar("SELECT count(*) FROM range(0, 10000, 1, 8)");
+                List<String> executorHosts = Arrays.stream(
+                        client.session().sparkContext().statusTracker().getExecutorInfos())
+                .map(info -> info.host())
+                .distinct()
+                .toList();
+
+        assertEquals(2, executorHosts.size(),
+                "one single-core executor must run on each worker: " + executorHosts);
+    }
+
+    @Test
+    void warmTinyQueriesStayWithinTheDeveloperLatencyBudget() {
+        client.scalar("SELECT sum(id) FROM range(0, 100)");
+        Duration slowest = Duration.ZERO;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            long started = System.nanoTime();
+            assertEquals("4950", client.scalar("SELECT sum(id) FROM range(0, 100)"));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+            if (elapsed.compareTo(slowest) > 0) {
+                slowest = elapsed;
+            }
+        }
+
+        assertTrue(slowest.compareTo(Duration.ofSeconds(5)) < 0,
+                "a warm trivial query must not pay application startup; slowest=" + slowest);
     }
 
     @Test

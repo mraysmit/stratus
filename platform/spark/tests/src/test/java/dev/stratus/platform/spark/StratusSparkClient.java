@@ -37,8 +37,6 @@ final class StratusSparkClient implements AutoCloseable {
      * jobs a test submits alongside it. See the {@code spark.cores.max} note in
      * {@link #connect}.
      */
-    private static final int CLIENT_CORES = 1;
-
     private final SparkClientConfig config;
     private final SparkSession session;
 
@@ -74,6 +72,8 @@ final class StratusSparkClient implements AutoCloseable {
                 .config(catalog, "org.apache.iceberg.spark.SparkCatalog")
                 .config(catalog + ".type", "rest")
                 .config(catalog + ".uri", config.catalogUri())
+                .config(catalog + ".rest.auth.type", "oauth2")
+                .config(catalog + ".oauth2-server-uri", config.catalogOAuth2Uri())
                 .config(catalog + ".credential", config.principalCredential())
                 .config(catalog + ".scope", "PRINCIPAL_ROLE:ALL")
                 .config(catalog + ".warehouse", config.catalogName())
@@ -94,7 +94,8 @@ final class StratusSparkClient implements AutoCloseable {
                 // an ingestion job sat at cores=0 state=WAITING for 42 minutes
                 // while this client held all four. A client reads counts and
                 // metadata, so one core is ample and leaves three for the jobs.
-                .config("spark.cores.max", String.valueOf(CLIENT_CORES))
+                .config("spark.cores.max", String.valueOf(config.applicationCores()))
+                .config("spark.executor.cores", "1")
                 // The raw-object path, configured separately from the catalog's
                 // own storage client because it is a separate client: a working
                 // catalog says nothing about whether S3A works.
@@ -103,6 +104,12 @@ final class StratusSparkClient implements AutoCloseable {
                 .config("spark.hadoop.fs.s3a.secret.key", config.storageSecretKey())
                 .config("spark.hadoop.fs.s3a.path.style.access", "true")
                 .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true")
+                .config("spark.hadoop.fs.s3a.fast.upload", "true")
+                .config("spark.hadoop.fs.s3a.fast.upload.buffer", "bytebuffer")
+                .config("spark.redaction.regex",
+                        "(?i)secret|password|token|access[.]?key|credential")
+                .config("spark.sql.redaction.options.regex",
+                        "(?i)secret|password|token|access[.]?key|credential")
                 // Reachability. Executors are launched inside the container
                 // bridge and dial back here; without an address they can route
                 // to, the application is accepted and then never progresses.
@@ -146,6 +153,8 @@ final class StratusSparkClient implements AutoCloseable {
         isolated.conf().set(catalog, "org.apache.iceberg.spark.SparkCatalog");
         isolated.conf().set(catalog + ".type", "rest");
         isolated.conf().set(catalog + ".uri", other.catalogUri());
+        isolated.conf().set(catalog + ".rest.auth.type", "oauth2");
+        isolated.conf().set(catalog + ".oauth2-server-uri", other.catalogOAuth2Uri());
         isolated.conf().set(catalog + ".credential", other.principalCredential());
         isolated.conf().set(catalog + ".scope", "PRINCIPAL_ROLE:ALL");
         isolated.conf().set(catalog + ".warehouse", other.catalogName());

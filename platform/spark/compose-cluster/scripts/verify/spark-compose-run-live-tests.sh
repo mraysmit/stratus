@@ -39,14 +39,16 @@ test_log="$test_log_dir/$run_id.log"
 log "Writing the complete Spark conformance transcript to $test_log"
 
 if [[ "$#" -eq 0 ]]; then
-  set -- test -Pspark-integration-tests -pl :stratus-spark-tests -am
+  # verify lets the upstream isolated-AWS module finish its package phase
+  # before this module's tests start; its classes are produced by shading.
+  set -- verify -Pspark-integration-tests -pl :stratus-spark-tests -am
 fi
 
 set +e
 {
   printf 'RUN startedAtUtc=%s runId=%s catalog=%s storage=%s\n' \
     "$run_started_at" "$run_id" "$POLARIS_ENDPOINT" "$CEPH_RGW_ENDPOINT"
-  ./mvnw "$@"
+  repository_maven "$@"
 } 2>&1 | tee "$test_log"
 maven_status="${PIPESTATUS[0]}"
 set -e

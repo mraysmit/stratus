@@ -216,21 +216,10 @@ final class SparkPipelineVerificationTest {
     @Test
     @Order(3)
     void ingestionJobWritesBronzeTable() {
-        // Submitted into the cluster rather than run in this driver.
-        //
-        // Ingestion reads a raw object over s3a://, and the captured stack
-        // shows that reaching Hadoop's FileSystem layer:
-        //   Subject.getSubject
-        //     <- UserGroupInformation.getCurrentUser
-        //     <- org.apache.hadoop.fs.viewfs.ViewFileSystem.<init>
-        // JDK 24 permanently disabled the Security Manager (JEP 486), so that
-        // call throws UnsupportedOperationException here and no flag re-enables
-        // it. The cluster image runs Java 17, where it works.
-        //
-        // This is not the only job affected: remove_orphan_files fails the same
-        // way in the driver, and it reads no raw object. Which jobs can run in
-        // a driver was settled by trying them, not by reasoning about which
-        // library they use.
+        // This is the suite's one deliberate fresh process. The incremental
+        // scenario proves ingestion repeatedly through its long-lived client;
+        // this call proves the packaged jar, arguments, process exit and real
+        // spark-submit boundary without charging that startup to every batch.
         var result = LiveSparkCluster.submitJob(JOBS + "IngestionJob", JOB,
                 "--sourceFile", SOURCE_FILE,
                 "--targetTable", BRONZE,
