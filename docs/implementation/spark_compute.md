@@ -95,18 +95,29 @@ Ensure ports 7077 and 8081 are open between all nodes. Port 8080 and 8081 need t
 
 ## 5. Spark Docker Image
 
-The official Apache Spark Docker image is used as the base. A custom image adds the Iceberg runtime JAR, Iceberg's upstream S3-compatible client bundle, and Hadoop's S3A connector for raw-file and event-log access through Ceph RGW. The `iceberg-aws-bundle` and `hadoop-aws` names are upstream artifact names for S3 protocol clients; they do not imply an AWS deployment or an AWS account.
+The official Apache Spark Docker image is used as the base. A custom image adds
+Hadoop's S3A connector for raw-file and event-log access through Ceph RGW and a
+Stratus-packaged Iceberg runtime. Hadoop S3A 3.4.3 requires AWS SDK 2.35.4,
+while Iceberg 1.11.0 requires 2.44.4. Both upstream bundles use the same Java
+package names, so loading both directly is ambiguous. The Stratus runtime
+combines Iceberg's Spark and AWS bundles and relocates Iceberg's SDK under
+`dev.stratus.thirdparty.iceberg.awssdk`; Hadoop retains the unrelocated SDK it
+was built and tested with.
 
 The artifact lock for this image contains:
 
 | Artifact | Version | Purpose |
 |---|---:|---|
-| `iceberg-spark-runtime-4.1_2.13` | 1.11.0 | Iceberg Spark runtime and SQL extensions |
-| `iceberg-aws-bundle` | 1.11.0 | Iceberg `S3FileIO` implementation used with Ceph RGW |
-| `hadoop-aws` | 3.4.1 | Hadoop S3A filesystem used for `s3a://` landing files and Spark event logs |
-| `hadoop-aws` runtime dependencies | resolved from the 3.4.1 POM | S3A SDK/runtime libraries, locked with filenames, versions, licences, and SHA-256 checksums |
+| `stratus-iceberg-aws-runtime` | Iceberg 1.11.0 | Spark 4.1 runtime, `S3FileIO`, and Iceberg's relocated AWS SDK |
+| `hadoop-client-api` / `hadoop-client-runtime` | 3.4.3 | One matched Hadoop client line, replacing the base image's 3.4.2 pair |
+| `hadoop-aws` | 3.4.3 | S3A filesystem used for `s3a://` landing files and Spark event logs |
+| Hadoop S3A runtime dependencies | resolved from the 3.4.3 POM | SDK 2.35.4 and connector-specific dependencies, locked with checksums |
 
-Spark 4.1.2's official S3 example selects `hadoop-aws:3.4.1`. Image CI must also inspect the selected base image and confirm its Hadoop client JARs are 3.4.1-compatible before assembly. A mismatch fails the build; it is not corrected by layering another copy of `hadoop-common`, `hadoop-client-api`, or `hadoop-client-runtime` over the Spark distribution.
+The selected Spark image carries Hadoop 3.4.2. The Dockerfile removes its API
+and runtime pair before copying the complete 3.4.3 pair and `hadoop-aws` 3.4.3.
+Image conformance rejects any remaining 3.4.1/3.4.2 client and proves that only
+Hadoop's SDK owns the unrelocated `S3Client` class. Hadoop 3.4.3 is also the
+released patch line containing HADOOP-19212 for current-JDK Subject handling.
 
 ### Dockerfile
 
@@ -117,18 +128,21 @@ FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
 
 USER root
 
-# The build system resolves these pinned artifacts into the build context and
-# verifies their recorded checksums before the container build starts.
-COPY artifacts/iceberg-spark-runtime-4.1_2.13-1.11.0.jar /opt/spark/jars/
-COPY artifacts/iceberg-aws-bundle-1.11.0.jar /opt/spark/jars/
-# Generated from the locked hadoop-aws:3.4.1 runtime dependency set. The
-# directory excludes Hadoop core/client JARs already supplied by Spark.
-COPY artifacts/s3a-runtime/ /opt/spark/jars/
+# Replace the base Hadoop pair as one versioned unit, then copy the locked S3A
+# dependencies and isolated Iceberg runtime.
+RUN rm /opt/spark/jars/hadoop-client-api-3.4.2.jar \
+       /opt/spark/jars/hadoop-client-runtime-3.4.2.jar
+COPY jars/ /opt/spark/jars/
 
 USER spark
 ```
 
-Java 25 is the Stratus build and verifier baseline, but Spark 4.1 supports Java 17 and 21 rather than Java 25. The selected Spark image therefore remains on its supported Java 17 runtime, and Spark job modules are compiled with `--release 17` using the JDK 25 build toolchain. This is a component-runtime compatibility exception, not a change to the platform baseline.
+Java 26 is the Stratus build and verifier baseline. Spark 4.1.2 does not list
+Java 26 as a supported runtime, so the selected cluster image remains on Java
+17 and jobs remain compiled with `--release 17`. The external verification
+driver deliberately runs on Java 26 as a tested compatibility exception; the
+live client, S3A, catalog, worker-distribution and latency checks are its
+evidence. This is not a claim of upstream Spark support for Java 26.
 
 ### Build-system image publication
 
@@ -164,6 +178,8 @@ spark.sql.extensions                            org.apache.iceberg.spark.extensi
 spark.sql.catalog.stratus                       org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.stratus.type                  rest
 spark.sql.catalog.stratus.uri                   https://polaris.stratus.local:8181/api/catalog
+spark.sql.catalog.stratus.rest.auth.type        oauth2
+spark.sql.catalog.stratus.oauth2-server-uri     https://polaris.stratus.local:8181/api/catalog/v1/oauth/tokens
 spark.sql.catalog.stratus.credential            svc-spark:<client-secret>
 spark.sql.catalog.stratus.scope                 PRINCIPAL_ROLE:ALL
 spark.sql.catalog.stratus.warehouse             stratus
@@ -175,6 +191,9 @@ spark.sql.catalog.stratus.s3.path-style-access  true
 
 # Default catalog
 spark.sql.defaultCatalog                        stratus
+spark.cores.max                                 2
+spark.executor.cores                            1
+spark.executor.memory                           1g
 
 # S3A filesystem (raw landing files and production event logs through Ceph RGW)
 spark.hadoop.fs.s3a.impl                        org.apache.hadoop.fs.s3a.S3AFileSystem
@@ -188,6 +207,11 @@ spark.hadoop.fs.s3a.connection.ssl.enabled      true
 # s3a://stratus-platform/spark-event-logs/ and uses a scoped history-server identity.
 spark.eventLog.enabled                          true
 spark.eventLog.dir                              file:///data/spark-events
+spark.local.dir                                 /opt/spark/scratch
+
+# Include the REST catalog credential key in Spark UI/event-log redaction.
+spark.redaction.regex                           (?i)secret|password|token|access[.]?key|credential
+spark.sql.redaction.options.regex               (?i)secret|password|token|access[.]?key|credential
 
 # Serialization
 spark.serializer                                org.apache.spark.serializer.KryoSerializer
@@ -1033,8 +1057,8 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Verified 2026-08-08 (developer scope): `platform/spark/image/` assembles the approved matrix — `iceberg-spark-runtime-4.1_2.13` and `iceberg-aws-bundle` 1.11.0 with `hadoop-aws` 3.4.1 — resolved by the repository Maven toolchain into the build context by `spark-compose-resolve-artifacts.sh`, which writes `artifact-lock.txt` with Maven coordinates and SHA-256 per jar. Hadoop client jars are excluded at resolution so no second copy is layered over the Spark distribution. Live S3A create/read proven by `readsAndWritesRawObjectsOverS3a`. Image scan, digest pin, SBOM and provenance remain with `P1-0.1` | Accepted |
-| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Verified 2026-08-08: one master and two workers under `platform/spark/compose-cluster/`, published on loopback only, with local event-log and scratch volumes. Repeated start/verify cycles are idempotent and the master's own view is polled to a bounded deadline, so a running-but-unregistered worker fails rather than passes. Live: `workers=2/2 clusterCores=4`; four `SparkClusterConformanceTest` checks green. That polling check was performed by `spark-compose-verify-cluster.sh` at acceptance; the script was removed on 2026-08-11 because `SparkClusterConformanceTest.masterReportsBothWorkersAliveWithCapacity` asserts the same thing, and the suite is now the only owner (code style rules 10.1). The path is `compose-cluster/`, matching the Ceph and Polaris harnesses, not the `developer/` name this row first proposed | Accepted |
+| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; `platform/spark/aws-runtime/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Reopened 2026-08-13: Hadoop is one matched 3.4.3 API/runtime/S3A line and Iceberg 1.11.0 carries its SDK in the relocated Stratus runtime. Offline classpath tests and image inspection pass; fresh live S3A and pipeline evidence is required before re-acceptance. Image scan, digest pin, SBOM and provenance remain with `P1-0.1` | In progress |
+| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Updated 2026-08-13: one master and two workers remain loopback-published; each container now receives private tmpfs scratch, the master supplies a two-core default application ceiling, and executors are single-core so the live client suite can prove placement on both workers. Fresh lifecycle and live worker evidence is pending. | In progress |
 | `P1-3.2-D1` | `P1-3.2` | Developer | Configure Polaris, Ceph S3FileIO/S3A, CA trust, and lab credentials. | Data-engineering owner | `P1-3.1-D1`, P1-2 developer gate | `platform/spark/compose-cluster/config/`; svc-spark identity | catalog resolution and object read/write | D1 | Data-platform owner | Verified 2026-08-08: Spark resolves all four governed namespaces through Polaris over TLS and writes and reads an Iceberg table whose files land under `s3://stratus-bronze/bronze/`; S3A raw object round trip proven separately, since it is configured independently of Iceberg's S3FileIO. `svc-spark` exists as both an RGW identity (bucket policies on the five Stratus buckets, proven to fail closed on `stratus-denied`) and a Polaris principal created by `spark-compose-bootstrap-principal.sh`. No credential is in a tracked file: the RGW key pair is pulled from OpenBao (ADR-P1-004) and the catalog secret is generated into the ignored `.env`; the Spark configuration is rendered from the providers' `connection.env` so no endpoint is duplicated (ADR-P1-003). A forged principal secret is refused, with a positive control proving the real one works at that moment. Least-privilege narrowing of the catalog role belongs to `P1-3.2-P1` | Accepted |
 | `P1-3.3-V1` | `P1-3.3` | Developer | Implement and verify bronze, silver, gold, quality, promotion, maintenance, and lineage-payload jobs. | Data-engineering owner | `P1-3.2-D1` | `jobs/spark/`; `platform/spark/tests/` | expected data, failed-quality block, maintenance evidence | D1-D2 | Data owner | Verified 2026-08-09: five jobs under `jobs/spark/` (ingestion, transform, materialisation, quality, maintenance) plus `PromotionGate`, proven end to end by `SparkPipelineVerificationTest` — 11/11 against the live cluster, transcript `platform/spark/compose-cluster/logs/spark-conformance-tests-20260809T042935Z.log`. The fixture carries a duplicated business key and a blank field on purpose, so the failed-quality block is proven on a real failure rather than asserted: the blocking uniqueness rule records FAILED, the non-blocking completeness rule records WARNING, and the gate blocks naming the failing rule. Determinism is addressed rather than hoped for — deduplication orders by an explicit column so re-runs keep the same row. The gate also blocks when a run has no recorded results at all, so a quality job that dies before writing cannot promote unchecked data; that path was observed live during development. Orphan-file deletion is refused without an explicit retention age. 20 offline unit tests cover argument parsing, the lineage payload shape, and the verdict. **Superseded in part by `P1-3.3-V2`:** this row also recorded that ingestion used `createOrReplace` so a repeated run converged. That held for one file and was wrong for two — a second landing file replaced the whole table, which contradicts the architecture's append-only bronze, and no test in this task's suite would have noticed because none ingested twice. | Accepted |
 | `P1-3.3-V2` | `P1-3.3` | Developer | Bring the bronze and silver write modes in line with the architecture and prove the pipeline over successive batches; done when a second batch accumulates, a late replay cannot overwrite a correction, and both are proven to fail if the guard is removed. | Data-engineering owner | `P1-3.3-V1` | `jobs/spark/`; `platform/spark/tests/` | multi-batch, late arrival, schema drift, failed-batch replay | D1 | Data owner | Verified 2026-08-09: 37/37 live `spark-integration` checks, transcript `platform/spark/compose-cluster/logs/spark-conformance-tests-20260809T111311Z.log`, and 56 offline unit tests. Bronze now appends by batch and refuses a batch it already holds unless a replay is asked for (ADR-P1-006); silver is upserted on a monotonic sequence so a replay carrying older state cannot overwrite a correction. Both guards were proven load-bearing by putting the defect back: restoring `createOrReplace` failed `aSecondBatchAccumulatesInsteadOfReplacingTheFirst` with 3 rows where 8 were expected, and removing the sequence comparison failed `aReplayCarryingAnOlderVersionDoesNotOverwriteTheCorrection` with `bob.stale@example.com` where the correction should have held — in each case that test alone. Writing the scenarios found three defects nothing had exercised: a MERGE source registered from a DataFrame plan cannot be planned by Spark 4.1, the promotion-gate override wrote a `java.sql.Timestamp` against the deployed table's `TIMESTAMP_NTZ` schema and always failed, and `delete_orphan_files` could not run at all against this platform — it failed first on the table identifier and then on the `s3://` scheme. Not proven here: deletion of a genuinely aged orphan, which Iceberg's 24-hour retention floor puts out of reach of a harness whose files are minutes old; it belongs to `P1-3.5-V1` | Accepted |
@@ -1133,7 +1157,7 @@ Increment 3 is accepted when all of the following are true:
 - [ ] **P2** - Both Spark workers running and showing `ALIVE` in the master web UI
 - [ ] **P3** - Spark connects to Polaris and resolves all four namespaces
 - [ ] **P4** - Spark connects to Ceph RGW through the approved S3 endpoint and can read and write all platform buckets
-- [ ] **P5** - image CI proves `hadoop-aws:3.4.1` compatibility with the Spark base image and executes an S3A create/read/list/delete test against Ceph RGW using the trusted CA
+- [ ] **P5** - image CI proves the matched Hadoop 3.4.3 client/S3A set, isolated Iceberg AWS SDK, and an S3A create/read/list/delete test against Ceph RGW using the trusted CA
 - [ ] **P6** - `SparkPipelineVerificationTest` and `SparkIncrementalLoadVerificationTest` — every test passes against the live cluster (12 and 17 as of 2026-08-09). The first proves one batch end to end. The second proves the days after it, and exists because a review asked what real-world cases the suite covered and found that every test ran on a single file ingested once: a second batch, a late replay, a schema change and a failed-batch replay were all absent, and two of them could not have passed against the jobs as they were (`P1-3.3-V2`, ADR-P1-006)
 - [ ] **P7** - Bronze, silver, and gold Iceberg tables created and visible in Ceph RGW
 - [ ] **P8** - Quality results written to `platform.quality_check_results` and queryable via Spark SQL
@@ -1169,7 +1193,7 @@ The developer gate may unblock Increment 4 engineering. Only the production gate
 
 ### `ClassNotFoundException` for Iceberg or S3 classes
 
-- Confirm the Iceberg runtime, Iceberg S3 bundle, `hadoop-aws-3.4.1.jar`, and its locked runtime dependencies are present in `/opt/spark/jars/` inside the container
+- Confirm `stratus-iceberg-aws-runtime`, the Hadoop 3.4.3 API/runtime/S3A jars, and the locked connector dependencies are present in `/opt/spark/jars/`; no 3.4.1/3.4.2 Hadoop client or second unrelocated AWS SDK may remain
 - Compare the running image digest and artifact-lock digest with the promotion manifest; do not repair a running container by downloading JARs interactively
 - Rebuild the Docker image if JARs are missing
 
@@ -1190,7 +1214,7 @@ The developer gate may unblock Increment 4 engineering. Only the production gate
 - Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
 - Apache Spark 4.1.2 S3A dependency example: https://spark.apache.org/docs/4.1.2/running-on-kubernetes.html#dependency-management
 - Apache Spark object-store integration: https://spark.apache.org/docs/4.1.2/cloud-integration.html
-- Apache Hadoop S3A connector: https://hadoop.apache.org/docs/r3.4.1/hadoop-aws/tools/hadoop-aws/index.html
+- Apache Hadoop S3A connector: https://hadoop.apache.org/docs/r3.4.3/hadoop-aws/tools/hadoop-aws/index.html
 - Apache Spark Iceberg integration: https://iceberg.apache.org/docs/latest/spark-getting-started/
 - Iceberg Spark procedures (maintenance): https://iceberg.apache.org/docs/latest/spark-procedures/
 - Iceberg Spark SQL extensions: https://iceberg.apache.org/docs/latest/spark-ddl/

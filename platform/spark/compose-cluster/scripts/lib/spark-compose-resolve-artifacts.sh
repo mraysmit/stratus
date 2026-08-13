@@ -19,15 +19,24 @@ source "$(dirname "$0")/spark-compose-common.sh"
 image_dir="$REPO_DIR/platform/spark/image"
 jar_dir="$image_dir/jars"
 lock_file="$image_dir/artifact-lock.txt"
+maven_jar_dir="$jar_dir"
+if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  maven_jar_dir="$(cygpath -w "$jar_dir")"
+elif [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v wslpath >/dev/null 2>&1; then
+  maven_jar_dir="$(wslpath -w "$jar_dir")"
+fi
 
 rm -rf "$jar_dir"
 mkdir -p "$jar_dir"
 
 log "Resolving the pinned Spark runtime artifacts with the repository toolchain"
-(cd "$REPO_DIR" && ./mvnw --quiet --file platform/spark/image/pom.xml \
+(cd "$REPO_DIR" && repository_maven --quiet \
+  --projects :stratus-bom,:stratus-iceberg-aws-runtime --also-make \
+  install -DskipTests)
+(cd "$REPO_DIR" && repository_maven --quiet --file platform/spark/image/pom.xml \
   dependency:copy-dependencies \
   -DincludeScope=runtime \
-  -DoutputDirectory="$jar_dir")
+  -DoutputDirectory="$maven_jar_dir")
 
 shopt -s nullglob
 jars=("$jar_dir"/*.jar)
@@ -38,7 +47,7 @@ shopt -u nullglob
 # contents can be audited without rebuilding it.
 # Not --quiet: dependency:list writes the coordinates on INFO lines, which
 # quiet mode suppresses entirely.
-coordinates="$( (cd "$REPO_DIR" && ./mvnw --batch-mode --file platform/spark/image/pom.xml \
+coordinates="$( (cd "$REPO_DIR" && repository_maven --batch-mode --file platform/spark/image/pom.xml \
   dependency:list -DincludeScope=runtime 2>/dev/null) \
   | sed -nE 's/^\[INFO\] +([a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+:jar:[0-9][^ :]*):?.*$/\1/p' | sort -u || true)"
 
@@ -48,6 +57,8 @@ coordinates="$( (cd "$REPO_DIR" && ./mvnw --batch-mode --file platform/spark/ima
   printf '# Base image: %s\n' "$SPARK_BASE_IMAGE"
   printf '#\n'
   printf '# Maven coordinates, from which each artifact licence is resolvable:\n'
+  printf '#   org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:jar:1.11.0 (source of the relocated Stratus runtime)\n'
+  printf '#   org.apache.iceberg:iceberg-aws-bundle:jar:1.11.0 (source of the relocated Stratus runtime)\n'
   if [[ -n "$coordinates" ]]; then
     printf '#   %s\n' $coordinates
   else

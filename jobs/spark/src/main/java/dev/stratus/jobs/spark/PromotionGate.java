@@ -68,7 +68,7 @@ public final class PromotionGate {
                         "An override requires both --override-reason and --override-principal");
             }
             if (decision.blocked() && overrideReason.isPresent()) {
-                recordOverride(spark, decision, overridePrincipal.get(), overrideReason.get(),
+                override(spark, runId, targetTable, overridePrincipal.get(), overrideReason.get(),
                         Clock.systemUTC());
                 LOGGER.info("PROMOTION OVERRIDDEN runId=" + runId
                         + " principal=" + overridePrincipal.get());
@@ -111,6 +111,20 @@ public final class PromotionGate {
         // No results at all is not a pass. See the class comment.
         boolean blocked = results.isEmpty() || (!failing.isEmpty() && !overridden);
         return new PromotionDecision(runId, targetTable, blocked, results.size(), failing, warnings);
+    }
+
+    /** Records an explicit override without changing the verdict it overrides. */
+    public static PromotionDecision override(SparkSession spark, String runId, String targetTable,
+                                             String principal, String reason, Clock clock) {
+        if (principal == null || principal.isBlank() || reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "An override requires a non-blank principal and reason");
+        }
+        PromotionDecision decision = evaluate(spark, runId, targetTable);
+        if (decision.blocked()) {
+            recordOverride(spark, decision, principal, reason, clock);
+        }
+        return decision;
     }
 
     private static void recordOverride(SparkSession spark, PromotionDecision decision,
