@@ -48,7 +48,10 @@ set +e
 {
   printf 'RUN startedAtUtc=%s runId=%s catalog=%s storage=%s\n' \
     "$run_started_at" "$run_id" "$POLARIS_ENDPOINT" "$CEPH_RGW_ENDPOINT"
-  repository_maven "$@"
+  # A variable exported inside Git Bash is not reliably added to the Windows
+  # environment inherited by cmd.exe. Pass the same opt-in as a Maven user
+  # property so Surefire receives it on Windows and WSL as well as on Linux.
+  repository_maven -Dstratus.spark.integration=true "$@"
 } 2>&1 | tee "$test_log"
 maven_status="${PIPESTATUS[0]}"
 set -e

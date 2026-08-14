@@ -86,6 +86,12 @@ final class StratusSparkClient implements AutoCloseable {
                 .config("spark.sql.extensions",
                         "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
                 .config("spark.sql.defaultCatalog", config.catalogName())
+                // Timestamp literals without an explicit zone use the SQL
+                // session zone. A client launched from Shanghai otherwise
+                // sends an expiry boundary eight hours earlier than the same
+                // client launched in UTC, so maintenance can report success
+                // while expiring nothing.
+                .config("spark.sql.session.timeZone", "UTC")
                 // A standalone application with no ceiling takes every core in
                 // the cluster. The developer cluster has four, so a client that
                 // holds its session for a whole test class starves any job that
@@ -96,6 +102,13 @@ final class StratusSparkClient implements AutoCloseable {
                 // metadata, so one core is ample and leaves three for the jobs.
                 .config("spark.cores.max", String.valueOf(config.applicationCores()))
                 .config("spark.executor.cores", "1")
+                // The Apache default is 200 shuffle partitions. On this
+                // four-core developer cluster that turned tiny Iceberg cleanup
+                // actions into 204 tasks and added tens of seconds of scheduler
+                // overhead. Two tasks per cluster core preserves parallelism
+                // without manufacturing empty work.
+                .config("spark.default.parallelism", "8")
+                .config("spark.sql.shuffle.partitions", "8")
                 // The raw-object path, configured separately from the catalog's
                 // own storage client because it is a separate client: a working
                 // catalog says nothing about whether S3A works.

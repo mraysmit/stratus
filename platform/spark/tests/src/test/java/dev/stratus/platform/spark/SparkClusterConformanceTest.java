@@ -97,10 +97,20 @@ final class SparkClusterConformanceTest {
         assertTrue(!hadoop.output().contains("3.4.2") && !hadoop.output().contains("3.4.1"),
                 "no older Hadoop client may remain on the runtime classpath: " + hadoop.output());
 
+        // Opening every archive through `jar tf` starts one JVM per JAR. The
+        // runtime image currently has close to 300 archives, which made this
+        // metadata assertion take more than three minutes on Docker Desktop.
+        // The image already includes Python; one process can inspect the same
+        // ZIP central directories without changing what is proved.
+        String ownerScan = "import glob, os, zipfile\n"
+                + "name = 'software/amazon/awssdk/services/s3/S3Client.class'\n"
+                + "def owns(path):\n"
+                + "    with zipfile.ZipFile(path) as archive:\n"
+                + "        return name in archive.namelist()\n"
+                + "print('\\n'.join(os.path.basename(path) for path in "
+                + "glob.glob('/opt/spark/jars/*.jar') if owns(path)))";
         var sdkOwners = LiveSparkCluster.exec(LiveSparkCluster.MASTER_SERVICE, SHORT,
-                "sh", "-c", "for jar in /opt/spark/jars/*.jar; do "
-                        + "if jar tf \"$jar\" | grep -qx 'software/amazon/awssdk/services/s3/S3Client.class'; "
-                        + "then basename \"$jar\"; fi; done");
+                "python3", "-c", ownerScan);
         assertTrue(sdkOwners.succeeded(), "AWS SDK ownership must be inspectable: " + sdkOwners.describe());
         assertEquals(1, sdkOwners.output().lines().filter(line -> !line.isBlank()).count(),
                 "only Hadoop's SDK may own the unrelocated AWS class: " + sdkOwners.output());

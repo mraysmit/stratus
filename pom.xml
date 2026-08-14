@@ -84,6 +84,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.5.4</version>
                         <configuration>
                             <!-- One JVM per test class. A JVM holds a single
                                  SparkContext, so a reused fork would hand the

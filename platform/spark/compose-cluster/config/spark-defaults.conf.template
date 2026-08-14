@@ -45,6 +45,7 @@ spark.hadoop.fs.s3a.fast.upload           true
 spark.hadoop.fs.s3a.fast.upload.buffer    bytebuffer
 
 spark.sql.defaultCatalog                  __CATALOG__
+spark.sql.session.timeZone                UTC
 
 # The developer cluster has four cores. A default ceiling prevents one
 # forgotten client setting from monopolising both workers; one core per
@@ -52,6 +53,11 @@ spark.sql.defaultCatalog                  __CATALOG__
 spark.cores.max                           2
 spark.executor.cores                      1
 spark.executor.memory                     1g
+# Spark's 200-way SQL shuffle default is intended for a much larger cluster.
+# Eight tasks give this four-core developer cluster two tasks per core and
+# avoid scheduling hundreds of empty tasks for tiny conformance datasets.
+spark.default.parallelism                 8
+spark.sql.shuffle.partitions              8
 
 # Both lab CAs must be trusted by every JVM that touches TLS, not just the one
 # that submits. The driver resolves the catalog, but the data path runs on the

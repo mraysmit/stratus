@@ -201,6 +201,9 @@ final class ComposeClusterStartupBehaviorTest {
               exit 0
             fi
             printf '%s\n' "$*" >>fake-docker.log
+            if [[ " $* " == *" exec -T mon1 ceph osd stat "* ]]; then
+              printf '3 osds: 3 up (since 1m), 3 in\n'
+            fi
             """;
     }
 

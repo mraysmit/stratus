@@ -191,9 +191,14 @@ spark.sql.catalog.stratus.s3.path-style-access  true
 
 # Default catalog
 spark.sql.defaultCatalog                        stratus
+spark.sql.session.timeZone                      UTC
+
+# Four-core developer profile; size these values for the production cluster.
 spark.cores.max                                 2
 spark.executor.cores                            1
 spark.executor.memory                           1g
+spark.default.parallelism                       8
+spark.sql.shuffle.partitions                    8
 
 # S3A filesystem (raw landing files and production event logs through Ceph RGW)
 spark.hadoop.fs.s3a.impl                        org.apache.hadoop.fs.s3a.S3AFileSystem
@@ -216,6 +221,12 @@ spark.sql.redaction.options.regex               (?i)secret|password|token|access
 # Serialization
 spark.serializer                                org.apache.spark.serializer.KryoSerializer
 ```
+
+The parallelism values above are deliberately specific to the four-core
+developer harness. Spark otherwise starts with 200 SQL shuffle partitions,
+which creates far more scheduling work than useful work for its tiny
+conformance datasets. Production deployments must size parallelism from their
+actual core count and workload rather than inherit the developer values.
 
 ---
 
