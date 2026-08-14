@@ -253,7 +253,7 @@ unmodified in the commit — this is deliberate, not an oversight.
 
 4. ~~**P1-7.5 rotation runbook.**~~ **Closed 2026-08-07.** The propagation
    behaviour in §3.5 is written into
-   [harness_operations_runbook.md](harness_operations_runbook.md) §4 under
+[harness_operations_runbook.md](../harness_operations_runbook.md) §4 under
    *Recovering from an interrupted rotation*, alongside the two fixes above:
    an operator rotating twice in quick succession sees an expected failure and
    is told to wait for propagation rather than treat the first rotation as

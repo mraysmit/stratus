@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.stratus.jobs.spark.IngestionJob;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -706,7 +707,7 @@ final class SparkIncrementalLoadVerificationTest {
             throw new IllegalArgumentException(
                     "The ingestion scenario accepts only --onExistingBatch <mode>");
         }
-        String existing = extra.length == 0 ? "reject" : extra[1];
+        String existing = extra.length == 0 ? IngestionJob.ON_EXISTING_FAIL : extra[1];
         return jobs.ingest(
                 "s3a://stratus-landing/" + LANDING_PREFIX + "/" + resource,
                 BRONZE, "crm", batchId, existing, schema,

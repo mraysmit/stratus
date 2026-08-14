@@ -91,6 +91,13 @@ final class SparkVerificationLogging {
         }
     }
 
+    /** Records a credential-free latency distribution for the run transcript. */
+    static void performanceMeasured(String metric, int samples, long p50Millis,
+                                    long p95Millis, long maxMillis) {
+        LOGGER.info("Spark performance measured metric={} samples={} p50Ms={} p95Ms={} maxMs={}",
+                safeToken(metric), samples, p50Millis, p95Millis, maxMillis);
+    }
+
     /**
      * The job's own log records, picked out of a submission's output.
      *

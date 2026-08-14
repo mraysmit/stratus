@@ -61,6 +61,13 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>jul-to-slf4j</artifactId>
                 </exclusion>
+                <!-- Spark also publishes a Log4j SLF4J provider. Keep its
+                     Log4j API/core implementation, but not a second SLF4J
+                     binding beside this module's deliberate JUL provider. -->
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j2-impl</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>

@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
@@ -83,8 +85,10 @@ final class SparkClientConformanceTest {
     @Test
     void aTwoCoreApplicationPlacesExecutorsOnBothWorkers() {
         client.scalar("SELECT count(*) FROM range(0, 10000, 1, 8)");
-                List<String> executorHosts = Arrays.stream(
+        String driverHost = client.session().sparkContext().getConf().get("spark.driver.host");
+        List<String> executorHosts = Arrays.stream(
                         client.session().sparkContext().statusTracker().getExecutorInfos())
+                .filter(info -> !info.host().equals(driverHost))
                 .map(info -> info.host())
                 .distinct()
                 .toList();
@@ -96,18 +100,20 @@ final class SparkClientConformanceTest {
     @Test
     void warmTinyQueriesStayWithinTheDeveloperLatencyBudget() {
         client.scalar("SELECT sum(id) FROM range(0, 100)");
-        Duration slowest = Duration.ZERO;
+        List<Long> elapsedMillis = new ArrayList<>();
         for (int attempt = 0; attempt < 5; attempt++) {
             long started = System.nanoTime();
             assertEquals("4950", client.scalar("SELECT sum(id) FROM range(0, 100)"));
-            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
-            if (elapsed.compareTo(slowest) > 0) {
-                slowest = elapsed;
-            }
+            elapsedMillis.add(Duration.ofNanos(System.nanoTime() - started).toMillis());
         }
+        Collections.sort(elapsedMillis);
+        long median = elapsedMillis.get(elapsedMillis.size() / 2);
+        long slowest = elapsedMillis.get(elapsedMillis.size() - 1);
+        SparkVerificationLogging.performanceMeasured(
+                "warm-tiny-query", elapsedMillis.size(), median, slowest, slowest);
 
-        assertTrue(slowest.compareTo(Duration.ofSeconds(5)) < 0,
-                "a warm trivial query must not pay application startup; slowest=" + slowest);
+        assertTrue(slowest < Duration.ofSeconds(5).toMillis(),
+                "a warm trivial query must not pay application startup; slowestMs=" + slowest);
     }
 
     @Test
