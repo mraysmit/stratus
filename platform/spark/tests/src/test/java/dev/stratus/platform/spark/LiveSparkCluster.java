@@ -47,7 +47,8 @@ final class LiveSparkCluster {
      * would otherwise fail on the cleanup rather than skip.
      */
     static boolean enabled() {
-        return Boolean.parseBoolean(System.getenv("STRATUS_SPARK_INTEGRATION"));
+        return Boolean.parseBoolean(System.getenv("STRATUS_SPARK_INTEGRATION"))
+                || Boolean.getBoolean("stratus.spark.integration");
     }
 
     /**
@@ -58,10 +59,12 @@ final class LiveSparkCluster {
     static void require() {
         if (Boolean.getBoolean("spark.integration.required")) {
             assertTrue(enabled(),
-                    "STRATUS_SPARK_INTEGRATION=true is required by the selected Maven profile");
+                    "the live-test runner must set STRATUS_SPARK_INTEGRATION=true or "
+                            + "-Dstratus.spark.integration=true");
         }
         assumeTrue(enabled(),
-                "Set STRATUS_SPARK_INTEGRATION=true to run against a live Spark cluster");
+                "Set STRATUS_SPARK_INTEGRATION=true or -Dstratus.spark.integration=true "
+                        + "to run against a live Spark cluster");
     }
 
     /** The Polaris catalog endpoint, from the provider's published settings. */

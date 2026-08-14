@@ -90,7 +90,7 @@ public final class MaintenanceJob {
         // default leaves a snapshot to roll back to after a bad write, which
         // is the situation expiry is most likely to be run near.
         String call = String.format("CALL %s.system.expire_snapshots(table => '%s', retain_last => %s%s)",
-                catalog, unqualified(targetTable), retainLast == null ? "2" : retainLast,
+                catalog, targetTable, retainLast == null ? "2" : retainLast,
                 olderThan == null ? "" : ", older_than => TIMESTAMP '" + olderThan + "'");
         LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
         Row result = spark.sql(call).first();
@@ -101,7 +101,7 @@ public final class MaintenanceJob {
 
     private static String rewriteDataFiles(SparkSession spark, String catalog, String targetTable) {
         String call = String.format("CALL %s.system.rewrite_data_files(table => '%s')",
-                catalog, unqualified(targetTable));
+                catalog, targetTable);
         LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
         Row result = spark.sql(call).first();
         return "MAINTENANCE rewrite_data_files table=" + targetTable
@@ -164,9 +164,4 @@ public final class MaintenanceJob {
         return metadataFile.substring(0, metadata);
     }
 
-    /** Iceberg procedures take the identifier without its catalog prefix. */
-    private static String unqualified(String targetTable) {
-        String[] parts = QualityCheckJob.splitIdentifier(targetTable);
-        return parts[1] + "." + parts[2];
-    }
 }

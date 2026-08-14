@@ -91,7 +91,7 @@ removing the misleading claim.
 
 ### 3.2 The Increment 2 document described code that does not exist
 
-[iceberg_polaris_catalog.md](../implementation/iceberg_polaris_catalog.md) §9
+[iceberg_polaris_catalog.md](../../implementation/iceberg_polaris_catalog.md) §9
 carried two inline Java blocks:
 
 - `PolarisTestClient.java` — the real class is `LiveCatalog`
@@ -181,7 +181,7 @@ nothing and exits before any rotation state is generated. The preflight failure
 message now names the command.
 
 **Runbook clause (item 4).** The 90-second key-propagation behaviour is now
-written into [harness_operations_runbook.md](harness_operations_runbook.md) §4
+written into [harness_operations_runbook.md](../harness_operations_runbook.md) §4
 under *Recovering from an interrupted rotation*, so an operator rotating twice
 in quick succession is told the failure is expected. `P1-7.5` still owns the
 production rotation runbook; only the harness-behaviour clause is closed.
@@ -297,7 +297,7 @@ Polaris catalog bootstrap must be re-run after any Polaris restart because the
 1.5.0 in-memory metastore loses all catalog state.
 
 To restore a working stack, follow the sequence in
-[harness_operations_runbook.md](harness_operations_runbook.md) §2.
+[harness_operations_runbook.md](../harness_operations_runbook.md) §2.
 
 **The environment anomaly recorded on 2026-08-05 still stands and was not
 re-investigated:** local commits in this repository have been observed reaching

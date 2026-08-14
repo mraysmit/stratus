@@ -126,6 +126,9 @@ final class SparkHarnessConformanceTest {
         assertTrue(defaults.contains("spark.cores.max")
                         && defaults.contains("spark.executor.cores"),
                 "developer applications need an explicit core ceiling and executor size");
+        assertTrue(defaults.contains("spark.default.parallelism")
+                        && defaults.contains("spark.sql.shuffle.partitions"),
+                "the four-core developer cluster must not inherit Spark's 200-way shuffle default");
     }
 
     @Test
@@ -151,6 +154,18 @@ final class SparkHarnessConformanceTest {
         assertTrue(defaults.contains("spark.hadoop.fs.s3a.fast.upload.buffer    bytebuffer")
                         && client.contains("spark.hadoop.fs.s3a.fast.upload.buffer\", \"bytebuffer"),
                 "client-mode S3A uploads must not depend on winutils.exe for local disk buffering");
+    }
+
+    @Test
+    void sqlTimestampsUseUtcInClusterAndClientMode() {
+        String defaults = read("config/spark-defaults.conf.template");
+        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+
+        assertTrue(defaults.contains("spark.sql.session.timeZone")
+                        && defaults.contains("UTC"),
+                "packaged jobs must interpret unzoned SQL timestamps in UTC");
+        assertTrue(client.contains("spark.sql.session.timeZone\", \"UTC"),
+                "client-mode jobs must interpret unzoned SQL timestamps in UTC");
     }
 
     @Test
@@ -204,11 +219,14 @@ final class SparkHarnessConformanceTest {
     @Test
     void providerSettingsRemainSourceableAfterAWindowsCheckout() {
         String common = read("scripts/lib/spark-compose-common.sh");
+        String liveRunner = read("scripts/verify/spark-compose-run-live-tests.sh");
 
         assertTrue(common.contains("sed 's/\\r$//'"),
                 "the Bash harness must strip CRLF before sourcing tracked connection files");
         assertTrue(common.contains("cmd.exe /d /c mvnw.cmd"),
                 "Git Bash must invoke the Windows Maven wrapper without rewriting it");
+        assertTrue(liveRunner.contains("-Dstratus.spark.integration=true"),
+                "the live opt-in must cross the Git Bash-to-cmd.exe process boundary");
     }
 
     @Test
