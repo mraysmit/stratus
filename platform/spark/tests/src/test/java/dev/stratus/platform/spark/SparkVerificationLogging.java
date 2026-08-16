@@ -3,18 +3,10 @@
 
 package dev.stratus.platform.spark;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.logging.Formatter;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
@@ -44,16 +36,6 @@ final class SparkVerificationLogging {
 
     static final String LOGGER_NAME = "dev.stratus.platform.spark";
 
-    /**
-     * Argument fragments whose value is credential material. Matched
-     * case-insensitively against the whole argument, because the value arrives
-     * joined to its key in a single {@code --conf key=value} token.
-     */
-    private static final List<String> SECRET_MARKERS =
-            List.of("credential", "secret", "password", "access-key", "token");
-
-    private static final String REDACTED = "<redacted>";
-
     /** The logger name every platform job's records carry. */
     private static final String JOB_LOGGER_PREFIX = "dev.stratus.jobs.spark.";
 
@@ -64,10 +46,6 @@ final class SparkVerificationLogging {
     private static final int TAIL_LINES = 12;
 
     private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(LOGGER_NAME);
-
-    static {
-        configure(System.getenv().getOrDefault("STRATUS_LOG_LEVEL", "INFO"));
-    }
 
     private SparkVerificationLogging() {
     }
@@ -82,7 +60,7 @@ final class SparkVerificationLogging {
                                  long durationMillis, String output) {
         LOGGER.info("Cluster command completed action={} exitCode={} durationMs={} outputBytes={}",
                 safeToken(description), exitCode, durationMillis,
-                output == null ? 0 : output.length());
+                output == null ? 0 : output.getBytes(StandardCharsets.UTF_8).length);
         LOGGER.debug("Cluster command detail action={} argv={}",
                 safeToken(description), redact(argv));
         for (String record : jobRecords(output, exitCode)) {
@@ -322,59 +300,7 @@ final class SparkVerificationLogging {
      * argument may be a bare secret with no key at all.
      */
     static List<String> redact(List<String> argv) {
-        return argv.stream().map(SparkVerificationLogging::redactArgument).toList();
-    }
-
-    private static String redactArgument(String argument) {
-        String lower = argument.toLowerCase(Locale.ROOT);
-        for (String marker : SECRET_MARKERS) {
-            if (lower.contains(marker)) {
-                int separator = argument.indexOf('=');
-                return separator < 0 ? REDACTED : argument.substring(0, separator + 1) + REDACTED;
-            }
-        }
-        return safeToken(argument, 512);
-    }
-
-    static void configure(String configuredLevel) {
-        Level level = switch (configuredLevel.toUpperCase(Locale.ROOT)) {
-            case "DEBUG" -> Level.FINE;
-            case "INFO" -> Level.INFO;
-            default -> throw new IllegalArgumentException("STRATUS_LOG_LEVEL must be INFO or DEBUG");
-        };
-        Logger.getLogger(LOGGER_NAME).setLevel(level);
-        for (var handler : Logger.getLogger("").getHandlers()) {
-            handler.setLevel(level);
-            handler.setFormatter(new OperationalLevelFormatter());
-        }
-    }
-
-    /**
-     * Renders console records in the operational level vocabulary: the JDK
-     * backend names the diagnostic level FINE, but operators configure DEBUG,
-     * so transcripts say DEBUG. One line per record with a UTC timestamp; an
-     * attached exception renders in full so failure context is never lost.
-     */
-    static final class OperationalLevelFormatter extends Formatter {
-
-        @Override
-        public String format(LogRecord logRecord) {
-            String level = Level.FINE.equals(logRecord.getLevel())
-                    ? "DEBUG" : logRecord.getLevel().getName();
-            var line = new StringBuilder()
-                    .append(DateTimeFormatter.ISO_INSTANT.format(
-                            logRecord.getInstant().truncatedTo(ChronoUnit.MILLIS)))
-                    .append(' ').append(level)
-                    .append(' ').append(logRecord.getLoggerName())
-                    .append(' ').append(formatMessage(logRecord))
-                    .append(System.lineSeparator());
-            if (logRecord.getThrown() != null) {
-                var stackTrace = new StringWriter();
-                logRecord.getThrown().printStackTrace(new PrintWriter(stackTrace));
-                line.append(stackTrace);
-            }
-            return line.toString();
-        }
+        return SparkLogSanitizer.arguments(argv);
     }
 
     private static String safeToken(String value) {
@@ -387,7 +313,20 @@ final class SparkVerificationLogging {
      * being readable — which is the same as not being kept.
      */
     private static String safeToken(String value, int maxLength) {
-        String singleLine = value.replace('\r', '_').replace('\n', '_').replace('\t', '_');
-        return singleLine.length() <= maxLength ? singleLine : singleLine.substring(0, maxLength);
+        return SparkLogSanitizer.token(value, maxLength);
+    }
+
+    /** Records a subprocess boundary before it can fail or time out. */
+    static void commandStarted(String description, List<String> argv, long timeoutMillis) {
+        LOGGER.info("Cluster command started action={} timeoutMs={}",
+                safeToken(description), timeoutMillis);
+        LOGGER.debug("Cluster command start detail action={} argv={}",
+                safeToken(description), redact(argv));
+    }
+
+    /** Warns that executor statistics are partial without hiding the SQL outcome. */
+    static void executionMetricsIncomplete(String operationId, long timeoutMillis) {
+        LOGGER.warn("Spark execution metrics incomplete operationId={} listenerDrainTimeoutMs={}",
+                safeToken(operationId), timeoutMillis);
     }
 }

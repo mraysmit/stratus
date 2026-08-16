@@ -13,8 +13,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
@@ -22,6 +20,8 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Job 4 — quality checks: runs the supplied rules against a table and writes
@@ -53,14 +53,13 @@ public final class QualityCheckJob {
     static final Set<String> ARGUMENTS = Set.of(
             "targetTable", "checks", "checksBase64", "runId", "pipelineRunId");
 
-    private static final Logger LOGGER = Logger.getLogger(QualityCheckJob.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(QualityCheckJob.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private QualityCheckJob() {
     }
 
     public static void main(String... argv) {
-        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String checks = checkDefinitions(arguments);
@@ -75,9 +74,9 @@ public final class QualityCheckJob {
             long passed = results.stream().filter(row -> STATUS_PASSED.equals(row.getString(7))).count();
             long failed = results.stream().filter(row -> STATUS_FAILED.equals(row.getString(7))).count();
             long warnings = results.stream().filter(row -> STATUS_WARNING.equals(row.getString(7))).count();
-            LOGGER.info(String.format(
-                    "QUALITY COMPLETE table=%s runId=%s checks=%d passed=%d failed=%d warnings=%d",
-                    targetTable, runId, results.size(), passed, failed, warnings));
+            LOGGER.info(
+                    "QUALITY COMPLETE table={} runId={} checks={} passed={} failed={} warnings={}",
+                    targetTable, runId, results.size(), passed, failed, warnings);
         } finally {
             spark.stop();
         }
@@ -117,15 +116,19 @@ public final class QualityCheckJob {
 
     public static List<Row> run(SparkSession spark, String targetTable, String checksJson,
                          String runId, String pipelineRunId, Clock clock) {
-        JsonNode definitions = readDefinitions(checksJson);
-        Dataset<Row> target = spark.table(targetTable);
+        JsonNode definitions = JobTelemetry.measure("QUALITY", "parse_rules", runId, targetTable,
+                () -> readDefinitions(checksJson));
+        Dataset<Row> target = JobTelemetry.measure("QUALITY", "resolve_target", runId, targetTable,
+                () -> spark.table(targetTable));
         String[] identifier = splitIdentifier(targetTable);
-        Long snapshotId = currentSnapshotId(spark, targetTable);
+        Long snapshotId = JobTelemetry.measure("QUALITY", "resolve_snapshot", runId, targetTable,
+                () -> currentSnapshotId(spark, targetTable));
         Timestamp checkedAt = Timestamp.from(Instant.now(clock));
 
         var rows = new ArrayList<Row>();
         for (JsonNode definition : definitions) {
-            Outcome outcome = evaluate(spark, target, definition);
+            Outcome outcome = JobTelemetry.measure("QUALITY", "evaluate_rule", runId, targetTable,
+                    () -> evaluate(spark, target, definition));
             String severity = text(definition, "severity", SEVERITY_BLOCKING);
             String status = outcome.passed
                     ? STATUS_PASSED
@@ -133,10 +136,10 @@ public final class QualityCheckJob {
             // The measurement behind the verdict, at DEBUG: an operator asking
             // why a rule failed needs the number it saw and the number it was
             // allowed, and neither belongs in the run's INFO summary.
-            LOGGER.log(Level.FINE, () -> String.format(
-                    "QUALITY RULE table=%s name=%s type=%s severity=%s status=%s metric=%s threshold=%s",
+            LOGGER.debug(
+                    "QUALITY RULE table={} name={} type={} severity={} status={} metric={} threshold={}",
                     targetTable, text(definition, "name", null), text(definition, "type", null),
-                    severity, status, outcome.metricValue, outcome.threshold));
+                    severity, status, outcome.metricValue, outcome.threshold);
             rows.add(RowFactory.create(
                     runId, identifier[1], identifier[2], identifier[1],
                     text(definition, "type", null), text(definition, "name", text(definition, "type", null)),
@@ -146,7 +149,10 @@ public final class QualityCheckJob {
         }
 
         try {
-            spark.createDataFrame(rows, resultSchema()).writeTo(RESULTS_TABLE).append();
+            JobTelemetry.measureChecked("QUALITY", "persist_results", runId, targetTable, () -> {
+                spark.createDataFrame(rows, resultSchema()).writeTo(RESULTS_TABLE).append();
+                return null;
+            });
         } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {
             // The results table is provisioned by the catalog bootstrap, not
             // by this job: creating it here would invent a schema that the

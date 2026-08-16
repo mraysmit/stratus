@@ -30,6 +30,10 @@
         <!-- 2.x required: Iceberg brings slf4j-api 2.x, which ignores 1.7-style
              bindings and would silently rout logging to the NOP logger. -->
         <slf4j.version>2.0.17</slf4j.version>
+        <!-- Spark 4.1.2's native logging backend. Keep the facade and provider
+             versions explicit so every Spark module resolves one SLF4J 2.x
+             provider rather than whichever binding happens to arrive first. -->
+        <log4j.version>2.24.3</log4j.version>
         <snakeyaml.version>2.4</snakeyaml.version>
     </properties>
 
@@ -124,8 +128,23 @@
             </dependency>
             <dependency>
                 <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
                 <artifactId>slf4j-jdk14</artifactId>
                 <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-slf4j2-impl</artifactId>
+                <version>${log4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-core</artifactId>
+                <version>${log4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.yaml</groupId>

@@ -9,12 +9,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.functions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Decides whether a dataset may be promoted, from the quality results already
@@ -45,13 +45,12 @@ public final class PromotionGate {
     static final Set<String> ARGUMENTS = Set.of(
             "runId", "targetTable", "override-reason", "override-principal");
 
-    private static final Logger LOGGER = Logger.getLogger(PromotionGate.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(PromotionGate.class);
 
     private PromotionGate() {
     }
 
     public static void main(String... argv) {
-        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String runId = arguments.require("runId");
         String targetTable = arguments.require("targetTable");
@@ -59,7 +58,7 @@ public final class PromotionGate {
         SparkSession spark = SparkSession.builder().appName("stratus-promotion-gate").getOrCreate();
         try {
             PromotionDecision decision = evaluate(spark, runId, targetTable);
-            LOGGER.info(decision.describe());
+            LOGGER.info("{}", decision.describe());
 
             var overrideReason = arguments.optional("override-reason");
             var overridePrincipal = arguments.optional("override-principal");
@@ -70,8 +69,8 @@ public final class PromotionGate {
             if (decision.blocked() && overrideReason.isPresent()) {
                 override(spark, runId, targetTable, overridePrincipal.get(), overrideReason.get(),
                         Clock.systemUTC());
-                LOGGER.info("PROMOTION OVERRIDDEN runId=" + runId
-                        + " principal=" + overridePrincipal.get());
+                LOGGER.info("PROMOTION OVERRIDDEN runId={} principal={}",
+                        runId, overridePrincipal.get());
                 return;
             }
             if (decision.blocked()) {
@@ -84,10 +83,11 @@ public final class PromotionGate {
     }
 
     public static PromotionDecision evaluate(SparkSession spark, String runId, String targetTable) {
-        List<Row> results = spark.table(QualityCheckJob.RESULTS_TABLE)
-                .filter(functions.col("run_id").equalTo(runId))
-                .select("check_name", "severity", "status")
-                .collectAsList();
+        List<Row> results = JobTelemetry.measure("PROMOTION", "read_evidence", runId, targetTable,
+                () -> spark.table(QualityCheckJob.RESULTS_TABLE)
+                        .filter(functions.col("run_id").equalTo(runId))
+                        .select("check_name", "severity", "status")
+                        .collectAsList());
 
         var failing = new ArrayList<String>();
         var warnings = new ArrayList<String>();
@@ -96,9 +96,8 @@ public final class PromotionGate {
             String status = row.getString(2);
             // Each recorded verdict at DEBUG: the INFO line says what the gate
             // decided, and this says which records it decided from.
-            LOGGER.log(Level.FINE, () -> "PROMOTION EVIDENCE runId=" + runId
-                    + " check=" + row.getString(0) + " severity=" + row.getString(1)
-                    + " status=" + status);
+            LOGGER.debug("PROMOTION EVIDENCE runId={} check={} severity={} status={}",
+                    runId, row.getString(0), row.getString(1), status);
             if (STATUS_OVERRIDDEN.equals(status)) {
                 overridden = true;
             } else if (QualityCheckJob.STATUS_FAILED.equals(status)) {

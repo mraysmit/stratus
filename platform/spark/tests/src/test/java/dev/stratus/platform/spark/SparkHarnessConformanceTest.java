@@ -230,6 +230,22 @@ final class SparkHarnessConformanceTest {
     }
 
     @Test
+    void liveRunsUseOneDeclarativeLoggingConfigurationAndCorrelationId() {
+        String compose = read("compose.yaml");
+        String log4j = read("config/log4j2.properties");
+        String liveRunner = read("scripts/verify/spark-compose-run-live-tests.sh");
+
+        assertTrue(compose.contains("./config/log4j2.properties:/opt/spark/conf/log4j2.properties:ro"),
+                "every Spark container must use the tracked Log4j2 configuration");
+        assertTrue(log4j.contains("${env:STRATUS_LOG_LEVEL:-INFO}")
+                        && log4j.contains("%X{runId}"),
+                "the runtime logging configuration must support level control and correlation");
+        assertTrue(liveRunner.contains("export STRATUS_RUN_ID")
+                        && liveRunner.contains("-Dstratus.run.id=\"$run_id\""),
+                "one run ID must correlate shell, JUnit, driver, and executor records");
+    }
+
+    @Test
     void theHarnessNeverStartsAProviderTransitively() {
         // ADR-P1-003: a consumer fails fast with a remediation rather than
         // starting Ceph or Polaris on the operator's behalf. Naming a

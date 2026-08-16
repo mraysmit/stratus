@@ -33,10 +33,19 @@ cd "$REPO_DIR"
 test_log_dir="$HARNESS_DIR/logs"
 mkdir -p "$test_log_dir"
 run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+run_started_epoch_ms="$(date -u +%s%3N)"
 run_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 run_id="spark-conformance-tests-$run_timestamp"
+export STRATUS_RUN_ID="$run_id"
 test_log="$test_log_dir/$run_id.log"
 log "Writing the complete Spark conformance transcript to $test_log"
+
+git_revision="$(git rev-parse --short=12 HEAD)"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  git_state="dirty"
+else
+  git_state="clean"
+fi
 
 if [[ "$#" -eq 0 ]]; then
   # verify lets the upstream isolated-AWS module finish its package phase
@@ -46,15 +55,20 @@ fi
 
 set +e
 {
-  printf 'RUN startedAtUtc=%s runId=%s catalog=%s storage=%s\n' \
-    "$run_started_at" "$run_id" "$POLARIS_ENDPOINT" "$CEPH_RGW_ENDPOINT"
+  printf 'RUN startedAtUtc=%s runId=%s revision=%s worktree=%s logLevel=%s catalog=%s storage=%s\n' \
+    "$run_started_at" "$run_id" "$git_revision" "$git_state" "$STRATUS_LOG_LEVEL" \
+    "$POLARIS_ENDPOINT" "$CEPH_RGW_ENDPOINT"
   # A variable exported inside Git Bash is not reliably added to the Windows
   # environment inherited by cmd.exe. Pass the same opt-in as a Maven user
   # property so Surefire receives it on Windows and WSL as well as on Linux.
-  repository_maven -Dstratus.spark.integration=true "$@"
+  repository_maven -Dstratus.spark.integration=true -Dstratus.run.id="$run_id" "$@"
 } 2>&1 | tee "$test_log"
 maven_status="${PIPESTATUS[0]}"
 set -e
-printf 'RUN completedAtUtc=%s runId=%s exitCode=%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$run_id" "$maven_status" | tee -a "$test_log"
+run_completed_epoch_ms="$(date -u +%s%3N)"
+run_duration_ms="$((run_completed_epoch_ms - run_started_epoch_ms))"
+printf 'RUN completedAtUtc=%s runId=%s exitCode=%s durationMs=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$run_id" "$maven_status" "$run_duration_ms" \
+  | tee -a "$test_log"
+printf 'RUN transcript runId=%s bytes=%s\n' "$run_id" "$(wc -c < "$test_log")" | tee -a "$test_log"
 exit "$maven_status"

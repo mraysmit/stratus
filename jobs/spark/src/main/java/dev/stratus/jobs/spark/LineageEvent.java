@@ -5,7 +5,8 @@ package dev.stratus.jobs.spark;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The lineage payload a platform job emits when it writes a table.
@@ -26,7 +27,7 @@ public final class LineageEvent {
     /** Stable marker so a transcript can be filtered to lineage alone. */
     public static final String MARKER = "STRATUS_LINEAGE";
 
-    private static final Logger LOGGER = Logger.getLogger(LineageEvent.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(LineageEvent.class);
 
     private LineageEvent() {
     }
@@ -37,7 +38,7 @@ public final class LineageEvent {
                         + "\"run_id\": \"%s\", \"timestamp\": \"%s\"}",
                 escape(type), escape(source), escape(target), escape(runId),
                 Instant.now(clock).toString());
-        LOGGER.info(MARKER + " " + payload);
+        LOGGER.info("{} {}", MARKER, payload);
     }
 
     /**

@@ -342,18 +342,20 @@ job ran with the default the caller was trying to replace.
 | `2` | A blocking quality check failed, so nothing was written |
 | `3` | The incoming schema conflicts with the table's, so nothing was written |
 
-**Logging.** INFO records each job's outcome with stable identifiers. DEBUG
-records the schema comparison, the batch predicate, the upsert statement, the
-maintenance call, and each quality rule's measurement. `JobLogging` reads
-`STRATUS_LOG_LEVEL` — the same switch the Ceph, catalog and secrets verifiers
-use — and renders one record per line with a UTC timestamp, naming the
-diagnostic level DEBUG rather than the JDK's FINE.
+**Logging.** Jobs and the live suite use SLF4J 2.x exclusively, with Spark's
+native Log4j2 backend as the single provider. `STRATUS_LOG_LEVEL` controls the
+`dev.stratus` namespace declaratively. INFO records outcomes and timed job
+phases with run, operation, table, status and duration identifiers. DEBUG adds
+the schema comparison, batch predicate, upsert statement, maintenance call,
+quality-rule measurement, and phase starts. Spark and Iceberg retain useful
+engine INFO records while noisy HTTP, SDK and Hadoop categories remain bounded.
 
-The level must be set explicitly or the diagnostics are unreachable: the JDK
-discards FINE by default, so a job would carry records no operator could ever
-turn on. The live suite passes the level into the container and relays each
-job's output into its own transcript, which is what makes those records visible
-rather than merely present in the source.
+The live runner passes the run ID and level into the test JVM and every
+packaged submission. It relays selected job records into the complete
+transcript, emits automatic JUnit/class/suite timing distributions, and records
+SQL, catalog, client-lifecycle, platform-job and subprocess durations. Provider
+tests fail if more than one SLF4J implementation is present, preventing the
+duplicate-provider and JUL bridge loops previously observed in this module.
 
 **Write mode per zone** follows the architecture (§6.4.6): bronze appends,
 silver upserts copy-on-write, gold is rebuilt in full. Each zone's write

@@ -3,7 +3,11 @@
 
 package dev.stratus.platform.spark;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.TimeoutException;
+import org.apache.spark.SparkStatusTracker;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 
@@ -39,13 +43,31 @@ final class StratusSparkClient implements AutoCloseable {
      */
     private final SparkClientConfig config;
     private final SparkSession session;
+    private final SparkExecutionMetrics executionMetrics;
 
-    private StratusSparkClient(SparkClientConfig config, SparkSession session) {
+    private StratusSparkClient(SparkClientConfig config, SparkSession session,
+                               SparkExecutionMetrics executionMetrics) {
         this.config = config;
         this.session = session;
+        this.executionMetrics = executionMetrics;
     }
 
     static StratusSparkClient connect(SparkClientConfig config) {
+        try (var observed = SparkTelemetry.start("client_connect", "spark.client.connect",
+                "client=" + SparkLogSanitizer.token(config.applicationName())
+                        + " principal=" + SparkLogSanitizer.token(config.principalId())
+                        + " master=" + SparkLogSanitizer.token(config.masterUrl()))) {
+            try {
+                return connectObserved(config, observed);
+            } catch (RuntimeException failure) {
+                observed.failed(failure, "");
+                throw failure;
+            }
+        }
+    }
+
+    private static StratusSparkClient connectObserved(SparkClientConfig config,
+                                                       SparkTelemetry.Operation observed) {
         // Before the session: the trust manager a TLS client is born with is
         // the one it keeps, and the catalog client is created during startup.
         HarnessTruststore.installed();
@@ -137,9 +159,14 @@ final class StratusSparkClient implements AutoCloseable {
                         "-Djavax.net.ssl.trustStore=" + HarnessTruststore.CONTAINER_PATH)
                 .getOrCreate();
 
-        var client = new StratusSparkClient(config, session);
+        var executionMetrics = new SparkExecutionMetrics();
+        session.sparkContext().addSparkListener(executionMetrics);
+        var client = new StratusSparkClient(config, session, executionMetrics);
         SparkVerificationLogging.clientConnected(config.applicationName(), config.principalId(),
                 client.applicationId(), config.masterUrl());
+        observed.succeeded("applicationId=" + client.applicationId()
+                + " sparkVersion=" + session.version()
+                + " requestedCores=" + config.applicationCores());
         return client;
     }
 
@@ -161,6 +188,21 @@ final class StratusSparkClient implements AutoCloseable {
      * a client.
      */
     StratusSparkClient asAnotherPrincipal(SparkClientConfig other) {
+        try (var observed = SparkTelemetry.start("client_session", "spark.client.session",
+                "client=" + SparkLogSanitizer.token(other.applicationName())
+                        + " principal=" + SparkLogSanitizer.token(other.principalId()))) {
+            try {
+                StratusSparkClient client = asAnotherPrincipalObserved(other);
+                observed.succeeded("applicationId=" + client.applicationId());
+                return client;
+            } catch (RuntimeException failure) {
+                observed.failed(failure, "");
+                throw failure;
+            }
+        }
+    }
+
+    private StratusSparkClient asAnotherPrincipalObserved(SparkClientConfig other) {
         SparkSession isolated = session.newSession();
         String catalog = "spark.sql.catalog." + other.catalogName();
         isolated.conf().set(catalog, "org.apache.iceberg.spark.SparkCatalog");
@@ -178,7 +220,7 @@ final class StratusSparkClient implements AutoCloseable {
         isolated.conf().set(catalog + ".s3.secret-access-key", other.storageSecretKey());
         isolated.conf().set(catalog + ".s3.path-style-access", "true");
 
-        var client = new StratusSparkClient(other, isolated);
+        var client = new StratusSparkClient(other, isolated, executionMetrics);
         SparkVerificationLogging.clientConnected(other.applicationName(), other.principalId(),
                 client.applicationId(), other.masterUrl());
         return client;
@@ -208,7 +250,29 @@ final class StratusSparkClient implements AutoCloseable {
     List<Row> sql(String statement) {
         SparkVerificationLogging.statementSubmitted(config.applicationName(),
                 config.principalId(), statement);
-        return session.sql(statement).collectAsList();
+        String action = sqlAction(statement);
+        String fingerprint = SparkLogSanitizer.fingerprint(statement);
+        try (var observed = SparkTelemetry.start("sql", "spark.sql." + action.toLowerCase(Locale.ROOT),
+                "applicationId=" + applicationId()
+                        + " client=" + SparkLogSanitizer.token(config.applicationName())
+                        + " principal=" + SparkLogSanitizer.token(config.principalId())
+                        + " action=" + action + " statementHash=" + fingerprint)) {
+            String operationId = observed.operationId();
+            session.sparkContext().setJobGroup(operationId, action + " " + fingerprint, false);
+            try {
+                List<Row> rows = session.sql(statement).collectAsList();
+                SparkWork work = workFor(operationId);
+                observed.succeeded("rows=" + rows.size() + ' ' + work.fields() + ' '
+                        + settledMetrics(operationId).fields());
+                return rows;
+            } catch (RuntimeException failure) {
+                observed.failed(failure, workFor(operationId).fields() + ' '
+                        + settledMetrics(operationId).fields());
+                throw failure;
+            } finally {
+                session.sparkContext().clearJobGroup();
+            }
+        }
     }
 
     /** The first column of the first row, as text; the shape most checks want. */
@@ -223,6 +287,71 @@ final class StratusSparkClient implements AutoCloseable {
 
     @Override
     public void close() {
-        session.stop();
+        try (var observed = SparkTelemetry.start("client_close", "spark.client.close",
+                "applicationId=" + applicationId()
+                        + " client=" + SparkLogSanitizer.token(config.applicationName()))) {
+            try {
+                session.sparkContext().removeSparkListener(executionMetrics);
+                session.stop();
+                observed.succeeded("");
+            } catch (RuntimeException failure) {
+                observed.failed(failure, "");
+                throw failure;
+            }
+        }
+    }
+
+    private static String sqlAction(String statement) {
+        String trimmed = statement == null ? "" : statement.stripLeading();
+        if (trimmed.isEmpty()) {
+            return "UNKNOWN";
+        }
+        int separator = trimmed.indexOf(' ');
+        String first = separator < 0 ? trimmed : trimmed.substring(0, separator);
+        return SparkLogSanitizer.token(first.toUpperCase(Locale.ROOT), 32);
+    }
+
+    private SparkWork workFor(String operationId) {
+        SparkStatusTracker tracker = session.sparkContext().statusTracker();
+        int[] jobIds = tracker.getJobIdsForGroup(operationId);
+        var stageIds = new LinkedHashSet<Integer>();
+        for (int jobId : jobIds) {
+            var job = tracker.getJobInfo(jobId);
+            if (job.isDefined()) {
+                for (int stageId : job.get().stageIds()) {
+                    stageIds.add(stageId);
+                }
+            }
+        }
+        int tasks = 0;
+        int completedTasks = 0;
+        int failedTasks = 0;
+        for (int stageId : stageIds) {
+            var stage = tracker.getStageInfo(stageId);
+            if (stage.isDefined()) {
+                tasks += stage.get().numTasks();
+                completedTasks += stage.get().numCompletedTasks();
+                failedTasks += stage.get().numFailedTasks();
+            }
+        }
+        return new SparkWork(jobIds.length, stageIds.size(), tasks, completedTasks, failedTasks);
+    }
+
+    private SparkExecutionMetrics.MetricsSnapshot settledMetrics(String operationId) {
+        final long timeoutMillis = 5_000L;
+        try {
+            session.sparkContext().listenerBus().waitUntilEmpty(timeoutMillis);
+        } catch (TimeoutException timeout) {
+            SparkVerificationLogging.executionMetricsIncomplete(operationId, timeoutMillis);
+        }
+        return executionMetrics.snapshot(operationId);
+    }
+
+    private record SparkWork(int jobs, int stages, int tasks, int completedTasks, int failedTasks) {
+
+        String fields() {
+            return "jobs=" + jobs + " stages=" + stages + " tasks=" + tasks
+                    + " completedTasks=" + completedTasks + " failedTasks=" + failedTasks;
+        }
     }
 }

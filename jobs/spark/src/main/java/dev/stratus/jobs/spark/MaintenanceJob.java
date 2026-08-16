@@ -6,10 +6,10 @@ package dev.stratus.jobs.spark;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Job 5 — table maintenance: expires snapshots, rewrites data files, and
@@ -36,13 +36,12 @@ public final class MaintenanceJob {
 
     static final Set<String> ARGUMENTS = Set.of("targetTable", "operations", "olderThan", "retainLast");
 
-    private static final Logger LOGGER = Logger.getLogger(MaintenanceJob.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(MaintenanceJob.class);
 
     private MaintenanceJob() {
     }
 
     public static void main(String... argv) {
-        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String[] operations = arguments.requireList("operations");
@@ -55,8 +54,8 @@ public final class MaintenanceJob {
                     arguments.optional("olderThan").orElse(null),
                     arguments.optional("retainLast").orElse(null));
             metrics.forEach(LOGGER::info);
-            LOGGER.info("MAINTENANCE COMPLETE table=" + targetTable
-                    + " operations=" + String.join(",", operations));
+            LOGGER.info("MAINTENANCE COMPLETE table={} operations={}",
+                    targetTable, String.join(",", operations));
         } finally {
             spark.stop();
         }
@@ -66,20 +65,21 @@ public final class MaintenanceJob {
                             String olderThan, String retainLast) {
         String catalog = QualityCheckJob.splitIdentifier(targetTable)[0];
         var metrics = new ArrayList<String>();
-        LOGGER.log(Level.FINE, () -> "MAINTENANCE planned table=" + targetTable
-                + " operations=" + String.join(",", operations)
-                + " olderThan=" + (olderThan == null ? "unset" : olderThan)
-                + " retainLast=" + (retainLast == null ? "default 2" : retainLast));
+        LOGGER.debug("MAINTENANCE planned table={} operations={} olderThan={} retainLast={}",
+                targetTable, String.join(",", operations),
+                olderThan == null ? "unset" : olderThan,
+                retainLast == null ? "default 2" : retainLast);
         for (String operation : operations) {
-            switch (operation) {
-                case EXPIRE_SNAPSHOTS -> metrics.add(expireSnapshots(spark, catalog, targetTable,
-                        olderThan, retainLast));
-                case REWRITE_DATA_FILES -> metrics.add(rewriteDataFiles(spark, catalog, targetTable));
-                case DELETE_ORPHAN_FILES -> metrics.add(deleteOrphanFiles(spark, catalog, targetTable,
-                        olderThan));
+            String metric = JobTelemetry.measure("MAINTENANCE", operation, "maintenance", targetTable,
+                    () -> switch (operation) {
+                case EXPIRE_SNAPSHOTS -> expireSnapshots(spark, catalog, targetTable,
+                        olderThan, retainLast);
+                case REWRITE_DATA_FILES -> rewriteDataFiles(spark, catalog, targetTable);
+                case DELETE_ORPHAN_FILES -> deleteOrphanFiles(spark, catalog, targetTable, olderThan);
                 default -> throw new IllegalArgumentException(
                         "Unsupported maintenance operation: " + operation);
-            }
+            });
+            metrics.add(metric);
         }
         return metrics;
     }
@@ -92,7 +92,7 @@ public final class MaintenanceJob {
         String call = String.format("CALL %s.system.expire_snapshots(table => '%s', retain_last => %s%s)",
                 catalog, targetTable, retainLast == null ? "2" : retainLast,
                 olderThan == null ? "" : ", older_than => TIMESTAMP '" + olderThan + "'");
-        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
+        LOGGER.debug("MAINTENANCE call {}", call);
         Row result = spark.sql(call).first();
         return "MAINTENANCE expire_snapshots table=" + targetTable
                 + " dataFilesDeleted=" + result.get(0)
@@ -102,7 +102,7 @@ public final class MaintenanceJob {
     private static String rewriteDataFiles(SparkSession spark, String catalog, String targetTable) {
         String call = String.format("CALL %s.system.rewrite_data_files(table => '%s')",
                 catalog, targetTable);
-        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
+        LOGGER.debug("MAINTENANCE call {}", call);
         Row result = spark.sql(call).first();
         return "MAINTENANCE rewrite_data_files table=" + targetTable
                 + " rewrittenDataFiles=" + result.get(0)
@@ -134,7 +134,7 @@ public final class MaintenanceJob {
                 "CALL %s.system.remove_orphan_files(table => '%s', older_than => TIMESTAMP '%s', "
                         + "location => '%s', equal_schemes => map('s3', 's3a'))",
                 catalog, targetTable, olderThan, location);
-        LOGGER.log(Level.FINE, () -> "MAINTENANCE call " + call);
+        LOGGER.debug("MAINTENANCE call {}", call);
         List<Row> removed = spark.sql(call).collectAsList();
         return "MAINTENANCE delete_orphan_files table=" + targetTable
                 + " orphanFilesRemoved=" + removed.size();
