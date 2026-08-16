@@ -180,7 +180,7 @@ bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets
 ### 3.5 Live batch compute — Spark
 
 ```bash
-bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
+bash platform/spark/compose-cluster/scripts/tests/spark-compose-run-live-tests.sh
 ```
 
 Submits real statements and real jobs to the standalone cluster. It proves

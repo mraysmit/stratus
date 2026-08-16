@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * Proves the Spark binding to Polaris and Ceph RGW (P1-3.2-D1): a client
@@ -41,6 +42,9 @@ final class SparkCatalogBindingConformanceTest {
 
     private static final Duration CLEANUP = Duration.ofMinutes(8);
 
+    @RegisterExtension
+    private static final SparkSuiteContext SPARK = new SparkSuiteContext();
+
     private static StratusSparkClient client;
 
     private String probeTable;
@@ -49,8 +53,9 @@ final class SparkCatalogBindingConformanceTest {
     @BeforeAll
     static void connect() {
         LiveSparkCluster.require();
-        client = StratusSparkClient.connect(
-                SparkClientConfig.serviceIdentity("stratus-catalog-binding", 17081, 17082));
+        client = SPARK.client(
+                SparkClientConfig.serviceIdentity("stratus-catalog-binding", 17081, 17082)
+                        .withApplicationCores(2));
     }
 
     @AfterAll

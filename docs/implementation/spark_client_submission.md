@@ -164,11 +164,15 @@ cost real time to diagnose:
   compose file mounts. Setting only the driver's lets the catalog resolve and
   then fails every write.
 - **A JVM holds one `SparkContext`.** `getOrCreate()` returns any existing
-  session whatever configuration it is asked for, so two clients in one fork
-  would silently share an identity. `connect` refuses when a session already
-  exists, and the `spark-integration-tests` profile runs one fork per class.
-  Two principals in one driver is therefore a test of *authorisation*; two
-  drivers means two processes.
+  session whatever configuration it is asked for, so independently rebuilding
+  clients in one fork would silently share an identity. `connect` still
+  refuses that unsafe path. The integration profile now sets
+  `reuseForks=true`: `SparkSuiteContext` owns one suite-scoped context in
+  JUnit's root store and hands every class an isolated `newSession()` with its
+  own catalog configuration and identity. Derived clients clear session state
+  without stopping the context; only the root owner stops it. Two principals
+  in one driver is therefore a test of *authorisation*; two drivers still means
+  two processes.
 - **The current-JDK failure was Hadoop, not an intrinsic S3A limit.** Hadoop
   3.4.1 called `Subject.getSubject`, which JDK 24 permanently disabled, so the
   raw-object path failed on the workstation while Iceberg's S3 client worked.

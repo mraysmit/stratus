@@ -20,12 +20,12 @@ import org.slf4j.LoggerFactory;
  * Decides whether a dataset may be promoted, from the quality results already
  * recorded for a run.
  *
- * <p>The decision is deterministic and reads nothing but
- * {@code platform.quality_check_results}: any blocking check recorded as
- * {@code FAILED} blocks, warnings never do, and a run with no recorded results
- * blocks rather than promotes. That last case matters — a quality job that
- * crashed before writing leaves no failures, and treating "no evidence" as
- * "no problem" would promote exactly the data nobody checked.
+ * <p>The decision is deterministic and reads nothing but the selected results
+ * table, which defaults to {@code platform.quality_check_results}: any blocking
+ * check recorded as {@code FAILED} blocks, warnings never do, and a run with no
+ * recorded results blocks rather than promotes. That last case matters — a
+ * quality job that crashed before writing leaves no failures, and treating "no
+ * evidence" as "no problem" would promote exactly the data nobody checked.
  *
  * <p>An override is recorded as an additional {@code overridden} record
  * against the same run, so the results table remains the whole history of what
@@ -43,7 +43,7 @@ public final class PromotionGate {
     public static final String STATUS_OVERRIDDEN = "overridden";
 
     static final Set<String> ARGUMENTS = Set.of(
-            "runId", "targetTable", "override-reason", "override-principal");
+            "runId", "targetTable", "override-reason", "override-principal", "resultsTable");
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PromotionGate.class);
 
@@ -54,13 +54,14 @@ public final class PromotionGate {
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String runId = arguments.require("runId");
         String targetTable = arguments.require("targetTable");
+        String resultsTable = QualityCheckJob.resultsTable(arguments);
 
         try (var context = JobTelemetry.openContext(runId)) {
             SparkSession spark = SparkSession.builder()
                     .appName("stratus-promotion-gate").getOrCreate();
             try {
-                PromotionDecision decision = evaluate(spark, runId, targetTable);
-                LOGGER.info("{}", decision.describe());
+                PromotionDecision decision = evaluate(spark, runId, targetTable, resultsTable);
+                LOGGER.info("{} resultsTable={}", decision.describe(), resultsTable);
 
                 var overrideReason = arguments.optional("override-reason");
                 var overridePrincipal = arguments.optional("override-principal");
@@ -70,9 +71,9 @@ public final class PromotionGate {
                 }
                 if (decision.blocked() && overrideReason.isPresent()) {
                     override(spark, runId, targetTable, overridePrincipal.get(),
-                            overrideReason.get(), Clock.systemUTC());
-                    LOGGER.info("PROMOTION OVERRIDDEN runId={} principal={}",
-                            runId, overridePrincipal.get());
+                            overrideReason.get(), Clock.systemUTC(), resultsTable);
+                    LOGGER.info("PROMOTION OVERRIDDEN runId={} principal={} resultsTable={}",
+                            runId, overridePrincipal.get(), resultsTable);
                     return;
                 }
                 if (decision.blocked()) {
@@ -86,8 +87,14 @@ public final class PromotionGate {
     }
 
     public static PromotionDecision evaluate(SparkSession spark, String runId, String targetTable) {
+        return evaluate(spark, runId, targetTable, QualityCheckJob.RESULTS_TABLE);
+    }
+
+    public static PromotionDecision evaluate(SparkSession spark, String runId, String targetTable,
+                                             String resultsTable) {
+        QualityCheckJob.requireFullyQualifiedTable(resultsTable);
         List<Row> results = JobTelemetry.measure("PROMOTION", "read_evidence", runId, targetTable,
-                () -> spark.table(QualityCheckJob.RESULTS_TABLE)
+                () -> spark.table(resultsTable)
                         .filter(functions.col("run_id").equalTo(runId))
                         .select("check_name", "severity", "status")
                         .collectAsList());
@@ -99,8 +106,8 @@ public final class PromotionGate {
             String status = row.getString(2);
             // Each recorded verdict at DEBUG: the INFO line says what the gate
             // decided, and this says which records it decided from.
-            LOGGER.debug("PROMOTION EVIDENCE runId={} check={} severity={} status={}",
-                    runId, row.getString(0), row.getString(1), status);
+            LOGGER.debug("PROMOTION EVIDENCE runId={} resultsTable={} check={} severity={} status={}",
+                    runId, resultsTable, row.getString(0), row.getString(1), status);
             if (STATUS_OVERRIDDEN.equals(status)) {
                 overridden = true;
             } else if (QualityCheckJob.STATUS_FAILED.equals(status)) {
@@ -118,19 +125,27 @@ public final class PromotionGate {
     /** Records an explicit override without changing the verdict it overrides. */
     public static PromotionDecision override(SparkSession spark, String runId, String targetTable,
                                              String principal, String reason, Clock clock) {
+        return override(spark, runId, targetTable, principal, reason, clock,
+                QualityCheckJob.RESULTS_TABLE);
+    }
+
+    public static PromotionDecision override(SparkSession spark, String runId, String targetTable,
+                                             String principal, String reason, Clock clock,
+                                             String resultsTable) {
         if (principal == null || principal.isBlank() || reason == null || reason.isBlank()) {
             throw new IllegalArgumentException(
                     "An override requires a non-blank principal and reason");
         }
-        PromotionDecision decision = evaluate(spark, runId, targetTable);
+        PromotionDecision decision = evaluate(spark, runId, targetTable, resultsTable);
         if (decision.blocked()) {
-            recordOverride(spark, decision, principal, reason, clock);
+            recordOverride(spark, decision, principal, reason, clock, resultsTable);
         }
         return decision;
     }
 
     private static void recordOverride(SparkSession spark, PromotionDecision decision,
-                                       String principal, String reason, Clock clock) {
+                                       String principal, String reason, Clock clock,
+                                       String resultsTable) {
         String[] identifier = QualityCheckJob.splitIdentifier(decision.targetTable());
         Row record = RowFactory.create(
                 decision.runId(), identifier[1], identifier[2], identifier[1],
@@ -145,9 +160,9 @@ public final class PromotionGate {
             // that schema is refused where the same value against the declared
             // one is converted on the write.
             spark.createDataFrame(List.of(record), QualityCheckJob.resultSchema())
-                    .writeTo(QualityCheckJob.RESULTS_TABLE).append();
+                    .writeTo(resultsTable).append();
         } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {
-            throw new IllegalStateException(QualityCheckJob.RESULTS_TABLE
+            throw new IllegalStateException(resultsTable
                     + " does not exist; an override cannot be recorded without it", exception);
         }
     }

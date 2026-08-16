@@ -17,7 +17,8 @@ are named with their replacement tasks in the promotion manifest in
 | `compose.yaml` | Master and two workers, loopback-published, on the external Ceph network |
 | `config/spark-defaults.conf.template` | Catalog and storage binding, rendered at startup from the providers' `connection.env` |
 | `scripts/lifecycle/` | Start and stop |
-| `scripts/verify/` | Cluster check, catalog principal bootstrap, live test wrapper |
+| `scripts/tests/` | Authoritative and focused test entry points |
+| `scripts/verify/` | Catalog principal bootstrap and non-test verification |
 | `scripts/lib/` | Shared library and the image artifact resolver |
 | `logs/`, `evidence/`, `certs/`, `.env` | Local disposable state; all ignored |
 
@@ -36,6 +37,65 @@ bash scripts/lib/spark-compose-resolve-artifacts.sh
 docker build -f ../image/Dockerfile -t stratus/spark-runtime:dev ../image
 ./mvnw -pl :stratus-spark-jobs -am package -DskipTests
 ```
+
+## Focused live-test fast path
+
+The normal live runner remains the authoritative clean path. With no Maven
+arguments it executes `verify -am`, builds the isolated AWS runtime before the
+Spark tests consume its `runtime` classifier, and runs the complete live tier:
+
+```bash
+bash scripts/tests/spark-compose-run-live-tests.sh
+```
+
+For repeated work on one live class or method, prepare the exact upstream
+snapshots once. Preparation is build-only and does not require the Stratus
+containers to be running:
+
+```bash
+bash scripts/tests/spark-compose-prepare-focused-tests.sh
+```
+
+Then run a selected test without rebuilding the upstream reactor:
+
+```bash
+bash scripts/tests/spark-compose-run-focused-tests.sh \
+  -Dtest=SparkClientConformanceTest
+
+bash scripts/tests/spark-compose-run-focused-tests.sh \
+  -Dtest=SparkPipelineVerificationTest#ingestionJobWritesBronzeTable
+```
+
+The focused runner accepts Maven `-D` properties only and requires an explicit
+`-Dtest` selection. Test-suppression, tag-selection, no-test-success, lifecycle,
+and local-repository overrides are refused. It compiles the current Spark test
+sources through the module's normal `test` lifecycle, but resolves the AWS
+runtime classifier and Spark jobs JAR from the prepared local snapshots.
+
+Preparation records ignored state under `private/focused-tests/`. Before every
+focused run, the harness checks the exact content of the root build, BOM,
+build parent, AWS runtime inputs, and Spark job production sources—including
+uncommitted and untracked files. It also checks the installed POMs and JARs and
+both current target JARs. The focused invocation pins Maven to the same local
+repository used during preparation and refuses a user-supplied repository
+override. Missing or changed state is refused with the preparation command;
+the runner never falls back silently to an older snapshot.
+
+## Live-suite Spark context lifecycle
+
+The Spark integration profile reuses one Surefire JVM. `SparkSuiteContext`
+owns one two-core host-side Spark context for the complete JUnit launcher run,
+while each live test class receives an isolated SQL session with its own
+catalog configuration and principal. Closing a class client clears its session
+cache; it does not stop the shared application. JUnit's root store closes the
+context after the last selected class. The pipeline suite still launches one
+separate packaged application because that test covers the real `spark-submit`
+and job-JAR boundary.
+
+This lifecycle is observable in the structured transcript: one
+`client_connect_started`, one cluster application ID for all class sessions,
+one `client_session_completed` per isolated session, session-scoped close
+events, and one final context-scoped close event.
 
 ## Ports
 
@@ -70,7 +130,7 @@ because a signing key never crosses a harness boundary.
 
 ## What the tests cover
 
-`scripts/verify/spark-compose-run-live-tests.sh` runs the `spark-integration`
+`scripts/tests/spark-compose-run-live-tests.sh` runs the `spark-integration`
 suites: cluster registration and capacity, runtime image contents and its
 artifact lock, catalog namespace resolution, an Iceberg write and read landing
 in the governed zone, an S3A raw object round trip, a forged principal secret

@@ -51,7 +51,7 @@ public final class QualityCheckJob {
     public static final String SEVERITY_BLOCKING = "blocking";
 
     static final Set<String> ARGUMENTS = Set.of(
-            "targetTable", "checks", "checksBase64", "runId", "pipelineRunId");
+            "targetTable", "checks", "checksBase64", "runId", "pipelineRunId", "resultsTable");
 
     private static final Logger LOGGER = LoggerFactory.getLogger(QualityCheckJob.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -64,6 +64,7 @@ public final class QualityCheckJob {
         String targetTable = arguments.require("targetTable");
         String checks = checkDefinitions(arguments);
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
+        String resultsTable = resultsTable(arguments);
 
         try (var context = JobTelemetry.openContext(runId)) {
             SparkSession spark = SparkSession.builder()
@@ -71,16 +72,17 @@ public final class QualityCheckJob {
                     .getOrCreate();
             try {
                 List<Row> results = run(spark, targetTable, checks, runId,
-                        arguments.optional("pipelineRunId").orElse(null), Clock.systemUTC());
+                        arguments.optional("pipelineRunId").orElse(null), Clock.systemUTC(),
+                        resultsTable);
                 long passed = results.stream()
                         .filter(row -> STATUS_PASSED.equals(row.getString(7))).count();
                 long failed = results.stream()
                         .filter(row -> STATUS_FAILED.equals(row.getString(7))).count();
                 long warnings = results.stream()
                         .filter(row -> STATUS_WARNING.equals(row.getString(7))).count();
-                LOGGER.info("QUALITY COMPLETE table={} runId={} checks={} passed={} failed={} "
-                                + "warnings={}",
-                        targetTable, runId, results.size(), passed, failed, warnings);
+                LOGGER.info("QUALITY COMPLETE table={} resultsTable={} runId={} checks={} passed={} "
+                                + "failed={} warnings={}",
+                        targetTable, resultsTable, runId, results.size(), passed, failed, warnings);
             } finally {
                 spark.stop();
             }
@@ -119,8 +121,21 @@ public final class QualityCheckJob {
         }
     }
 
+    /** Selects the permanent audit table unless an isolated result store is explicit. */
+    static String resultsTable(JobArguments arguments) {
+        return requireFullyQualifiedTable(
+                arguments.optional("resultsTable").orElse(RESULTS_TABLE));
+    }
+
     public static List<Row> run(SparkSession spark, String targetTable, String checksJson,
                          String runId, String pipelineRunId, Clock clock) {
+        return run(spark, targetTable, checksJson, runId, pipelineRunId, clock, RESULTS_TABLE);
+    }
+
+    public static List<Row> run(SparkSession spark, String targetTable, String checksJson,
+                                String runId, String pipelineRunId, Clock clock,
+                                String resultsTable) {
+        requireFullyQualifiedTable(resultsTable);
         JsonNode definitions = JobTelemetry.measure("QUALITY", "parse_rules", runId, targetTable,
                 () -> readDefinitions(checksJson));
         Dataset<Row> target = JobTelemetry.measure("QUALITY", "resolve_target", runId, targetTable,
@@ -155,14 +170,14 @@ public final class QualityCheckJob {
 
         try {
             JobTelemetry.measureChecked("QUALITY", "persist_results", runId, targetTable, () -> {
-                spark.createDataFrame(rows, resultSchema()).writeTo(RESULTS_TABLE).append();
+                spark.createDataFrame(rows, resultSchema()).writeTo(resultsTable).append();
                 return null;
             });
         } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {
             // The results table is provisioned by the catalog bootstrap, not
             // by this job: creating it here would invent a schema that the
             // rest of the platform reads.
-            throw new IllegalStateException(RESULTS_TABLE + " does not exist; run the catalog "
+            throw new IllegalStateException(resultsTable + " does not exist; run the catalog "
                     + "bootstrap before running quality checks", exception);
         }
         return rows;
@@ -313,6 +328,11 @@ public final class QualityCheckJob {
                 .add("pipeline_run_id", DataTypes.StringType, true)
                 .add("checked_at", DataTypes.TimestampType, false)
                 .add("iceberg_snapshot_id", DataTypes.LongType, true);
+    }
+
+    static String requireFullyQualifiedTable(String identifier) {
+        splitIdentifier(identifier);
+        return identifier;
     }
 
     private static String text(JsonNode node, String field, String fallback) {

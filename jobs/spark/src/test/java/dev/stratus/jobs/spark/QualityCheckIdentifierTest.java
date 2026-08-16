@@ -78,6 +78,24 @@ final class QualityCheckIdentifierTest {
     }
 
     @Test
+    void resultTableDefaultsToThePermanentAuditTableAndAcceptsAnExplicitTable() {
+        assertEquals(QualityCheckJob.RESULTS_TABLE,
+                QualityCheckJob.resultsTable(JobArguments.parse()));
+        assertEquals("stratus.platform.quality_check_results_probe",
+                QualityCheckJob.resultsTable(JobArguments.parse(
+                        "--resultsTable", "stratus.platform.quality_check_results_probe")));
+    }
+
+    @Test
+    void refusesAResultsTableThatIsNotFullyQualified() {
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> QualityCheckJob.resultsTable(
+                        JobArguments.parse("--resultsTable", "platform.results")));
+
+        assertTrue(failure.getMessage().contains("platform.results"), failure.getMessage());
+    }
+
+    @Test
     void aBlockedDecisionNamesTheFailingRules() {
         var decision = new PromotionDecision("run-1", "stratus.bronze.customers", true, 4,
                 List.of("customer_id_unique"), List.of("email_mostly_present"));
