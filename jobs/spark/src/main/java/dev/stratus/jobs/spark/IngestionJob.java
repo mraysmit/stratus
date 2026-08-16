@@ -94,29 +94,33 @@ public final class IngestionJob {
         String schema = arguments.optional("schema").orElse(null);
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
 
-        // Validated before the session starts: a misspelled mode should cost a
-        // second, not a cluster allocation (code_style_rules 4.3).
-        if (!ON_EXISTING_FAIL.equals(onExistingBatch) && !ON_EXISTING_REPLACE.equals(onExistingBatch)) {
-            throw new IllegalArgumentException("--onExistingBatch must be "
-                    + ON_EXISTING_FAIL + " or " + ON_EXISTING_REPLACE + ", got: " + onExistingBatch);
-        }
+        try (var context = JobTelemetry.openContext(runId)) {
+            // Validated before the session starts: a misspelled mode should cost a
+            // second, not a cluster allocation (code_style_rules 4.3).
+            if (!ON_EXISTING_FAIL.equals(onExistingBatch)
+                    && !ON_EXISTING_REPLACE.equals(onExistingBatch)) {
+                throw new IllegalArgumentException("--onExistingBatch must be "
+                        + ON_EXISTING_FAIL + " or " + ON_EXISTING_REPLACE
+                        + ", got: " + onExistingBatch);
+            }
 
-        SparkSession spark = SparkSession.builder()
-                .appName("stratus-ingestion-" + targetTable)
-                .getOrCreate();
-        try {
-            long written = run(spark, sourceFile, targetTable, sourceSystem, batchId,
-                    onExistingBatch, schema, runId, Clock.systemUTC());
-            LOGGER.info("INGESTION COMPLETE table={} batchId={} rowsInBatch={} source={} runId={}",
-                    targetTable, batchId, written, sourceFile, runId);
-        } catch (SchemaDrift.Refusal refusal) {
-            // Its own status code: an orchestrator retries a failed job and
-            // escalates a refused one, and drift will still be there on retry.
-            LOGGER.error("INGESTION REFUSED {}", refusal.getMessage());
-            spark.stop();
-            System.exit(JobExit.SCHEMA_DRIFT);
-        } finally {
-            spark.stop();
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-ingestion-" + targetTable)
+                    .getOrCreate();
+            try {
+                long written = run(spark, sourceFile, targetTable, sourceSystem, batchId,
+                        onExistingBatch, schema, runId, Clock.systemUTC());
+                LOGGER.info("INGESTION COMPLETE table={} batchId={} rowsInBatch={} source={} runId={}",
+                        targetTable, batchId, written, sourceFile, runId);
+            } catch (SchemaDrift.Refusal refusal) {
+                // Its own status code: an orchestrator retries a failed job and
+                // escalates a refused one, and drift will still be there on retry.
+                LOGGER.error("INGESTION REFUSED {}", refusal.getMessage());
+                spark.stop();
+                System.exit(JobExit.SCHEMA_DRIFT);
+            } finally {
+                spark.stop();
+            }
         }
     }
 

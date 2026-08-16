@@ -65,20 +65,25 @@ public final class QualityCheckJob {
         String checks = checkDefinitions(arguments);
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
 
-        SparkSession spark = SparkSession.builder()
-                .appName("stratus-quality-" + targetTable)
-                .getOrCreate();
-        try {
-            List<Row> results = run(spark, targetTable, checks, runId,
-                    arguments.optional("pipelineRunId").orElse(null), Clock.systemUTC());
-            long passed = results.stream().filter(row -> STATUS_PASSED.equals(row.getString(7))).count();
-            long failed = results.stream().filter(row -> STATUS_FAILED.equals(row.getString(7))).count();
-            long warnings = results.stream().filter(row -> STATUS_WARNING.equals(row.getString(7))).count();
-            LOGGER.info(
-                    "QUALITY COMPLETE table={} runId={} checks={} passed={} failed={} warnings={}",
-                    targetTable, runId, results.size(), passed, failed, warnings);
-        } finally {
-            spark.stop();
+        try (var context = JobTelemetry.openContext(runId)) {
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-quality-" + targetTable)
+                    .getOrCreate();
+            try {
+                List<Row> results = run(spark, targetTable, checks, runId,
+                        arguments.optional("pipelineRunId").orElse(null), Clock.systemUTC());
+                long passed = results.stream()
+                        .filter(row -> STATUS_PASSED.equals(row.getString(7))).count();
+                long failed = results.stream()
+                        .filter(row -> STATUS_FAILED.equals(row.getString(7))).count();
+                long warnings = results.stream()
+                        .filter(row -> STATUS_WARNING.equals(row.getString(7))).count();
+                LOGGER.info("QUALITY COMPLETE table={} runId={} checks={} passed={} failed={} "
+                                + "warnings={}",
+                        targetTable, runId, results.size(), passed, failed, warnings);
+            } finally {
+                spark.stop();
+            }
         }
     }
 

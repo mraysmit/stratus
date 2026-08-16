@@ -32,7 +32,7 @@ public final class SparkObservabilityExtension
         context.getRoot().getStore(NAMESPACE).computeIfAbsent(
                 "suite", ignored -> new SuiteLifetime(), SuiteLifetime.class);
         CLASS_STARTS.put(context.getUniqueId(), System.nanoTime());
-        LOGGER.info("event=test_class_started runId={} testClass={}",
+        LOGGER.info("event=test_class_started suiteRunId={} testClass={}",
                 SparkTelemetry.runId(), context.getRequiredTestClass().getName());
     }
 
@@ -43,7 +43,7 @@ public final class SparkObservabilityExtension
                 + context.getRequiredTestMethod().getName();
         MDC.put("test", test);
         TEST_STARTS.put(context.getUniqueId(), System.nanoTime());
-        LOGGER.info("event=test_started runId={} test={}", SparkTelemetry.runId(), test);
+        LOGGER.info("event=test_started suiteRunId={} test={}", SparkTelemetry.runId(), test);
     }
 
     @Override
@@ -65,7 +65,7 @@ public final class SparkObservabilityExtension
     public void testDisabled(ExtensionContext context, java.util.Optional<String> reason) {
         String test = context.getRequiredTestClass().getSimpleName() + '#'
                 + context.getRequiredTestMethod().getName();
-        LOGGER.info("event=test_completed runId={} test={} status=SKIPPED durationMs=0 reason={}",
+        LOGGER.info("event=test_completed suiteRunId={} test={} status=SKIPPED durationMs=0 reason={}",
                 SparkTelemetry.runId(), test,
                 SparkLogSanitizer.token(reason.orElse("disabled"), 512));
     }
@@ -77,13 +77,15 @@ public final class SparkObservabilityExtension
         SparkTelemetry.record("junit.test", elapsed);
         SparkTelemetry.record("junit.test." + context.getRequiredTestClass().getSimpleName(), elapsed);
         if (failure == null) {
-            LOGGER.info("event=test_completed runId={} test={} status={} durationMs={}",
+            LOGGER.info("event=test_completed suiteRunId={} test={} status={} durationMs={}",
                     SparkTelemetry.runId(), test, status, Duration.ofNanos(elapsed).toMillis());
         } else {
-            LOGGER.error("event=test_completed runId={} test={} status={} durationMs={} "
+            LOGGER.error("event=test_completed suiteRunId={} test={} status={} durationMs={} "
                             + "exceptionClass={} exceptionMessage={}",
                     SparkTelemetry.runId(), test, status, Duration.ofNanos(elapsed).toMillis(),
                     failure.getClass().getName(), SparkLogSanitizer.token(failure.getMessage(), 1024));
+            LOGGER.debug("event=test_failure_detail suiteRunId={} test={} stackTrace={}",
+                    SparkTelemetry.runId(), test, SparkLogSanitizer.stackTrace(failure, 8192));
         }
         TEST_STARTS.remove(context.getUniqueId());
         MDC.remove("test");
@@ -94,7 +96,7 @@ public final class SparkObservabilityExtension
         long elapsed = System.nanoTime() - CLASS_STARTS.getOrDefault(
                 context.getUniqueId(), System.nanoTime());
         SparkTelemetry.record("junit.class", elapsed);
-        LOGGER.info("event=test_class_completed runId={} testClass={} durationMs={}",
+        LOGGER.info("event=test_class_completed suiteRunId={} testClass={} durationMs={}",
                 SparkTelemetry.runId(), context.getRequiredTestClass().getName(),
                 Duration.ofNanos(elapsed).toMillis());
         CLASS_STARTS.remove(context.getUniqueId());
@@ -106,7 +108,7 @@ public final class SparkObservabilityExtension
 
         private SuiteLifetime() {
             SparkTelemetry.installRunContext();
-            LOGGER.info("event=test_suite_started runId={}", SparkTelemetry.runId());
+            LOGGER.info("event=test_suite_started suiteRunId={}", SparkTelemetry.runId());
         }
 
         @Override
@@ -114,7 +116,7 @@ public final class SparkObservabilityExtension
             long elapsed = System.nanoTime() - startedAt;
             SparkTelemetry.record("junit.suite", elapsed);
             SparkTelemetry.logSummaries();
-            LOGGER.info("event=test_suite_completed runId={} durationMs={}",
+            LOGGER.info("event=test_suite_completed suiteRunId={} durationMs={}",
                     SparkTelemetry.runId(), Duration.ofNanos(elapsed).toMillis());
             MDC.clear();
         }
