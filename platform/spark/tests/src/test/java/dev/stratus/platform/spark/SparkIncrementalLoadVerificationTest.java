@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * Proves the batch pipeline over a week of arrivals rather than a single file.
@@ -52,6 +53,9 @@ import org.junit.jupiter.api.TestMethodOrder;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 final class SparkIncrementalLoadVerificationTest {
 
+    @RegisterExtension
+    private static final SparkSuiteContext SPARK = new SparkSuiteContext();
+
     private static final Duration JOB = Duration.ofMinutes(10);
     /** The status codes the jobs document; see {@code JobExit}. */
     private static final int EXIT_PROMOTION_BLOCKED = 2;
@@ -62,6 +66,8 @@ final class SparkIncrementalLoadVerificationTest {
     private static final String BRONZE = "stratus.bronze.incremental_customers_" + SUFFIX;
     private static final String SILVER = "stratus.silver.incremental_customers_" + SUFFIX;
     private static final String COUNTRIES = "stratus.silver.incremental_countries_" + SUFFIX;
+    private static final String RESULTS =
+            "stratus.platform.quality_check_results_incremental_" + SUFFIX;
 
     /**
      * The schema is declared rather than inferred. Inference reads types out of
@@ -124,9 +130,11 @@ final class SparkIncrementalLoadVerificationTest {
     @BeforeAll
     static void placeTheReferenceData() {
         LiveSparkCluster.require();
-        client = StratusSparkClient.connect(
-                SparkClientConfig.serviceIdentity("stratus-incremental-verification", 17085, 17086));
-        jobs = new PlatformJobs(client);
+        client = SPARK.client(
+                SparkClientConfig.serviceIdentity("stratus-incremental-verification", 17085, 17086)
+                        .withApplicationCores(2));
+        QualityResultFixture.create(client, RESULTS);
+        jobs = new PlatformJobs(client, RESULTS);
 
         jobLogCapture = new TestLogCapture("dev.stratus.jobs.spark");
 
@@ -154,7 +162,7 @@ final class SparkIncrementalLoadVerificationTest {
         // report green.
         try {
             if (client != null) {
-                for (String table : new String[] {SILVER, COUNTRIES, BRONZE}) {
+                for (String table : new String[] {RESULTS, SILVER, COUNTRIES, BRONZE}) {
                     client.sql("DROP TABLE IF EXISTS " + table + " PURGE");
                 }
             }
@@ -191,21 +199,26 @@ final class SparkIncrementalLoadVerificationTest {
         var result = ingest("customers-batch-1.csv", BATCH_1, SCHEMA);
 
         assertTrue(result.succeeded(), "the first ingestion must succeed: " + result.describe());
-        assertEquals("5", scalar("count(*)", BRONZE), "every row of the first batch must land");
-        assertEquals("5", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '" + BATCH_1 + "'"),
+        Row bronze = observe("count(*), "
+                + "count_if(stratus_batch_id = '" + BATCH_1 + "'), "
+                + "count_if(stratus_source_file IS NULL), "
+                + "count_if(stratus_ingested_at IS NULL)", BRONZE);
+        assertEquals("5", text(bronze, 0), "every row of the first batch must land");
+        assertEquals("5", text(bronze, 1),
                 "every row must carry the batch it arrived in");
-        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_source_file IS NULL"),
+        assertEquals("0", text(bronze, 2),
                 "every row must record the object it was read from");
-        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_ingested_at IS NULL"),
+        assertEquals("0", text(bronze, 3),
                 "every row must record when it was ingested");
 
         // One partition per batch is what makes a replay a metadata operation
         // that cannot reach another batch's files.
-        assertEquals("1", scalar("count(*)", BRONZE + ".partitions"),
+        String partitions = scalar("count(*)", BRONZE + ".partitions");
+        assertEquals("1", partitions,
                 "bronze must be partitioned by batch");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH_1, scalar("count(*)", BRONZE),
-                scalar("count(*)", BRONZE + ".partitions"), "customers-batch-1.csv", SCHEMA);
+        SparkVerificationLogging.batchIngested(
+                BRONZE, BATCH_1, text(bronze, 0), partitions, "customers-batch-1.csv", SCHEMA);
 
         Map<String, String> properties = tableProperties(BRONZE);
         assertEquals("copy-on-write", properties.get("write.merge.mode"), properties.toString());
@@ -239,12 +252,12 @@ final class SparkIncrementalLoadVerificationTest {
         var result = ingest("customers-batch-1.csv", BATCH_1, SCHEMA, "--onExistingBatch", "replace");
 
         assertTrue(result.succeeded(), "a deliberate replay must succeed: " + result.describe());
-        assertEquals("5", scalar("count(*)", BRONZE), "a replay must converge, not accumulate");
-        assertEquals("alice@example.com",
-                scalar("email", BRONZE + " WHERE customer_id = 1"),
+        Row bronze = observe("count(*), max(CASE WHEN customer_id = 1 THEN email END)", BRONZE);
+        assertEquals("5", text(bronze, 0), "a replay must converge, not accumulate");
+        assertEquals("alice@example.com", text(bronze, 1),
                 "the replayed rows must be the same rows");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH_1, scalar("count(*)", BRONZE),
+        SparkVerificationLogging.batchIngested(BRONZE, BATCH_1, text(bronze, 0),
                 scalar("count(*)", BRONZE + ".partitions"), "customers-batch-1.csv (replayed)", SCHEMA);
         SparkVerificationLogging.scenarioPassed("deliberate replay",
                 "the batch was rewritten in place and converged on the same rows");
@@ -259,17 +272,20 @@ final class SparkIncrementalLoadVerificationTest {
         var result = ingest("customers-batch-2.csv", BATCH_2, SCHEMA);
 
         assertTrue(result.succeeded(), "the second ingestion must succeed: " + result.describe());
-        assertEquals("8", scalar("count(*)", BRONZE),
+        Row bronze = observe("count(*), count(DISTINCT stratus_batch_id), "
+                + "count_if(customer_id = 5)", BRONZE);
+        assertEquals("8", text(bronze, 0),
                 "the second batch must add to the first, not replace it");
-        assertEquals("2", scalar("count(DISTINCT stratus_batch_id)", BRONZE),
+        assertEquals("2", text(bronze, 1),
                 "both batches must be identifiable in the table");
-        assertEquals("1", scalar("count(*)", BRONZE + " WHERE customer_id = 5"),
+        assertEquals("1", text(bronze, 2),
                 "a customer only the first batch carried must still be there");
-        assertEquals("2", scalar("count(*)", BRONZE + ".partitions"),
+        String partitions = scalar("count(*)", BRONZE + ".partitions");
+        assertEquals("2", partitions,
                 "each batch must be its own partition");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH_2, scalar("count(*)", BRONZE),
-                scalar("count(*)", BRONZE + ".partitions"), "customers-batch-2.csv", SCHEMA);
+        SparkVerificationLogging.batchIngested(
+                BRONZE, BATCH_2, text(bronze, 0), partitions, "customers-batch-2.csv", SCHEMA);
         SparkVerificationLogging.scenarioPassed("bronze accumulates",
                 "the second batch added to the first rather than replacing it");
     }
@@ -282,7 +298,8 @@ final class SparkIncrementalLoadVerificationTest {
         assertTrue(result.succeeded(), "the first transform must succeed: " + result.describe());
         assertTrue(jobLog().contains("\"type\": \"TRANSFORM\""),
                 "every job must emit its lineage payload: " + jobLog());
-        assertEquals("5", scalar("count(*)", SILVER), "silver must hold the first batch's customers");
+        Row silver = observe("count(*), max(CASE WHEN customer_id = 2 THEN email END)", SILVER);
+        assertEquals("5", text(silver, 0), "silver must hold the first batch's customers");
 
         // Bronze provenance belongs to a row that arrived once. A silver row is
         // rewritten by whichever batch last corrected it, so carrying the batch
@@ -293,8 +310,8 @@ final class SparkIncrementalLoadVerificationTest {
         assertFalse(columns.contains("stratus_batch_id"),
                 "silver must not carry the ingestion audit columns: " + columns);
 
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH_1, scalar("count(*)", SILVER),
-                "customer_id=2", scalar("email", SILVER + " WHERE customer_id = 2"));
+        SparkVerificationLogging.silverUpserted(
+                SILVER, BATCH_1, text(silver, 0), "customer_id=2", text(silver, 1));
 
         Map<String, String> properties = tableProperties(SILVER);
         assertEquals("copy-on-write", properties.get("write.merge.mode"), properties.toString());
@@ -309,16 +326,17 @@ final class SparkIncrementalLoadVerificationTest {
         var result = transform(BATCH_2);
 
         assertTrue(result.succeeded(), "the second transform must succeed: " + result.describe());
-        assertEquals("7", scalar("count(*)", SILVER),
+        Row silver = observe("count(*), max(CASE WHEN customer_id = 2 THEN email END), "
+                + "count_if(customer_id = 2)", SILVER);
+        assertEquals("7", text(silver, 0),
                 "two new customers must be inserted and the corrected one updated in place");
-        assertEquals("bob.corrected@example.com",
-                scalar("email", SILVER + " WHERE customer_id = 2"),
+        assertEquals("bob.corrected@example.com", text(silver, 1),
                 "the newer version of the record must win");
-        assertEquals("1", scalar("count(*)", SILVER + " WHERE customer_id = 2"),
+        assertEquals("1", text(silver, 2),
                 "an update must not become a second row");
 
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH_2, scalar("count(*)", SILVER),
-                "customer_id=2", scalar("email", SILVER + " WHERE customer_id = 2"));
+        SparkVerificationLogging.silverUpserted(
+                SILVER, BATCH_2, text(silver, 0), "customer_id=2", text(silver, 1));
         SparkVerificationLogging.scenarioPassed("correction applied",
                 "the newer version of the record replaced the older one in place");
     }
@@ -331,26 +349,27 @@ final class SparkIncrementalLoadVerificationTest {
         // was already superseded. Nothing downstream can tell.
         var ingested = ingest("customers-batch-3-late.csv", BATCH_3_LATE, SCHEMA);
         assertTrue(ingested.succeeded(), "the late batch must still be recorded: " + ingested.describe());
-        assertEquals("10", scalar("count(*)", BRONZE),
+        String bronzeRows = scalar("count(*)", BRONZE);
+        assertEquals("10", bronzeRows,
                 "bronze records what arrived, including a replay of old state");
 
         var result = transform(BATCH_3_LATE);
 
         assertTrue(result.succeeded(), "the transform must succeed: " + result.describe());
-        assertEquals("7", scalar("count(*)", SILVER), "a replay of old state must insert nothing");
-        assertEquals("bob.corrected@example.com",
-                scalar("email", SILVER + " WHERE customer_id = 2"),
+        Row silver = observe("count(*), max(CASE WHEN customer_id = 2 THEN email END), "
+                + "max(CASE WHEN customer_id = 6 THEN email END)", SILVER);
+        assertEquals("7", text(silver, 0), "a replay of old state must insert nothing");
+        assertEquals("bob.corrected@example.com", text(silver, 1),
                 "the older row must not overwrite the correction");
-        assertEquals("frank@example.com",
-                scalar("email", SILVER + " WHERE customer_id = 6"),
+        assertEquals("frank@example.com", text(silver, 2),
                 "nor overwrite a row it is older than by hours rather than days");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH_3_LATE, scalar("count(*)", BRONZE),
+        SparkVerificationLogging.batchIngested(BRONZE, BATCH_3_LATE, bronzeRows,
                 scalar("count(*)", BRONZE + ".partitions"), "customers-batch-3-late.csv", SCHEMA);
         SparkVerificationLogging.staleReplayIgnored(SILVER, BATCH_3_LATE, "customer_id=2",
-                scalar("email", SILVER + " WHERE customer_id = 2"));
+                text(silver, 1));
         SparkVerificationLogging.staleReplayIgnored(SILVER, BATCH_3_LATE, "customer_id=6",
-                scalar("email", SILVER + " WHERE customer_id = 6"));
+                text(silver, 2));
     }
 
     @Test
@@ -360,14 +379,15 @@ final class SparkIncrementalLoadVerificationTest {
 
         assertTrue(result.succeeded(),
                 "a source system adding a field must not stop the pipeline: " + result.describe());
-        assertEquals("12", scalar("count(*)", BRONZE), "the batch must be appended");
-        assertEquals("10", scalar("count(*)", BRONZE + " WHERE segment IS NULL"),
+        Row bronze = observe("count(*), count_if(segment IS NULL), "
+                + "max(CASE WHEN customer_id = 8 THEN segment END)", BRONZE);
+        assertEquals("12", text(bronze, 0), "the batch must be appended");
+        assertEquals("10", text(bronze, 1),
                 "rows that arrived before the column existed must read back null");
-        assertEquals("enterprise", scalar("segment", BRONZE + " WHERE customer_id = 8"),
+        assertEquals("enterprise", text(bronze, 2),
                 "the new column must carry its values");
 
-        SparkVerificationLogging.schemaEvolved(BRONZE, "segment",
-                scalar("count(*)", BRONZE + " WHERE segment IS NULL"));
+        SparkVerificationLogging.schemaEvolved(BRONZE, "segment", text(bronze, 1));
     }
 
     @Test
@@ -386,12 +406,13 @@ final class SparkIncrementalLoadVerificationTest {
         assertTrue(result.detail().contains("string"),
                 "and the type the batch carries: " + result.detail());
 
-        assertEquals("12", scalar("count(*)", BRONZE), "a refused batch must write nothing");
-        assertEquals("0", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '"
-                + BATCH_5_TYPECHANGE + "'"), "not even partially");
+        Row bronze = observe("count(*), count_if(stratus_batch_id = '"
+                + BATCH_5_TYPECHANGE + "')", BRONZE);
+        assertEquals("12", text(bronze, 0), "a refused batch must write nothing");
+        assertEquals("0", text(bronze, 1), "not even partially");
 
         SparkVerificationLogging.schemaDriftRefused(BRONZE, result.exitCode(),
-                scalar("count(*)", BRONZE), "customer_id: table holds int, batch carries string");
+                text(bronze, 0), "customer_id: table holds int, batch carries string");
     }
 
     @Test
@@ -403,8 +424,10 @@ final class SparkIncrementalLoadVerificationTest {
 
         var first = transform(BATCH_8_TIED);
         assertTrue(first.succeeded(), "the transform must succeed: " + first.describe());
-        assertEquals("8", scalar("count(*)", SILVER), "the tied key must collapse to one row");
-        String kept = scalar("email", SILVER + " WHERE customer_id = 20");
+        Row firstSilver = observe(
+                "count(*), max(CASE WHEN customer_id = 20 THEN email END)", SILVER);
+        assertEquals("8", text(firstSilver, 0), "the tied key must collapse to one row");
+        String kept = text(firstSilver, 1);
 
         // Ordering by the sequence alone leaves this to whichever row the
         // engine read first, so the same input could produce a different silver
@@ -412,11 +435,13 @@ final class SparkIncrementalLoadVerificationTest {
         // something else.
         var second = transform(BATCH_8_TIED);
         assertTrue(second.succeeded(), "the repeated transform must succeed: " + second.describe());
-        assertEquals("8", scalar("count(*)", SILVER), "a repeated transform must not add a row");
-        assertEquals(kept, scalar("email", SILVER + " WHERE customer_id = 20"),
+        Row secondSilver = observe(
+                "count(*), max(CASE WHEN customer_id = 20 THEN email END)", SILVER);
+        assertEquals("8", text(secondSilver, 0), "a repeated transform must not add a row");
+        assertEquals(kept, text(secondSilver, 1),
                 "a repeated transform over the same input must keep the same row");
 
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH_8_TIED, scalar("count(*)", SILVER),
+        SparkVerificationLogging.silverUpserted(SILVER, BATCH_8_TIED, text(secondSilver, 0),
                 "customer_id=20", kept);
         SparkVerificationLogging.scenarioPassed("deterministic tie-break",
                 "two rows sharing a key and a sequence value resolved to the same one twice");
@@ -432,11 +457,12 @@ final class SparkIncrementalLoadVerificationTest {
         var quality = runQualityChecks(BLOCKED_RUN, defectiveDataRules());
         assertTrue(quality.succeeded(),
                 "the quality job reports rather than decides: " + quality.describe());
-        assertEquals("2", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"),
+        Row blockedQuality = observe("count(*), count_if(status = 'FAILED')",
+                results(BLOCKED_RUN));
+        assertEquals("2", text(blockedQuality, 1),
                 "the null email and the unknown country must both be recorded as failures");
         SparkVerificationLogging.qualityRunRecorded(BLOCKED_RUN, BRONZE,
-                scalar("count(*)", results(BLOCKED_RUN)),
-                scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"));
+                text(blockedQuality, 0), text(blockedQuality, 1));
 
         // The gate consulted from inside the job, which is how Airflow will run
         // it in Increment 4 — one task, one status code.
@@ -459,21 +485,22 @@ final class SparkIncrementalLoadVerificationTest {
         String cleanRun = "incremental-clean-" + SUFFIX;
         var recheck = runQualityChecks(cleanRun, defectiveDataRules());
         assertTrue(recheck.succeeded(), "the re-check must run: " + recheck.describe());
-        assertEquals("0", scalar("count(*)", results(cleanRun) + " AND status = 'FAILED'"),
+        Row cleanQuality = observe("count(*), count_if(status = 'FAILED')", results(cleanRun));
+        assertEquals("0", text(cleanQuality, 1),
                 "the same rules must pass once the data is corrected");
 
         var promoted = transform(BATCH_6_DEFECTIVE, cleanRun);
         assertTrue(promoted.succeeded(), "the corrected batch must transform: " + promoted.describe());
-        assertEquals("10", scalar("count(*)", SILVER), "the two corrected customers must reach silver");
-        assertEquals("liam@example.com", scalar("email", SILVER + " WHERE customer_id = 10"),
+        Row silver = observe("count(*), max(CASE WHEN customer_id = 10 THEN email END)", SILVER);
+        assertEquals("10", text(silver, 0), "the two corrected customers must reach silver");
+        assertEquals("liam@example.com", text(silver, 1),
                 "and carry their corrected values");
 
         SparkVerificationLogging.qualityRunRecorded(cleanRun, BRONZE,
-                scalar("count(*)", results(cleanRun)),
-                scalar("count(*)", results(cleanRun) + " AND status = 'FAILED'"));
+                text(cleanQuality, 0), text(cleanQuality, 1));
         SparkVerificationLogging.promotionDecided(cleanRun, BRONZE, "PROMOTE", promoted.exitCode());
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH_6_DEFECTIVE, scalar("count(*)", SILVER),
-                "customer_id=10", scalar("email", SILVER + " WHERE customer_id = 10"));
+        SparkVerificationLogging.silverUpserted(
+                SILVER, BATCH_6_DEFECTIVE, text(silver, 0), "customer_id=10", text(silver, 1));
         SparkVerificationLogging.scenarioPassed("failed batch replayed",
                 "the same rules that blocked the batch passed once it was corrected");
     }
@@ -488,18 +515,21 @@ final class SparkIncrementalLoadVerificationTest {
         assertTrue(result.detail().contains("PROMOTION OVERRIDDEN"),
                 "an override must never be silent: " + result.detail());
 
-        assertEquals("1", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'overridden'"),
+        Row override = observe("count_if(status = 'overridden'), "
+                + "count_if(status = 'FAILED'), "
+                + "max(CASE WHEN status = 'overridden' THEN failure_detail END)",
+                results(BLOCKED_RUN));
+        assertEquals("1", text(override, 0),
                 "the override must be recorded as its own result");
-        assertEquals("2", scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"),
+        assertEquals("2", text(override, 1),
                 "and must not edit the verdict it overrides");
 
-        String who = client.scalar("SELECT failure_detail FROM "
-                + results(BLOCKED_RUN) + " AND status = 'overridden'");
+        String who = text(override, 2);
         assertTrue(who.contains("data-steward"),
                 "the record must name who overrode it: " + who);
 
         SparkVerificationLogging.overrideRecorded(BLOCKED_RUN, "data-steward",
-                scalar("count(*)", results(BLOCKED_RUN) + " AND status = 'FAILED'"));
+                text(override, 1));
     }
 
     @Test
@@ -518,19 +548,23 @@ final class SparkIncrementalLoadVerificationTest {
         var result = runQualityChecks(run, checks);
         assertTrue(result.succeeded(), "the freshness run must complete: " + result.describe());
 
-        Row stale = onlyRow("SELECT status, failure_detail FROM "
-                + results(run) + " AND check_name = 'business_time_recent'");
-        assertEquals("FAILED", stale.getString(0),
+        List<Row> freshness = client.sql("SELECT check_name, status, failure_detail FROM "
+                + results(run) + " AND check_name IN "
+                + "('business_time_recent', 'ingest_time_recent')");
+        assertEquals(2, freshness.size(), "both freshness results must be recorded");
+        Map<String, Row> freshnessByName = new LinkedHashMap<>();
+        freshness.forEach(row -> freshnessByName.put(row.getString(0), row));
+        Row stale = freshnessByName.get("business_time_recent");
+        assertEquals("FAILED", stale.getString(1),
                 "business time is days behind and must fail an hourly SLA");
-        assertTrue(stale.getString(1).contains("minutes old"),
-                "the record must quantify the staleness: " + stale.getString(1));
+        assertTrue(stale.getString(2).contains("minutes old"),
+                "the record must quantify the staleness: " + stale.getString(2));
 
-        assertEquals("PASSED", client.scalar("SELECT status FROM "
-                        + results(run) + " AND check_name = 'ingest_time_recent'"),
+        assertEquals("PASSED", freshnessByName.get("ingest_time_recent").getString(1),
                 "the rows were ingested minutes ago and must pass a daily SLA");
 
         SparkVerificationLogging.qualityRuleOutcome(run, "business_time_recent", "FAILED",
-                stale.getString(1));
+                stale.getString(2));
         SparkVerificationLogging.qualityRuleOutcome(run, "ingest_time_recent", "PASSED",
                 "within the daily SLA");
     }
@@ -582,12 +616,15 @@ final class SparkIncrementalLoadVerificationTest {
         var compaction = jobs.maintain(BRONZE, new String[] {"rewrite_data_files"}, null, null);
 
         assertTrue(compaction.succeeded(), "compaction must succeed: " + compaction.describe());
-        assertEquals(rows, scalar("count(*)", BRONZE), "maintenance must not change the row count");
-        assertEquals("liam@example.com", scalar("email", BRONZE + " WHERE customer_id = 10"),
+        Row afterCompaction = observe(
+                "count(*), max(CASE WHEN customer_id = 10 THEN email END)", BRONZE);
+        assertEquals(rows, text(afterCompaction, 0), "maintenance must not change the row count");
+        assertEquals("liam@example.com", text(afterCompaction, 1),
                 "nor any row's contents");
 
+        String snapshotsAfter = scalar("count(*)", BRONZE + ".snapshots");
         SparkVerificationLogging.maintenanceOutcome(BRONZE, "expire_snapshots", before,
-                scalar("count(*)", BRONZE + ".snapshots"), rows);
+                snapshotsAfter, rows);
         SparkVerificationLogging.maintenanceOutcome(BRONZE, "rewrite_data_files",
                 "dataFiles unchanged by design", scalar("count(*)", BRONZE + ".files"), rows);
     }
@@ -643,13 +680,14 @@ final class SparkIncrementalLoadVerificationTest {
                 "a file the table refers to must survive both runs: " + remaining);
         assertTrue(remaining.contains("stratus-orphan-probe"),
                 "and so must a stray younger than the retention: " + remaining);
-        assertEquals("16", scalar("count(*)", BRONZE), "neither run may touch live data");
+        String bronzeRows = scalar("count(*)", BRONZE);
+        assertEquals("16", bronzeRows, "neither run may touch live data");
 
         SparkVerificationLogging.negativeConfirmed("orphan retention inside the write window",
                 refused.exitCode(), "Iceberg refuses any interval under 24 hours");
         SparkVerificationLogging.maintenanceOutcome(BRONZE, "delete_orphan_files",
                 "probe present", "probe younger than the retention, so kept",
-                scalar("count(*)", BRONZE));
+                bronzeRows);
         SparkVerificationLogging.objectPrefixListed(bronzeDataPrefix, remaining);
     }
 
@@ -659,20 +697,22 @@ final class SparkIncrementalLoadVerificationTest {
         var result = ingest("customers-batch-7.ndjson", BATCH_7_NDJSON, SCHEMA);
 
         assertTrue(result.succeeded(), "an ndjson batch must ingest: " + result.describe());
-        assertEquals("18", scalar("count(*)", BRONZE), "it must accumulate like any other batch");
-        assertEquals("mia@example.com", scalar("email", BRONZE + " WHERE customer_id = 11"),
+        Row bronze = observe("count(*), max(CASE WHEN customer_id = 11 THEN email END), "
+                + "count_if(stratus_batch_id = '" + BATCH_7_NDJSON + "')", BRONZE);
+        assertEquals("18", text(bronze, 0), "it must accumulate like any other batch");
+        assertEquals("mia@example.com", text(bronze, 1),
                 "its values must survive the format");
-        assertEquals("2", scalar("count(*)", BRONZE + " WHERE stratus_batch_id = '"
-                + BATCH_7_NDJSON + "'"), "and carry the same audit columns");
+        assertEquals("2", text(bronze, 2), "and carry the same audit columns");
 
         var transformed = transform(BATCH_7_NDJSON);
         assertTrue(transformed.succeeded(), "and reach silver: " + transformed.describe());
-        assertEquals("12", scalar("count(*)", SILVER), "both customers must be inserted");
+        Row silver = observe("count(*), max(CASE WHEN customer_id = 11 THEN email END)", SILVER);
+        assertEquals("12", text(silver, 0), "both customers must be inserted");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH_7_NDJSON, scalar("count(*)", BRONZE),
+        SparkVerificationLogging.batchIngested(BRONZE, BATCH_7_NDJSON, text(bronze, 0),
                 scalar("count(*)", BRONZE + ".partitions"), "customers-batch-7.ndjson", SCHEMA);
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH_7_NDJSON, scalar("count(*)", SILVER),
-                "customer_id=11", scalar("email", SILVER + " WHERE customer_id = 11"));
+        SparkVerificationLogging.silverUpserted(
+                SILVER, BATCH_7_NDJSON, text(silver, 0), "customer_id=11", text(silver, 1));
     }
 
     private static PlatformJobs.Outcome ingest(String resource, String batchId,
@@ -740,7 +780,7 @@ final class SparkIncrementalLoadVerificationTest {
     }
 
     private static String results(String runId) {
-        return "stratus.platform.quality_check_results WHERE run_id = '" + runId + "'";
+        return RESULTS + " WHERE run_id = '" + runId + "'";
     }
 
     /** Every job log record emitted so far, as one searchable block. */
@@ -752,6 +792,16 @@ final class SparkIncrementalLoadVerificationTest {
 
     private static String scalar(String expression, String from) {
         return client.scalar("SELECT " + expression + " FROM " + from);
+    }
+
+    /** Collects several related observations with one Spark action. */
+    private static Row observe(String expressions, String from) {
+        return onlyRow("SELECT " + expressions + " FROM " + from);
+    }
+
+    private static String text(Row observation, int field) {
+        Object value = observation.get(field);
+        return value == null ? null : value.toString();
     }
 
     /**

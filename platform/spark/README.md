@@ -50,7 +50,7 @@ bash compose-cluster/scripts/lifecycle/spark-compose-startup.sh
 bash compose-cluster/scripts/verify/spark-compose-bootstrap-principal.sh
 
 # worker registration and everything else is proven by the live suite
-bash compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
+bash compose-cluster/scripts/tests/spark-compose-run-live-tests.sh
 ```
 
 ## Identity

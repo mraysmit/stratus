@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * Proves that two catalog principals using the platform at the same time are
@@ -44,6 +45,9 @@ import org.junit.jupiter.api.Test;
 @Tag("spark-integration")
 final class SparkPrincipalSeparationTest {
 
+    @RegisterExtension
+    private static final SparkSuiteContext SPARK = new SparkSuiteContext();
+
     private static final String SUFFIX =
             UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     private static final String UNGRANTED_PRINCIPAL = "svc-probe-" + SUFFIX;
@@ -64,14 +68,18 @@ final class SparkPrincipalSeparationTest {
         String credential =
                 principals.createWithoutCatalogAccess(UNGRANTED_PRINCIPAL, ungrantedSecret);
 
-        granted = StratusSparkClient.connect(
-                SparkClientConfig.serviceIdentity("stratus-granted-client", 17077, 17078));
+        granted = SPARK.client(
+                SparkClientConfig.serviceIdentity("stratus-granted-client", 17077, 17078)
+                        .withApplicationCores(2));
         ungranted = granted.asAnotherPrincipal(
                 granted.config().asPrincipal("stratus-ungranted-client", credential, 17077, 17078));
     }
 
     @AfterAll
     static void removeTheProbePrincipal() {
+        if (ungranted != null) {
+            ungranted.close();
+        }
         if (granted != null) {
             granted.close();
         }

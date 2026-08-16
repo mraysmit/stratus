@@ -34,6 +34,19 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- This is a dependency-only shading module: it has no
+                         source or test classpath of its own. The reactor's tag
+                         selectors otherwise make Surefire demand a JUnit or
+                         TestNG engine before it can discover that there are no
+                         tests. Runtime behavior remains covered by the Spark
+                         compatibility and live conformance modules. -->
+                    <skipTests>true</skipTests>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
                     <!-- Shade replaces the main artifact. Recreate the thin

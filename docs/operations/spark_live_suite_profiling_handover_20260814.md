@@ -19,6 +19,32 @@ grows between runs, and substantial host-to-host/run-to-run variability. No
 product or test code was changed. This dated handover is the session's only new
 tracked file.
 
+### Implementation update — 2026-08-16
+
+The performance work recommended in §9.2 and §9.3 is now implemented. The
+original numbers in this handover remain the before-change profiling baseline;
+they should not be read as the current harness design.
+
+- The prepared-artifact focused runner validates dirty source inputs, installed
+  Maven snapshots, and target JAR hashes before running a required `-Dtest`
+  selection. It never falls back to stale artifacts.
+- `SparkSuiteContext` now owns one two-core host-side Spark context in JUnit's
+  root store. Five live classes use isolated SQL sessions, and only the root
+  owner stops the context.
+- The packaged ingestion `spark-submit` remains separate and completed while
+  the shared host application held two of the cluster's four cores.
+- Live evidence: `spark-conformance-tests-20260816T063214Z.log` passed 41/41
+  affected tests in 192.002 seconds. It records one context connection, one
+  host application ID, six isolated sessions (including the ungranted
+  principal), six session closes, one context close, and a 31.782-second
+  packaged ingestion submission.
+- Authoritative evidence: `spark-conformance-tests-20260816T063723Z.log`
+  rebuilt the upstream reactor and passed the complete 46/46 live tier in
+  177.650 seconds. JUnit took 144.668 seconds; the host context connected once
+  in 8.331 seconds, and the packaged ingestion submission took 22.725 seconds.
+- The remaining continuation starts at §9.4: reduce repeated Spark actions
+  without weakening semantic coverage, then isolate quality-result state.
+
 ---
 
 ## 2. Where the work is
@@ -296,11 +322,12 @@ load, Iceberg metadata access, or Ceph object operations.
    commits, Ceph objects, and cleanup dominate small-data tests.
 4. **Focused-test build amplification.** `verify -am` shades an upstream
    runtime and recompiles every Spark test source on each focused invocation.
-5. **Shared quality-results growth.** Both incremental and pipeline tests use
-   the permanent `stratus.platform.quality_check_results` table. The earlier
-   full transcript showed 19 accumulated data files/manifests. Unique run IDs
-   prevent correctness collisions but do not prevent metadata growth or
-   run-to-run performance drift.
+5. **Shared quality-results growth (baseline, now mitigated).** Both
+   incremental and pipeline tests originally used the permanent
+   `stratus.platform.quality_check_results` table. The earlier full transcript
+   showed 19 accumulated data files/manifests. Unique run IDs prevented
+   correctness collisions but not metadata growth or run-to-run performance
+   drift. Section 9.5 records the per-suite isolation implemented afterward.
 6. **Host variability.** The same client class and same number of jobs took
    roughly 1.9 times as long in the focused session as in the earlier full run.
 
@@ -350,6 +377,9 @@ directory.
 | `profile-client-isolated-surefire-console.log` | console mirror for direct Surefire profile |
 | `profile-pipeline-ingestion-console.log` | console mirror for isolated ingestion |
 | `profile-install-reactor.log` | one-time local artifact installation timing |
+| `spark-conformance-tests-20260816T070052Z.log` | authoritative 46-test run after shared-context and action-batching changes |
+| `spark-conformance-tests-20260816T070856Z.log` | focused 29-test proof of isolated quality-result stores and cleanup |
+| `spark-conformance-tests-20260816T071313Z.log` | final authoritative 46-test run with batching, shared context, and isolated results together |
 
 Two deliberately retained failure transcripts document why direct Surefire
 requires prepared artifacts:
@@ -382,6 +412,10 @@ relative regression thresholds once several stable samples exist.
 
 ### 9.2 Add a safe prepared-artifact fast path
 
+**Completed 2026-08-16.** The implementation is under
+`platform/spark/compose-cluster/scripts/tests/`; the fast runner refuses
+missing or mismatched preparation state. The original recommendation follows.
+
 Keep the current `verify -am` path as the authoritative clean/full path. Add an
 explicit developer fast path that:
 
@@ -394,6 +428,10 @@ Measured benefit for a focused class on this workstation: about 114 seconds
 per repeat after preparation.
 
 ### 9.3 Share the host Spark context
+
+**Completed 2026-08-16.** The 41-test affected-class run used one host
+application and retained the independent packaged submission. The original
+recommendation follows.
 
 Create a suite-scoped test fixture or JUnit extension that owns one two-core
 host-side `SparkContext`. Give each class an isolated `SparkSession` and
@@ -408,6 +446,22 @@ Target: reduce five host-side context lifecycles to one, while retaining the
 one deliberate external application.
 
 ### 9.4 Reduce action count without weakening contracts
+
+**First pass completed 2026-08-16.** Related scalar observations are now
+returned by aggregate rows and values already produced by the test are reused
+in assertions and logs. The two deep classes remained green at 29/29 while
+their visible scheduler jobs fell from 231 to 173: incremental fell from 182
+to 134 and pipeline from 49 to 39, a combined reduction of 58 jobs (25.1%).
+The authoritative 46-test transcript
+`spark-conformance-tests-20260816T070052Z.log` recorded 194 jobs, one shared
+host connection, and 147.996 seconds of JUnit time. Disabling adaptive query
+execution was also measured and reverted because it increased both job count
+and duration.
+
+The `<120` deep-suite target was not reached. It remains a follow-up target,
+not a reason to remove behavioral assertions: the remaining actions include
+the writes and maintenance operations under test plus at least one real
+Iceberg/Spark action for each essential observation.
 
 - Combine related scalar assertions into one SQL aggregation returning several
   columns.
@@ -424,8 +478,31 @@ suite, down from 252. Measure again before setting a stricter target.
 
 ### 9.5 Isolate quality-result state
 
-`QualityCheckJob` currently fixes its result table at
-`stratus.platform.quality_check_results`. Choose one of:
+**Completed 2026-08-16.** `QualityCheckJob` and `PromotionGate` retain
+`stratus.platform.quality_check_results` as their production default and now
+accept an explicit fully qualified results table. The selected name flows
+through quality writes, promotion evidence reads, and override writes, and is
+included in structured job logging.
+
+Each deep live class creates a unique empty Iceberg table from the deployed
+canonical schema, passes it to `PlatformJobs`, reads only that store, and drops
+it with `PURGE` during class cleanup. The focused transcript
+`spark-conformance-tests-20260816T070856Z.log` passed 29/29 and records both
+unique table creates, all isolated reads, and both purged drops. The permanent
+table was read only to derive its schema and received no suite writes. Empty
+CTAS creation adds four visible jobs to the pair (173 to 177), a bounded cost
+that removes unbounded cross-run history growth from test timing.
+
+The final authoritative transcript
+`spark-conformance-tests-20260816T071313Z.log` passed 46/46 with one host
+connection, 198 visible scheduler jobs, 141.894 seconds of JUnit time, and a
+22.705-second packaged submission. Its promotion-evidence DEBUG records name
+the unique selected table, making result-store routing observable rather than
+implicit.
+
+The original alternatives follow for historical context:
+
+The options considered were:
 
 - make the results table injectable and give the live suite a unique table that
   it drops with purge;

@@ -208,7 +208,7 @@ bash platform/spark/compose-cluster/scripts/verify/spark-compose-bootstrap-princ
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh
 bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh
-bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
+bash platform/spark/compose-cluster/scripts/tests/spark-compose-run-live-tests.sh
 ```
 
 Live suites are excluded from the default build and select by JUnit tag. Mocks, fakes, and simulated product endpoints are prohibited: product behaviour is proven against the running product.
