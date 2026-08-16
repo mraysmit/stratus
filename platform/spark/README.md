@@ -4,13 +4,16 @@ Product integration for Apache Spark, the batch compute engine of the Stratus
 platform. Spark reads and writes Iceberg tables through the Polaris catalog
 and reaches object storage through Ceph RGW.
 
-**Status: developer track updated 2026-08-13; live revalidation pending.** The
-reduced cluster, its bindings to Polaris and Ceph, and the full batch pipeline
-have prior live evidence in `compose-cluster/logs/`; the Hadoop/AWS classpath
-and test-driver changes described below require a fresh complete transcript. The
-implementation plan and task track are owned by
+**Status: developer track live-revalidated 2026-08-16; production track not
+started.** The reduced cluster, its bindings to Polaris and Ceph, the full batch
+pipeline, and correlated telemetry passed the authoritative 46-test live run in
+`compose-cluster/logs/spark-conformance-tests-20260816T071313Z.log`. Remaining
+phase metrics, feedback-tier separation and production telemetry export are
+tracked explicitly in the implementation plan. The implementation plan and
+task track are owned by
 [spark_compute.md](../../docs/implementation/spark_compute.md) (Increment 3),
-whose `P1-3.1-D1`, `P1-3.2-D1`, and `P1-3.3-V1` record the state.
+whose `P1-3.1-D1`, `P1-3.1-V1` through `P1-3.1-V4`, `P1-3.2-D1`,
+`P1-3.3-V1`, and `P1-3.6-P2` record the state.
 
 Production placement, master recovery, Spark authentication and transport
 encryption, and the Ceph-backed history server are on the production track and
