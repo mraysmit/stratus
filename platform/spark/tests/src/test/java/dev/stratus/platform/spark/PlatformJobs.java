@@ -8,6 +8,7 @@ import dev.stratus.jobs.spark.JobExit;
 import dev.stratus.jobs.spark.MaintenanceJob;
 import dev.stratus.jobs.spark.MaterialisationJob;
 import dev.stratus.jobs.spark.PromotionGate;
+import dev.stratus.jobs.spark.PromotionDecision;
 import dev.stratus.jobs.spark.QualityCheckJob;
 import dev.stratus.jobs.spark.SchemaDrift;
 import dev.stratus.jobs.spark.TransformJob;
@@ -75,8 +76,21 @@ final class PlatformJobs {
      */
     private void refresh(String... tables) {
         for (String table : tables) {
-            if (table != null && client.session().catalog().tableExists(table)) {
-                client.session().catalog().refreshTable(table);
+            if (table != null) {
+                try (var observed = SparkTelemetry.start("catalog_refresh", "spark.catalog.refresh",
+                        "applicationId=" + client.applicationId()
+                                + " table=" + SparkLogSanitizer.token(table))) {
+                    try {
+                        boolean exists = client.session().catalog().tableExists(table);
+                        if (exists) {
+                            client.session().catalog().refreshTable(table);
+                        }
+                        observed.succeeded("exists=" + exists);
+                    } catch (RuntimeException failure) {
+                        observed.failed(failure, "");
+                        throw failure;
+                    }
+                }
             }
         }
     }
@@ -84,7 +98,8 @@ final class PlatformJobs {
     Outcome ingest(String sourceFile, String targetTable, String sourceSystem, String batchId,
                    String onExistingBatch, String schema, String runId) {
         refresh(targetTable);
-        return run(() -> {
+        return run("ingestion", "table=" + targetTable + " batchId=" + batchId
+                + " runId=" + runId, () -> {
             IngestionJob.run(client.session(), sourceFile, targetTable, sourceSystem, batchId,
                     onExistingBatch, schema, runId, Clock.systemUTC());
             return "ingested batch " + batchId + " into " + targetTable;
@@ -98,12 +113,13 @@ final class PlatformJobs {
         // The gate is consulted first, exactly as the job's main does, so a
         // blocked run writes nothing and reports the documented status code.
         if (qualityRunId != null) {
-            var decision = PromotionGate.evaluate(client.session(), qualityRunId, sourceTable);
+            var decision = evaluateGate(qualityRunId, sourceTable);
             if (decision.blocked()) {
                 return new Outcome(JobExit.PROMOTION_BLOCKED, decision.describe());
             }
         }
-        return run(() -> {
+        return run("transform", "sourceTable=" + sourceTable + " targetTable=" + targetTable
+                + " runId=" + runId, () -> {
             TransformJob.run(client.session(), sourceTable, targetTable, businessKey,
                     sequenceColumn, sourceBatch, runId, Clock.systemUTC());
             return "transformed into " + targetTable;
@@ -113,7 +129,7 @@ final class PlatformJobs {
     Outcome materialise(String[] sourceTables, String targetTable, String sql, String runId) {
         refresh(sourceTables);
         refresh(targetTable);
-        return run(() -> {
+        return run("materialisation", "targetTable=" + targetTable + " runId=" + runId, () -> {
             MaterialisationJob.run(client.session(), sourceTables, targetTable, sql, runId,
                     Clock.systemUTC());
             return "materialised " + targetTable;
@@ -122,7 +138,7 @@ final class PlatformJobs {
 
     Outcome checkQuality(String targetTable, String checksJson, String runId) {
         refresh(targetTable);
-        return run(() -> {
+        return run("quality", "targetTable=" + targetTable + " runId=" + runId, () -> {
             List<?> results = QualityCheckJob.run(client.session(), targetTable, checksJson, runId,
                     null, Clock.systemUTC());
             return "recorded " + results.size() + " results for " + runId;
@@ -131,26 +147,46 @@ final class PlatformJobs {
 
     Outcome maintain(String targetTable, String[] operations, String olderThan, String retainLast) {
         refresh(targetTable);
-        return run(() -> String.join("; ", MaintenanceJob.run(client.session(), targetTable,
+        return run("maintenance", "targetTable=" + targetTable
+                + " operations=" + String.join(",", operations),
+                () -> String.join("; ", MaintenanceJob.run(client.session(), targetTable,
                 operations, olderThan, retainLast)));
     }
 
     Outcome gate(String runId, String targetTable) {
         refresh(targetTable);
-        var decision = PromotionGate.evaluate(client.session(), runId, targetTable);
+        var decision = evaluateGate(runId, targetTable);
         return new Outcome(decision.blocked() ? JobExit.PROMOTION_BLOCKED : JobExit.SUCCESS,
                 decision.describe());
     }
 
     Outcome overrideGate(String runId, String targetTable, String principal, String reason) {
         refresh(targetTable);
-        return run(() -> {
+        return run("promotion_override", "targetTable=" + targetTable + " runId=" + runId
+                + " principal=" + principal, () -> {
             var decision = PromotionGate.override(client.session(), runId, targetTable,
                     principal, reason, Clock.systemUTC());
             return decision.blocked()
                     ? "PROMOTION OVERRIDDEN runId=" + runId + " principal=" + principal
                     : decision.describe();
         });
+    }
+
+    private PromotionDecision evaluateGate(String runId, String targetTable) {
+        try (var observed = SparkTelemetry.start("promotion_gate", "spark.job.promotion_gate",
+                "applicationId=" + client.applicationId() + " runId=" + runId
+                        + " targetTable=" + targetTable)) {
+            try {
+                PromotionDecision decision = PromotionGate.evaluate(
+                        client.session(), runId, targetTable);
+                observed.succeeded("blocked=" + decision.blocked()
+                        + " checks=" + decision.checksExamined());
+                return decision;
+            } catch (RuntimeException failure) {
+                observed.failed(failure, "");
+                throw failure;
+            }
+        }
     }
 
     /**
@@ -160,22 +196,28 @@ final class PlatformJobs {
      * failed job and escalates a refused one, and drift will still be there on
      * the retry.
      */
-    private Outcome run(ThrowingSupplier work) {
-        try {
-            String detail = work.get();
-            SparkVerificationLogging.jobCompleted(client.config().principalId(),
-                    JobExit.SUCCESS, detail);
-            return new Outcome(JobExit.SUCCESS, detail);
-        } catch (SchemaDrift.Refusal refusal) {
-            SparkVerificationLogging.jobCompleted(client.config().principalId(),
-                    JobExit.SCHEMA_DRIFT, refusal.getMessage());
-            return new Outcome(JobExit.SCHEMA_DRIFT, refusal.getMessage());
-        } catch (RuntimeException failure) {
-            String detail = failure.getMessage() == null
-                    ? failure.getClass().getName() : failure.getMessage();
-            SparkVerificationLogging.jobCompleted(client.config().principalId(),
-                    JobExit.FAILURE, detail);
-            return new Outcome(JobExit.FAILURE, detail);
+    private Outcome run(String jobType, String fields, ThrowingSupplier work) {
+        try (var observed = SparkTelemetry.start("platform_job", "spark.job." + jobType,
+                "applicationId=" + client.applicationId() + " jobType=" + jobType + ' ' + fields)) {
+            try {
+                String detail = work.get();
+                SparkVerificationLogging.jobCompleted(client.config().principalId(),
+                        JobExit.SUCCESS, detail);
+                observed.succeeded("exitCode=" + JobExit.SUCCESS);
+                return new Outcome(JobExit.SUCCESS, detail);
+            } catch (SchemaDrift.Refusal refusal) {
+                SparkVerificationLogging.jobCompleted(client.config().principalId(),
+                        JobExit.SCHEMA_DRIFT, refusal.getMessage());
+                observed.failed(refusal, "exitCode=" + JobExit.SCHEMA_DRIFT);
+                return new Outcome(JobExit.SCHEMA_DRIFT, refusal.getMessage());
+            } catch (RuntimeException failure) {
+                String detail = failure.getMessage() == null
+                        ? failure.getClass().getName() : failure.getMessage();
+                SparkVerificationLogging.jobCompleted(client.config().principalId(),
+                        JobExit.FAILURE, detail);
+                observed.failed(failure, "exitCode=" + JobExit.FAILURE);
+                return new Outcome(JobExit.FAILURE, detail);
+            }
         }
     }
 

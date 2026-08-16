@@ -10,15 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.stratus.jobs.spark.IngestionJob;
 import dev.stratus.jobs.spark.JobExit;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -86,21 +81,12 @@ final class SparkPipelineVerificationTest {
      * asserted on.
      *
      * <p>{@code LineageEvent.emit} is called from inside each job's
-     * {@code run}, not its {@code main}, and writes through
-     * {@code java.util.logging}. Running the job in this driver therefore still
+     * {@code run}, not its {@code main}, and writes through SLF4J. Running the
+     * job in this driver therefore still
      * produces the payload — it arrives here instead of on a subprocess's
      * stdout, which is a stronger place to read it from.
      */
-    private static final List<String> JOB_LOG = new ArrayList<>();
-
-    /**
-     * Held deliberately. {@code LogManager} keeps only a weak reference to a
-     * logger, so a logger nothing else refers to is collected and takes its
-     * handlers with it — the capture then silently returns nothing, which is
-     * exactly what happened on the first live run of this class.
-     */
-    private static Logger jobLogger;
-    private static Handler jobLogHandler;
+    private static TestLogCapture jobLogCapture;
 
     /**
      * Four rows with one duplicated business key and one blank email, so the
@@ -128,29 +114,20 @@ final class SparkPipelineVerificationTest {
                 SparkClientConfig.serviceIdentity("stratus-pipeline-verification", 17083, 17084));
         jobs = new PlatformJobs(client);
 
-        jobLogger = Logger.getLogger("dev.stratus.jobs.spark");
-        jobLogger.setLevel(Level.ALL);
-        jobLogHandler = new Handler() {
-            @Override public void publish(LogRecord record) {
-                synchronized (JOB_LOG) {
-                    JOB_LOG.add(record.getMessage());
-                }
-            }
-
-            @Override public void flush() {
-            }
-
-            @Override public void close() {
-            }
-        };
-        jobLogHandler.setLevel(Level.ALL);
-        jobLogger.addHandler(jobLogHandler);
+        jobLogCapture = new TestLogCapture("dev.stratus.jobs.spark");
     }
 
     /** Every job log record emitted so far, as one searchable block. */
     private static String jobLog() {
-        synchronized (JOB_LOG) {
-            return String.join("\n", JOB_LOG);
+        return jobLogCapture == null ? "" : jobLogCapture.events().stream()
+                .map(event -> event.getMessage().getFormattedMessage())
+                .reduce("", (left, right) -> left + '\n' + right);
+    }
+
+    @AfterAll
+    static void stopCapturingJobLogs() {
+        if (jobLogCapture != null) {
+            jobLogCapture.close();
         }
     }
 

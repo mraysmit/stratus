@@ -32,7 +32,17 @@
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-jdk14</artifactId>
+            <artifactId>slf4j-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -50,23 +60,12 @@
             <artifactId>spark-sql_2.13</artifactId>
             <scope>test</scope>
             <exclusions>
-                <!-- This module binds SLF4J to JUL (slf4j-jdk14), the platform
-                     convention. Spark brings the bridge that routes JUL back
-                     into SLF4J, and the two together form a loop: every record
-                     is handed from one to the other until the stack is
-                     exhausted. It fails as a StackOverflowError inside
-                     SparkSession creation, which looks like anything but a
-                     logging problem. -->
+                <!-- The test JVM uses Spark's native Log4j2 SLF4J provider.
+                     Do not also install a JUL bridge: Stratus code logs through
+                     SLF4J directly and a bidirectional bridge can recurse. -->
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>jul-to-slf4j</artifactId>
-                </exclusion>
-                <!-- Spark also publishes a Log4j SLF4J provider. Keep its
-                     Log4j API/core implementation, but not a second SLF4J
-                     binding beside this module's deliberate JUL provider. -->
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-slf4j2-impl</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

@@ -9,8 +9,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The {@code --name value} arguments a platform job is submitted with.
@@ -27,7 +27,7 @@ import java.util.logging.Logger;
  */
 public final class JobArguments {
 
-    private static final Logger LOGGER = Logger.getLogger(JobArguments.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(JobArguments.class);
 
     private final Map<String, String> values;
 
@@ -77,7 +77,7 @@ public final class JobArguments {
             throw new IllegalArgumentException("Unrecognised argument(s) --"
                     + String.join(", --", unknown) + "; this job reads " + new TreeSet<>(known));
         }
-        LOGGER.log(Level.FINE, () -> "JOB ARGUMENTS accepted=" + values.keySet());
+        LOGGER.debug("JOB ARGUMENTS accepted={}", values.keySet());
         return this;
     }
 
