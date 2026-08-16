@@ -198,6 +198,8 @@ final class LiveSparkCluster {
         var argv = new ArrayList<>(List.of(
                 "/opt/spark/bin/spark-submit",
                 "--master", "spark://spark-master.stratus.local:7077",
+                "--conf", "spark.executorEnv.STRATUS_LOG_LEVEL=" + logLevel(),
+                "--conf", "spark.executorEnv.STRATUS_RUN_ID=" + SparkTelemetry.runId(),
                 "--class", mainClass,
                 "/opt/stratus/jobs/stratus-spark-jobs.jar"));
         argv.addAll(List.of(jobArguments));
@@ -323,7 +325,7 @@ final class LiveSparkCluster {
         }
 
         String describe() {
-            return "exit=" + exitCode + "\n" + output;
+            return "exit=" + exitCode + " output=" + SparkLogSanitizer.token(output, 4096);
         }
     }
 }

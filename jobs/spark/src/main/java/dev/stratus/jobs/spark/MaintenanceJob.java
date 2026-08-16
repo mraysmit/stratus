@@ -6,6 +6,7 @@ package dev.stratus.jobs.spark;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
@@ -45,24 +46,32 @@ public final class MaintenanceJob {
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String targetTable = arguments.require("targetTable");
         String[] operations = arguments.requireList("operations");
+        String runId = "maintenance-" + UUID.randomUUID();
 
-        SparkSession spark = SparkSession.builder()
-                .appName("stratus-maintenance-" + targetTable)
-                .getOrCreate();
-        try {
-            List<String> metrics = run(spark, targetTable, operations,
-                    arguments.optional("olderThan").orElse(null),
-                    arguments.optional("retainLast").orElse(null));
-            metrics.forEach(LOGGER::info);
-            LOGGER.info("MAINTENANCE COMPLETE table={} operations={}",
-                    targetTable, String.join(",", operations));
-        } finally {
-            spark.stop();
+        try (var context = JobTelemetry.openContext(runId)) {
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-maintenance-" + targetTable)
+                    .getOrCreate();
+            try {
+                List<String> metrics = run(spark, targetTable, operations,
+                        arguments.optional("olderThan").orElse(null),
+                        arguments.optional("retainLast").orElse(null), runId);
+                metrics.forEach(LOGGER::info);
+                LOGGER.info("MAINTENANCE COMPLETE table={} operations={}",
+                        targetTable, String.join(",", operations));
+            } finally {
+                spark.stop();
+            }
         }
     }
 
     public static List<String> run(SparkSession spark, String targetTable, String[] operations,
                             String olderThan, String retainLast) {
+        return run(spark, targetTable, operations, olderThan, retainLast, "maintenance");
+    }
+
+    private static List<String> run(SparkSession spark, String targetTable, String[] operations,
+                                    String olderThan, String retainLast, String runId) {
         String catalog = QualityCheckJob.splitIdentifier(targetTable)[0];
         var metrics = new ArrayList<String>();
         LOGGER.debug("MAINTENANCE planned table={} operations={} olderThan={} retainLast={}",
@@ -70,7 +79,7 @@ public final class MaintenanceJob {
                 olderThan == null ? "unset" : olderThan,
                 retainLast == null ? "default 2" : retainLast);
         for (String operation : operations) {
-            String metric = JobTelemetry.measure("MAINTENANCE", operation, "maintenance", targetTable,
+            String metric = JobTelemetry.measure("MAINTENANCE", operation, runId, targetTable,
                     () -> switch (operation) {
                 case EXPIRE_SNAPSHOTS -> expireSnapshots(spark, catalog, targetTable,
                         olderThan, retainLast);

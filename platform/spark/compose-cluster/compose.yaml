@@ -8,6 +8,9 @@ x-spark-common: &spark-common
   env_file:
     - .env
   environment:
+    # Daemon-side Stratus records use the same level as submitted drivers.
+    # The live runner defaults this to DEBUG; normal startup defaults to INFO.
+    STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-INFO}
     # Object storage and catalog credentials for the svc-spark identity,
     # pulled from OpenBao by the harness scripts (ADR-P1-004). Never literal
     # here and never in the template.

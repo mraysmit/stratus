@@ -34,7 +34,7 @@ final class SparkTelemetry {
     }
 
     static void installRunContext() {
-        MDC.put("runId", RUN_ID);
+        MDC.put("suiteRunId", RUN_ID);
     }
 
     static String nextOperationId(String prefix) {
@@ -44,14 +44,19 @@ final class SparkTelemetry {
     static Operation start(String event, String metric, String details) {
         installRunContext();
         String operationId = nextOperationId(event);
-        LOGGER.debug("event={}_started runId={} operationId={} {}",
+        MdcScope operationContext = MdcScope.put("operationId", operationId);
+        LOGGER.debug("event={}_started suiteRunId={} operationId={} {}",
                 event, RUN_ID, operationId, SparkLogSanitizer.token(details, 2048));
-        return new Operation(event, metric, operationId, details, System.nanoTime());
+        return new Operation(event, metric, operationId, details, System.nanoTime(), operationContext);
     }
 
     static void record(String metric, long durationNanos) {
         DURATIONS.computeIfAbsent(metric, ignored -> new ConcurrentLinkedQueue<>())
                 .add(Math.max(0L, durationNanos));
+    }
+
+    static void resetMetric(String metric) {
+        DURATIONS.remove(metric);
     }
 
     static List<TimingSummary> summaries() {
@@ -63,7 +68,7 @@ final class SparkTelemetry {
 
     static void logSummaries() {
         for (TimingSummary summary : summaries()) {
-            LOGGER.info("event=timing_summary runId={} metric={} samples={} totalMs={} meanMs={} "
+            LOGGER.info("event=timing_summary suiteRunId={} metric={} samples={} totalMs={} meanMs={} "
                             + "minMs={} p50Ms={} p95Ms={} maxMs={}",
                     RUN_ID, SparkLogSanitizer.token(summary.metric()), summary.samples(),
                     summary.totalMillis(), summary.meanMillis(), summary.minimumMillis(),
@@ -78,15 +83,17 @@ final class SparkTelemetry {
         private final String operationId;
         private final String initialDetails;
         private final long startedAt;
+        private final MdcScope operationContext;
         private boolean completed;
 
         private Operation(String event, String metric, String operationId,
-                          String initialDetails, long startedAt) {
+                          String initialDetails, long startedAt, MdcScope operationContext) {
             this.event = event;
             this.metric = metric;
             this.operationId = operationId;
             this.initialDetails = initialDetails;
             this.startedAt = startedAt;
+            this.operationContext = operationContext;
         }
 
         String operationId() {
@@ -114,21 +121,54 @@ final class SparkTelemetry {
             record(metric, elapsed);
             String combined = SparkLogSanitizer.token(initialDetails + ' ' + details, 2048);
             if (failure == null) {
-                LOGGER.info("event={}_completed runId={} operationId={} status={} durationMs={} {}",
+                LOGGER.info("event={}_completed suiteRunId={} operationId={} status={} durationMs={} {}",
                         event, RUN_ID, operationId, status, Duration.ofNanos(elapsed).toMillis(), combined);
             } else {
-                LOGGER.error("event={}_completed runId={} operationId={} status={} durationMs={} "
+                LOGGER.error("event={}_completed suiteRunId={} operationId={} status={} durationMs={} "
                                 + "exceptionClass={} exceptionMessage={} {}",
                         event, RUN_ID, operationId, status, Duration.ofNanos(elapsed).toMillis(),
                         failure.getClass().getName(),
                         SparkLogSanitizer.token(failure.getMessage(), 1024), combined);
+                LOGGER.debug("event={}_failure_detail suiteRunId={} operationId={} stackTrace={}",
+                        event, RUN_ID, operationId, SparkLogSanitizer.stackTrace(failure, 8192));
             }
         }
 
         @Override
         public void close() {
-            if (!completed) {
-                finish("ABANDONED", "", new IllegalStateException("operation did not report an outcome"));
+            try {
+                if (!completed) {
+                    finish("ABANDONED", "",
+                            new IllegalStateException("operation did not report an outcome"));
+                }
+            } finally {
+                operationContext.close();
+            }
+        }
+    }
+
+    private static final class MdcScope implements AutoCloseable {
+
+        private final String key;
+        private final String previous;
+
+        private MdcScope(String key, String previous) {
+            this.key = key;
+            this.previous = previous;
+        }
+
+        private static MdcScope put(String key, String value) {
+            String previous = MDC.get(key);
+            MDC.put(key, value);
+            return new MdcScope(key, previous);
+        }
+
+        @Override
+        public void close() {
+            if (previous == null) {
+                MDC.remove(key);
+            } else {
+                MDC.put(key, previous);
             }
         }
     }
@@ -136,7 +176,7 @@ final class SparkTelemetry {
     record TimingSummary(String metric, int samples, long totalMillis, long meanMillis,
                          long minimumMillis, long p50Millis, long p95Millis, long maximumMillis) {
 
-        private static TimingSummary from(String metric, Iterable<Long> durations) {
+        static TimingSummary from(String metric, Iterable<Long> durations) {
             var ordered = new ArrayList<Long>();
             durations.forEach(ordered::add);
             ordered.sort(Long::compareTo);

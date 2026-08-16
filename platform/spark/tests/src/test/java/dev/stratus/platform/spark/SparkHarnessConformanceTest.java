@@ -237,12 +237,21 @@ final class SparkHarnessConformanceTest {
 
         assertTrue(compose.contains("./config/log4j2.properties:/opt/spark/conf/log4j2.properties:ro"),
                 "every Spark container must use the tracked Log4j2 configuration");
+        assertTrue(compose.contains("STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-INFO}"),
+                "master and worker daemons must receive the selected Stratus log level");
         assertTrue(log4j.contains("${env:STRATUS_LOG_LEVEL:-INFO}")
-                        && log4j.contains("%X{runId}"),
+                        && log4j.contains("%X{suiteRunId}")
+                        && log4j.contains("%X{jobRunId}")
+                        && log4j.contains("%X{operationId}"),
                 "the runtime logging configuration must support level control and correlation");
         assertTrue(liveRunner.contains("export STRATUS_RUN_ID")
                         && liveRunner.contains("-Dstratus.run.id=\"$run_id\""),
                 "one run ID must correlate shell, JUnit, driver, and executor records");
+
+        String clusterCommands = read("../tests/src/test/java/dev/stratus/platform/spark/LiveSparkCluster.java");
+        assertTrue(clusterCommands.contains("spark.executorEnv.STRATUS_LOG_LEVEL")
+                        && clusterCommands.contains("spark.executorEnv.STRATUS_RUN_ID"),
+                "packaged submissions must propagate level and run correlation to executors");
     }
 
     @Test

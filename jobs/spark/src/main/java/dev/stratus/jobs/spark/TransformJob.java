@@ -65,30 +65,32 @@ public final class TransformJob {
         String sourceBatch = arguments.optional("sourceBatch").orElse(null);
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
 
-        SparkSession spark = SparkSession.builder()
-                .appName("stratus-transform-" + targetTable)
-                .getOrCreate();
-        try {
-            arguments.optional("qualityRunId").ifPresent(qualityRunId -> {
-                var decision = PromotionGate.evaluate(spark, qualityRunId, sourceTable);
-                LOGGER.info("{}", decision.describe());
-                if (decision.blocked()) {
-                    // Non-zero exit rather than an exception: the orchestrator
-                    // reads the status code, and a stack trace would bury the
-                    // reason the promotion was refused.
-                    spark.stop();
-                    System.exit(JobExit.PROMOTION_BLOCKED);
-                }
-            });
+        try (var context = JobTelemetry.openContext(runId)) {
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-transform-" + targetTable)
+                    .getOrCreate();
+            try {
+                arguments.optional("qualityRunId").ifPresent(qualityRunId -> {
+                    var decision = PromotionGate.evaluate(spark, qualityRunId, sourceTable);
+                    LOGGER.info("{}", decision.describe());
+                    if (decision.blocked()) {
+                        // Non-zero exit rather than an exception: the orchestrator
+                        // reads the status code, and a stack trace would bury the
+                        // reason the promotion was refused.
+                        spark.stop();
+                        System.exit(JobExit.PROMOTION_BLOCKED);
+                    }
+                });
 
-            long written = run(spark, sourceTable, targetTable, businessKey, sequenceColumn,
-                    sourceBatch, runId, Clock.systemUTC());
-            LOGGER.info(
-                    "TRANSFORM COMPLETE table={} rows={} businessKey={} sequence={} batch={} runId={}",
-                    targetTable, written, String.join(",", businessKey), sequenceColumn,
-                    sourceBatch == null ? "all" : sourceBatch, runId);
-        } finally {
-            spark.stop();
+                long written = run(spark, sourceTable, targetTable, businessKey, sequenceColumn,
+                        sourceBatch, runId, Clock.systemUTC());
+                LOGGER.info("TRANSFORM COMPLETE table={} rows={} businessKey={} sequence={} "
+                                + "batch={} runId={}", targetTable, written,
+                        String.join(",", businessKey), sequenceColumn,
+                        sourceBatch == null ? "all" : sourceBatch, runId);
+            } finally {
+                spark.stop();
+            }
         }
     }
 

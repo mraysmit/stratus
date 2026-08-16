@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.slf4j.spi.SLF4JServiceProvider;
 
 /** Exercises job diagnostics through the real SLF4J 2.x provider. */
@@ -116,6 +117,35 @@ final class JobDiagnosticLoggingTest {
         assertTrue(message.contains("durationMs="), message);
         assertTrue(message.contains("<redacted>"), message);
         assertFalse(message.contains(secret), message);
+
+        String allMessages = capture.events().stream()
+                .map(event -> event.getMessage().getFormattedMessage())
+                .reduce("", (left, right) -> left + ' ' + right);
+        assertTrue(allMessages.contains("event=job_phase_failure_detail"), allMessages);
+        assertTrue(allMessages.contains("stackTrace="), allMessages);
+        assertFalse(allMessages.contains(secret), allMessages);
+    }
+
+    @Test
+    void nestedJobPhasesRestoreTheCallersCorrelationContext() {
+        MDC.put("suiteRunId", "outer-suite");
+        MDC.put("jobRunId", "outer-job");
+        MDC.put("operationId", "outer-operation");
+        try {
+            JobTelemetry.measure("QUALITY", "probe", "inner-job", "stratus.quality.probe", () -> {
+                assertEquals("outer-suite", MDC.get("suiteRunId"));
+                assertEquals("inner-job", MDC.get("jobRunId"));
+                assertTrue(MDC.get("operationId").startsWith("quality-"), MDC.get("operationId"));
+            });
+
+            assertEquals("outer-suite", MDC.get("suiteRunId"));
+            assertEquals("outer-job", MDC.get("jobRunId"));
+            assertEquals("outer-operation", MDC.get("operationId"));
+        } finally {
+            MDC.remove("operationId");
+            MDC.remove("jobRunId");
+            MDC.remove("suiteRunId");
+        }
     }
 
     @Test

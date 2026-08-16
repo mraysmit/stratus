@@ -59,9 +59,9 @@ final class StratusSparkClient implements AutoCloseable {
                         + " master=" + SparkLogSanitizer.token(config.masterUrl()))) {
             try {
                 return connectObserved(config, observed);
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 observed.failed(failure, "");
-                throw failure;
+                throw unchecked(failure);
             }
         }
     }
@@ -124,6 +124,8 @@ final class StratusSparkClient implements AutoCloseable {
                 // metadata, so one core is ample and leaves three for the jobs.
                 .config("spark.cores.max", String.valueOf(config.applicationCores()))
                 .config("spark.executor.cores", "1")
+                .config("spark.executorEnv.STRATUS_LOG_LEVEL", LiveSparkCluster.logLevel())
+                .config("spark.executorEnv.STRATUS_RUN_ID", SparkTelemetry.runId())
                 // The Apache default is 200 shuffle partitions. On this
                 // four-core developer cluster that turned tiny Iceberg cleanup
                 // actions into 204 tasks and added tens of seconds of scheduler
@@ -195,9 +197,9 @@ final class StratusSparkClient implements AutoCloseable {
                 StratusSparkClient client = asAnotherPrincipalObserved(other);
                 observed.succeeded("applicationId=" + client.applicationId());
                 return client;
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 observed.failed(failure, "");
-                throw failure;
+                throw unchecked(failure);
             }
         }
     }
@@ -248,8 +250,6 @@ final class StratusSparkClient implements AutoCloseable {
 
     /** Runs a statement and returns its rows. */
     List<Row> sql(String statement) {
-        SparkVerificationLogging.statementSubmitted(config.applicationName(),
-                config.principalId(), statement);
         String action = sqlAction(statement);
         String fingerprint = SparkLogSanitizer.fingerprint(statement);
         try (var observed = SparkTelemetry.start("sql", "spark.sql." + action.toLowerCase(Locale.ROOT),
@@ -257,6 +257,8 @@ final class StratusSparkClient implements AutoCloseable {
                         + " client=" + SparkLogSanitizer.token(config.applicationName())
                         + " principal=" + SparkLogSanitizer.token(config.principalId())
                         + " action=" + action + " statementHash=" + fingerprint)) {
+            SparkVerificationLogging.statementSubmitted(config.applicationName(),
+                    config.principalId(), statement);
             String operationId = observed.operationId();
             session.sparkContext().setJobGroup(operationId, action + " " + fingerprint, false);
             try {
@@ -265,10 +267,10 @@ final class StratusSparkClient implements AutoCloseable {
                 observed.succeeded("rows=" + rows.size() + ' ' + work.fields() + ' '
                         + settledMetrics(operationId).fields());
                 return rows;
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 observed.failed(failure, workFor(operationId).fields() + ' '
                         + settledMetrics(operationId).fields());
-                throw failure;
+                throw unchecked(failure);
             } finally {
                 session.sparkContext().clearJobGroup();
             }
@@ -294,11 +296,16 @@ final class StratusSparkClient implements AutoCloseable {
                 session.sparkContext().removeSparkListener(executionMetrics);
                 session.stop();
                 observed.succeeded("");
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 observed.failed(failure, "");
-                throw failure;
+                throw unchecked(failure);
             }
         }
+    }
+
+    private static RuntimeException unchecked(Exception failure) {
+        return failure instanceof RuntimeException runtimeFailure
+                ? runtimeFailure : new IllegalStateException(failure.getMessage(), failure);
     }
 
     private static String sqlAction(String statement) {

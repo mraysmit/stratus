@@ -55,30 +55,33 @@ public final class PromotionGate {
         String runId = arguments.require("runId");
         String targetTable = arguments.require("targetTable");
 
-        SparkSession spark = SparkSession.builder().appName("stratus-promotion-gate").getOrCreate();
-        try {
-            PromotionDecision decision = evaluate(spark, runId, targetTable);
-            LOGGER.info("{}", decision.describe());
+        try (var context = JobTelemetry.openContext(runId)) {
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-promotion-gate").getOrCreate();
+            try {
+                PromotionDecision decision = evaluate(spark, runId, targetTable);
+                LOGGER.info("{}", decision.describe());
 
-            var overrideReason = arguments.optional("override-reason");
-            var overridePrincipal = arguments.optional("override-principal");
-            if (overrideReason.isPresent() != overridePrincipal.isPresent()) {
-                throw new IllegalArgumentException(
-                        "An override requires both --override-reason and --override-principal");
-            }
-            if (decision.blocked() && overrideReason.isPresent()) {
-                override(spark, runId, targetTable, overridePrincipal.get(), overrideReason.get(),
-                        Clock.systemUTC());
-                LOGGER.info("PROMOTION OVERRIDDEN runId={} principal={}",
-                        runId, overridePrincipal.get());
-                return;
-            }
-            if (decision.blocked()) {
+                var overrideReason = arguments.optional("override-reason");
+                var overridePrincipal = arguments.optional("override-principal");
+                if (overrideReason.isPresent() != overridePrincipal.isPresent()) {
+                    throw new IllegalArgumentException(
+                            "An override requires both --override-reason and --override-principal");
+                }
+                if (decision.blocked() && overrideReason.isPresent()) {
+                    override(spark, runId, targetTable, overridePrincipal.get(),
+                            overrideReason.get(), Clock.systemUTC());
+                    LOGGER.info("PROMOTION OVERRIDDEN runId={} principal={}",
+                            runId, overridePrincipal.get());
+                    return;
+                }
+                if (decision.blocked()) {
+                    spark.stop();
+                    System.exit(JobExit.PROMOTION_BLOCKED);
+                }
+            } finally {
                 spark.stop();
-                System.exit(JobExit.PROMOTION_BLOCKED);
             }
-        } finally {
-            spark.stop();
         }
     }
 

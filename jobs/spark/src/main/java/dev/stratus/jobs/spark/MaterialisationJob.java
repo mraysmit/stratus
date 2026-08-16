@@ -49,24 +49,26 @@ public final class MaterialisationJob {
         String sql = arguments.require("sql");
         String runId = arguments.optional("runId").orElseGet(() -> UUID.randomUUID().toString());
 
-        SparkSession spark = SparkSession.builder()
-                .appName("stratus-materialisation-" + targetTable)
-                .getOrCreate();
-        try {
-            arguments.optional("qualityRunId").ifPresent(qualityRunId -> {
-                var decision = PromotionGate.evaluate(spark, qualityRunId, sourceTables[0]);
-                LOGGER.info("{}", decision.describe());
-                if (decision.blocked()) {
-                    spark.stop();
-                    System.exit(JobExit.PROMOTION_BLOCKED);
-                }
-            });
+        try (var context = JobTelemetry.openContext(runId)) {
+            SparkSession spark = SparkSession.builder()
+                    .appName("stratus-materialisation-" + targetTable)
+                    .getOrCreate();
+            try {
+                arguments.optional("qualityRunId").ifPresent(qualityRunId -> {
+                    var decision = PromotionGate.evaluate(spark, qualityRunId, sourceTables[0]);
+                    LOGGER.info("{}", decision.describe());
+                    if (decision.blocked()) {
+                        spark.stop();
+                        System.exit(JobExit.PROMOTION_BLOCKED);
+                    }
+                });
 
-            long written = run(spark, sourceTables, targetTable, sql, runId, Clock.systemUTC());
-            LOGGER.info("MATERIALISATION COMPLETE table={} rows={} sources={} runId={}",
-                    targetTable, written, String.join(",", sourceTables), runId);
-        } finally {
-            spark.stop();
+                long written = run(spark, sourceTables, targetTable, sql, runId, Clock.systemUTC());
+                LOGGER.info("MATERIALISATION COMPLETE table={} rows={} sources={} runId={}",
+                        targetTable, written, String.join(",", sourceTables), runId);
+            } finally {
+                spark.stop();
+            }
         }
     }
 

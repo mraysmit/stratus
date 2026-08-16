@@ -110,6 +110,31 @@ final class SparkVerificationLoggingTest {
     }
 
     @Test
+    void quotedJsonAndSqlCredentialsAreRedacted() {
+        String jsonSecret = "json-secret-value";
+        String sqlSecret = "sql-secret-value";
+        String sanitized = SparkLogSanitizer.token(
+                "{\"password\":\"" + jsonSecret + "\"} CREATE USER x PASSWORD '"
+                        + sqlSecret + "'", 1024);
+
+        assertFalse(sanitized.contains(jsonSecret), sanitized);
+        assertFalse(sanitized.contains(sqlSecret), sanitized);
+        assertTrue(sanitized.contains("<redacted>"), sanitized);
+    }
+
+    @Test
+    void renderedStackTracesAreSanitizedBoundedAndSingleLine() {
+        String secret = "stack-secret-value";
+        String rendered = SparkLogSanitizer.stackTrace(
+                new IllegalStateException("password='" + secret + "'\nsecond line"), 180);
+
+        assertFalse(rendered.contains(secret), rendered);
+        assertFalse(rendered.contains("\n"), rendered);
+        assertTrue(rendered.contains("<redacted>"), rendered);
+        assertTrue(rendered.length() <= 180, rendered);
+    }
+
+    @Test
     void ordinaryArgumentsAreRecordedAndRecordsStayOnOneLine() {
         assertEquals(List.of("--targetTable", "stratus.bronze.customers"),
                 SparkVerificationLogging.redact(

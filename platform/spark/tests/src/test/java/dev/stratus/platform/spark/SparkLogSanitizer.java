@@ -3,6 +3,8 @@
 
 package dev.stratus.platform.spark;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -21,8 +23,13 @@ final class SparkLogSanitizer {
             "--password", "--secret", "--token", "--credential", "--authorization",
             "--api-key", "--apikey", "--access-key", "--private-key");
     private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
-            "(?i)((?:secret|password|token|credential|authorization|api[-_.]?key|"
-                    + "access[-_.]?key|private[-_.]?key)\\s*[:=]\\s*)([^,;\\s}\\]]+)");
+            "(?i)((?:[\\\"']?(?:secret|password|token|credential|authorization|api[-_.]?key|"
+                    + "access[-_.]?key|private[-_.]?key)[\\\"']?)\\s*[:=]\\s*)"
+                    + "(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,;\\s}\\]]+)");
+    private static final Pattern SQL_SECRET = Pattern.compile(
+            "(?i)(\\b(?:secret|password|token|credential|authorization|api[-_.]?key|"
+                    + "access[-_.]?key|private[-_.]?key)\\b\\s+)"
+                    + "(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,;\\s]+)");
     private static final Pattern BEARER = Pattern.compile("(?i)\\bBearer\\s+[^,;\\s]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern URI_USER_INFO = Pattern.compile("(://)[^/@\\s]+@");
 
@@ -59,10 +66,20 @@ final class SparkLogSanitizer {
         }
         String redacted = BEARER.matcher(value).replaceAll("Bearer " + REDACTED);
         redacted = KEY_VALUE_SECRET.matcher(redacted).replaceAll("$1" + REDACTED);
+        redacted = SQL_SECRET.matcher(redacted).replaceAll("$1" + REDACTED);
         redacted = URI_USER_INFO.matcher(redacted).replaceAll("$1" + REDACTED + "@");
         String singleLine = redacted.replace('\r', '_').replace('\n', '_').replace('\t', '_');
         return singleLine.length() <= maximumLength
                 ? singleLine : singleLine.substring(0, maximumLength);
+    }
+
+    static String stackTrace(Throwable failure, int maximumLength) {
+        if (failure == null) {
+            return "null";
+        }
+        var rendered = new StringWriter();
+        failure.printStackTrace(new PrintWriter(rendered));
+        return token(rendered.toString(), maximumLength);
     }
 
     static String fingerprint(String value) {
