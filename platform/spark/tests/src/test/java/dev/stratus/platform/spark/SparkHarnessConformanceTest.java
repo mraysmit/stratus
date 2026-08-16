@@ -393,6 +393,35 @@ final class SparkHarnessConformanceTest {
     }
 
     @Test
+    void implementationPlanTracksCompletedAndRemainingTelemetryWork() {
+        String plan = read("../../../docs/implementation/spark_compute.md");
+
+        for (String completedTask : List.of("P1-3.1-V1", "P1-3.1-V2")) {
+            assertTrue(plan.contains("| `" + completedTask + "`")
+                            && plan.contains(completedTask + "` **Verified 2026-08-16**"),
+                    completedTask + " must record its completed implementation and evidence");
+        }
+        for (String remainingTask : List.of("P1-3.1-V3", "P1-3.1-V4", "P1-3.6-P2")) {
+            assertTrue(plan.contains("| `" + remainingTask + "`")
+                            && plan.contains(remainingTask + "` **Not started**"),
+                    remainingTask + " must remain visible with an explicit status");
+        }
+
+        assertTrue(plan.contains("first executor registration")
+                        && plan.contains("Iceberg scan planning and commit")
+                        && plan.contains("relative regression thresholds"),
+                "the remaining phase-level timing and regression work must be explicit");
+        assertTrue(plan.contains("Fast live")
+                        && plan.contains("Deep semantic")
+                        && plan.contains("Cold packaged submission"),
+                "the remaining feedback-tier split must be explicit");
+        assertTrue(plan.contains("Prometheus")
+                        && plan.contains("Grafana")
+                        && plan.contains("Loki"),
+                "the production telemetry export targets must be explicit");
+    }
+
+    @Test
     void theHarnessNeverStartsAProviderTransitively() {
         // ADR-P1-003: a consumer fails fast with a remediation rather than
         // starting Ceph or Polaris on the operator's behalf. Naming a
