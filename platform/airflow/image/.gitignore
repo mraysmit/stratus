@@ -1,0 +1,9 @@
+# Downloaded and generated build inputs. Their approved digests live in the
+# tracked locks; the artifacts themselves must not enter Git.
+artifacts/
+
+# The repository-wide build/ rule targets generated build output. This is an
+# intentional source folder containing image build scripts.
+!scripts/
+!scripts/build/
+!scripts/build/*.sh
