@@ -31,7 +31,7 @@ Therefore, `mvnw clean verify` is the complete local regression command. It runs
 | `-Pceph-integration-tests` | `ceph-integration` | no | running local Ceph harness | Targeted live Ceph suite run |
 | `-Pcatalog-integration-tests` | `catalog-integration` | no | running local Ceph and Polaris harnesses | Targeted live catalog conformance run (use `verify/polaris-compose-run-catalog-tests.sh`) |
 | `-Psecrets-integration-tests` | `secrets-integration` | no | running local OpenBao harness | Targeted live secret-store conformance run (use `verify/openbao-compose-run-secrets-tests.sh`) |
-| `-Pspark-integration-tests` | `spark-integration` | no | running local Ceph, OpenBao, Polaris and Spark harnesses | Targeted live Spark cluster and batch pipeline run (use `verify/spark-compose-run-live-tests.sh`) |
+| `-Pspark-integration-tests` | `spark-integration` | no | running local Ceph, OpenBao, Polaris and Spark harnesses | Targeted live Spark cluster and batch pipeline run (use `tests/spark-compose-run-live-tests.sh`) |
 | `-Pall-tests` | all tags | yes | running local Ceph, OpenBao, Polaris and Spark harnesses | Removes every tag filter; see the warning below before using it |
 | `-Puntagged-tests` | no known tag | no | none | Audit for tests missing an approved tag |
 
@@ -60,7 +60,7 @@ A change MUST additionally pass the live layer it affects, run through that laye
 | Ceph endpoint behavior, TLS, credentials, request signing, path-style routing, bucket policy, object operations, multipart behavior, cleanup | `ceph-integration` | `platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh` |
 | Iceberg table behavior, zone namespaces, schema evolution, snapshot expiry, partition layout, catalog credentials | `catalog-integration` | `platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh` |
 | Secret storage, retrieval, or the secret-store client | `secrets-integration` | `platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh` |
-| Spark jobs, batch pipeline semantics, client submission, principal separation | `spark-integration` | `platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh` |
+| Spark jobs, batch pipeline semantics, client submission, principal separation | `spark-integration` | `platform/spark/compose-cluster/scripts/tests/spark-compose-run-live-tests.sh` |
 
 A change spanning several layers must pass each of them.
 
@@ -200,7 +200,7 @@ The wrappers write their own transcripts into the component's `logs/` directory;
 bash platform/ceph/compose-cluster/scripts/verify/ceph-compose-run-live-tests.sh
 bash platform/polaris/compose-service/scripts/verify/polaris-compose-run-catalog-tests.sh
 bash platform/openbao/compose-service/scripts/verify/openbao-compose-run-secrets-tests.sh
-bash platform/spark/compose-cluster/scripts/verify/spark-compose-run-live-tests.sh
+bash platform/spark/compose-cluster/scripts/tests/spark-compose-run-live-tests.sh
 ```
 
 ### Targeted offline profiles
@@ -305,9 +305,12 @@ Expected output: none. This is a static cross-check on the source; `-Puntagged-t
   the environment supplies. It is not selected by the default local regression.
 - `stratus-spark-tests` under `platform/spark/tests` owns the live cluster,
   client-submission, batch-pipeline, incremental-load, and principal-separation
-  suites. Under `-Pspark-integration-tests` Surefire sets `reuseForks=false`:
-  a JVM holds one `SparkContext`, so a reused fork would hand the next class the
-  previous class's driver and identity.
+  suites. Under `-Pspark-integration-tests` Surefire sets `reuseForks=true` and
+  keeps one JVM. A JUnit root-store extension owns one suite-scoped, two-core
+  `SparkContext`; every live client class receives an isolated `SparkSession`
+  with class-specific catalog configuration and identity. Closing a class
+  session clears its cache without stopping the context, and the root store
+  stops the context after the complete launcher run.
 - `stratus-spark-jobs` under `jobs/spark` owns the platform job code and its
   offline unit tests.
 - Mockito, all other mocking frameworks, and simulated product endpoints of any

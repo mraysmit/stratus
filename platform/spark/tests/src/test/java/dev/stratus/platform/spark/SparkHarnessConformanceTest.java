@@ -147,6 +147,143 @@ final class SparkHarnessConformanceTest {
     }
 
     @Test
+    void dependencyOnlyAwsRuntimeDoesNotInvokeTaggedSurefire() {
+        String awsRuntimePom = read("../aws-runtime/pom.xml");
+
+        assertTrue(awsRuntimePom.contains("<artifactId>maven-surefire-plugin</artifactId>")
+                        && awsRuntimePom.contains("<skipTests>true</skipTests>"),
+                "the testless shading module must not ask Surefire to resolve inherited tag filters");
+    }
+
+    @Test
+    void focusedLiveRunsRequireExactPreparedSnapshots() {
+        String artifacts = read("scripts/lib/spark-compose-focused-test-artifacts.sh");
+        String runner = read("scripts/tests/spark-compose-run-focused-tests.sh");
+
+        assertTrue(artifacts.contains("--cached --others --exclude-standard")
+                        && artifacts.contains(":stratus-bom,:stratus-iceberg-aws-runtime,:stratus-spark-jobs")
+                        && artifacts.contains("focused_test_assert_hash AWS_RUNTIME")
+                        && artifacts.contains("focused_test_assert_hash SPARK_JOBS"),
+                "the fast path must fingerprint dirty inputs and validate every prepared snapshot");
+        assertTrue(runner.contains("focused_test_validate_artifacts")
+                        && runner.contains("test -Pspark-integration-tests -pl :stratus-spark-tests")
+                        && runner.contains("-Dtest="),
+                "the focused runner must validate freshness and pin the direct test lifecycle");
+    }
+
+    @Test
+    void liveClassesShareOneRootOwnedSparkContextWithIsolatedSessions() {
+        String rootPom = read("../../../pom.xml");
+        assertTrue(rootPom.contains("<reuseForks>true</reuseForks>"),
+                "one Surefire fork must host the suite-scoped Spark context");
+
+        String suiteContext = read("../tests/src/test/java/dev/stratus/platform/spark/"
+                + "SparkSuiteContext.java");
+        assertTrue(suiteContext.contains("context.getRoot().getStore")
+                        && suiteContext.contains("implements AutoCloseable")
+                        && suiteContext.contains("withApplicationCores(2)"),
+                "the shared two-core context must be owned and closed by JUnit's root store");
+
+        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+        assertTrue(client.contains("ownsSparkContext")
+                        && client.contains("if (ownsSparkContext)")
+                        && client.contains("session.catalog().clearCache()"),
+                "class sessions must clear their state without stopping the shared SparkContext");
+
+        for (String testClass : List.of(
+                "SparkCatalogBindingConformanceTest.java",
+                "SparkClientConformanceTest.java",
+                "SparkIncrementalLoadVerificationTest.java",
+                "SparkPipelineVerificationTest.java",
+                "SparkPrincipalSeparationTest.java")) {
+            String source = read("../tests/src/test/java/dev/stratus/platform/spark/" + testClass);
+            assertTrue(source.contains("SparkSuiteContext")
+                            && source.contains("@RegisterExtension")
+                            && source.contains(".client("),
+                    testClass + " must obtain an isolated session from the suite-owned context");
+            assertFalse(source.contains("StratusSparkClient.connect("),
+                    testClass + " must not start its own SparkContext");
+        }
+
+        for (String documentation : List.of(
+                "../../../docs/reference/maven_test_commands.md",
+                "../../../docs/implementation/spark_client_submission.md")) {
+            String guidance = read(documentation);
+            assertTrue(guidance.contains("suite-scoped")
+                            && guidance.contains("isolated")
+                            && guidance.contains("reuseForks=true"),
+                    documentation + " must describe the shared-context lifecycle");
+            assertFalse(guidance.contains("reuseForks=false")
+                            || guidance.contains("one fork per class"),
+                    documentation + " must not preserve the superseded fork-per-class guidance");
+        }
+    }
+
+    @Test
+    void testEntryPointsHaveTheirOwnClearlyNamedDirectory() {
+        Path tests = HARNESS.resolve("scripts/tests");
+        assertTrue(Files.isDirectory(tests),
+                "Spark test entry points must live under scripts/tests");
+
+        try (Stream<Path> scripts = Files.list(tests)) {
+            assertEquals(List.of(
+                            "spark-compose-prepare-focused-tests.sh",
+                            "spark-compose-run-focused-tests.sh",
+                            "spark-compose-run-live-tests.sh"),
+                    scripts.filter(path -> path.toString().endsWith(".sh"))
+                            .map(path -> path.getFileName().toString())
+                            .sorted()
+                            .toList(),
+                    "scripts/tests must contain the complete Spark test interface");
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to inspect scripts/tests", exception);
+        }
+    }
+
+    @Test
+    void deepSuitesBatchRelatedObservationsInsteadOfStartingOneActionPerAssertion() {
+        String incremental = read("../tests/src/test/java/dev/stratus/platform/spark/"
+                + "SparkIncrementalLoadVerificationTest.java");
+        String pipeline = read("../tests/src/test/java/dev/stratus/platform/spark/"
+                + "SparkPipelineVerificationTest.java");
+
+        assertTrue(occurrences(incremental, "scalar(") <= 45,
+                "incremental verification must batch related values into observation rows");
+        assertTrue(occurrences(pipeline, "client.scalar(") <= 8,
+                "pipeline verification must reuse or batch values already observed");
+    }
+
+    @Test
+    void deepSuitesIsolateQualityHistoryAndPurgeTheirResultTables() {
+        String fixture = read("../tests/src/test/java/dev/stratus/platform/spark/"
+                + "QualityResultFixture.java");
+        assertTrue(fixture.contains("USING iceberg AS SELECT * FROM")
+                        && fixture.contains("QualityCheckJob.RESULTS_TABLE")
+                        && fixture.contains("WHERE 1 = 0"),
+                "isolated stores must derive the deployed canonical schema without copying history");
+
+        for (String testClass : List.of(
+                "SparkIncrementalLoadVerificationTest.java",
+                "SparkPipelineVerificationTest.java")) {
+            String source = read("../tests/src/test/java/dev/stratus/platform/spark/" + testClass);
+            assertTrue(source.contains("quality_check_results_")
+                            && source.contains("QualityResultFixture.create(client, RESULTS)")
+                            && source.contains("new PlatformJobs(client, RESULTS)")
+                            && source.contains("new String[] {RESULTS,"),
+                    testClass + " must create, use, and purge a unique quality-result table");
+        }
+
+        String quality = read("../../../jobs/spark/src/main/java/dev/stratus/jobs/spark/"
+                + "QualityCheckJob.java");
+        String promotion = read("../../../jobs/spark/src/main/java/dev/stratus/jobs/spark/"
+                + "PromotionGate.java");
+        assertTrue(quality.contains("writeTo(resultsTable)")
+                        && promotion.contains("spark.table(resultsTable)")
+                        && promotion.contains("writeTo(resultsTable)"),
+                "quality writes, gate reads, and override writes must share the selected table");
+    }
+
+    @Test
     void s3aUploadsDoNotRequireWindowsNativeUtilities() {
         String defaults = read("config/spark-defaults.conf.template");
         String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
@@ -219,11 +356,12 @@ final class SparkHarnessConformanceTest {
     @Test
     void providerSettingsRemainSourceableAfterAWindowsCheckout() {
         String common = read("scripts/lib/spark-compose-common.sh");
-        String liveRunner = read("scripts/verify/spark-compose-run-live-tests.sh");
+        String mavenCommon = read("scripts/lib/spark-compose-maven-common.sh");
+        String liveRunner = read("scripts/tests/spark-compose-run-live-tests.sh");
 
         assertTrue(common.contains("sed 's/\\r$//'"),
                 "the Bash harness must strip CRLF before sourcing tracked connection files");
-        assertTrue(common.contains("cmd.exe /d /c mvnw.cmd"),
+        assertTrue(mavenCommon.contains("cmd.exe /d /c mvnw.cmd"),
                 "Git Bash must invoke the Windows Maven wrapper without rewriting it");
         assertTrue(liveRunner.contains("-Dstratus.spark.integration=true"),
                 "the live opt-in must cross the Git Bash-to-cmd.exe process boundary");
@@ -233,7 +371,7 @@ final class SparkHarnessConformanceTest {
     void liveRunsUseOneDeclarativeLoggingConfigurationAndCorrelationId() {
         String compose = read("compose.yaml");
         String log4j = read("config/log4j2.properties");
-        String liveRunner = read("scripts/verify/spark-compose-run-live-tests.sh");
+        String liveRunner = read("scripts/tests/spark-compose-run-live-tests.sh");
 
         assertTrue(compose.contains("./config/log4j2.properties:/opt/spark/conf/log4j2.properties:ro"),
                 "every Spark container must use the tracked Log4j2 configuration");
@@ -270,5 +408,9 @@ final class SparkHarnessConformanceTest {
         String outsideStrings = common.replaceAll("\"[^\"]*\"", "\"\"");
         assertFalse(outsideStrings.contains("-compose-startup.sh"),
                 "the harness must never invoke a provider's startup script; found one outside a message");
+    }
+
+    private static int occurrences(String text, String needle) {
+        return (text.length() - text.replace(needle, "").length()) / needle.length();
     }
 }

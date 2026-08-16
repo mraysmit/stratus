@@ -42,9 +42,15 @@ import java.util.List;
 final class PlatformJobs {
 
     private final StratusSparkClient client;
+    private final String qualityResultsTable;
 
     PlatformJobs(StratusSparkClient client) {
+        this(client, QualityCheckJob.RESULTS_TABLE);
+    }
+
+    PlatformJobs(StratusSparkClient client, String qualityResultsTable) {
         this.client = client;
+        this.qualityResultsTable = qualityResultsTable;
     }
 
     /** One job's outcome: the status code its {@code main} would have used, and why. */
@@ -140,7 +146,7 @@ final class PlatformJobs {
         refresh(targetTable);
         return run("quality", "targetTable=" + targetTable + " runId=" + runId, () -> {
             List<?> results = QualityCheckJob.run(client.session(), targetTable, checksJson, runId,
-                    null, Clock.systemUTC());
+                    null, Clock.systemUTC(), qualityResultsTable);
             return "recorded " + results.size() + " results for " + runId;
         });
     }
@@ -165,7 +171,7 @@ final class PlatformJobs {
         return run("promotion_override", "targetTable=" + targetTable + " runId=" + runId
                 + " principal=" + principal, () -> {
             var decision = PromotionGate.override(client.session(), runId, targetTable,
-                    principal, reason, Clock.systemUTC());
+                    principal, reason, Clock.systemUTC(), qualityResultsTable);
             return decision.blocked()
                     ? "PROMOTION OVERRIDDEN runId=" + runId + " principal=" + principal
                     : decision.describe();
@@ -178,7 +184,7 @@ final class PlatformJobs {
                         + " targetTable=" + targetTable)) {
             try {
                 PromotionDecision decision = PromotionGate.evaluate(
-                        client.session(), runId, targetTable);
+                        client.session(), runId, targetTable, qualityResultsTable);
                 observed.succeeded("blocked=" + decision.blocked()
                         + " checks=" + decision.checksExamined());
                 return decision;

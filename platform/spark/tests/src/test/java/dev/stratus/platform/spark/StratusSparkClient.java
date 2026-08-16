@@ -21,12 +21,11 @@ import org.apache.spark.sql.SparkSession;
  * cluster's own copy of Spark and nothing about reaching it — no submission
  * path, no per-principal identity, and no way to hold two clients at once.
  *
- * <p>Each instance owns its session, so a test can hold several. Sessions are
- * built rather than shared for the same reason the configuration is a value:
- * {@code SparkSession.builder().getOrCreate()} returns the JVM's existing
- * session if there is one, which would silently hand a second client the first
- * client's identity — a test for principal separation that quietly used one
- * principal would pass while proving nothing.
+ * <p>Each instance owns its SQL session, so a test can hold several. The root
+ * client also owns the JVM's Spark context; derived clients use isolated
+ * sessions over that context and close only their session-local state. This
+ * keeps catalog identities separate without paying for a new cluster
+ * application in every test class.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
@@ -44,12 +43,15 @@ final class StratusSparkClient implements AutoCloseable {
     private final SparkClientConfig config;
     private final SparkSession session;
     private final SparkExecutionMetrics executionMetrics;
+    private final boolean ownsSparkContext;
 
     private StratusSparkClient(SparkClientConfig config, SparkSession session,
-                               SparkExecutionMetrics executionMetrics) {
+                               SparkExecutionMetrics executionMetrics,
+                               boolean ownsSparkContext) {
         this.config = config;
         this.session = session;
         this.executionMetrics = executionMetrics;
+        this.ownsSparkContext = ownsSparkContext;
     }
 
     static StratusSparkClient connect(SparkClientConfig config) {
@@ -163,7 +165,7 @@ final class StratusSparkClient implements AutoCloseable {
 
         var executionMetrics = new SparkExecutionMetrics();
         session.sparkContext().addSparkListener(executionMetrics);
-        var client = new StratusSparkClient(config, session, executionMetrics);
+        var client = new StratusSparkClient(config, session, executionMetrics, true);
         SparkVerificationLogging.clientConnected(config.applicationName(), config.principalId(),
                 client.applicationId(), config.masterUrl());
         observed.succeeded("applicationId=" + client.applicationId()
@@ -222,7 +224,7 @@ final class StratusSparkClient implements AutoCloseable {
         isolated.conf().set(catalog + ".s3.secret-access-key", other.storageSecretKey());
         isolated.conf().set(catalog + ".s3.path-style-access", "true");
 
-        var client = new StratusSparkClient(other, isolated, executionMetrics);
+        var client = new StratusSparkClient(other, isolated, executionMetrics, false);
         SparkVerificationLogging.clientConnected(other.applicationName(), other.principalId(),
                 client.applicationId(), other.masterUrl());
         return client;
@@ -293,9 +295,14 @@ final class StratusSparkClient implements AutoCloseable {
                 "applicationId=" + applicationId()
                         + " client=" + SparkLogSanitizer.token(config.applicationName()))) {
             try {
-                session.sparkContext().removeSparkListener(executionMetrics);
-                session.stop();
-                observed.succeeded("");
+                if (ownsSparkContext) {
+                    session.sparkContext().removeSparkListener(executionMetrics);
+                    session.stop();
+                    observed.succeeded("scope=spark-context");
+                } else {
+                    session.catalog().clearCache();
+                    observed.succeeded("scope=session");
+                }
             } catch (Exception failure) {
                 observed.failed(failure, "");
                 throw unchecked(failure);

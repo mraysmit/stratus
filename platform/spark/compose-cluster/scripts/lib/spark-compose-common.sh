@@ -3,13 +3,7 @@ set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-08-08
 
-HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REPO_DIR="$(cd "$HARNESS_DIR/../../.." && pwd)"
-
-# All harness status output carries an ISO-8601 UTC timestamp.
-log_timestamp() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
-log() { printf '%s %s\n' "$(log_timestamp)" "$*"; }
-fail() { printf '%s ERROR: %s\n' "$(log_timestamp)" "$*" >&2; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/spark-compose-maven-common.sh"
 
 # The two hardcoded provider values: the Ceph and Polaris harness directories,
 # stable under the guardrail-enforced repository layout. Every other provider
@@ -53,21 +47,6 @@ export CEPH_HARNESS_CA_FILE POLARIS_HARNESS_CA_FILE
 SPARK_BASE_IMAGE='apache/spark:4.1.2-scala2.13-java17-python3-ubuntu'
 SPARK_IMAGE="${SPARK_IMAGE:-stratus/spark-runtime:dev}"
 export SPARK_BASE_IMAGE SPARK_IMAGE
-
-# A Windows checkout may deliberately use CRLF for the wrapper scripts. Git
-# Bash cannot execute that mvnw shebang, while cmd.exe can execute mvnw.cmd.
-# Keep every harness entry point on the repository wrapper without requiring
-# developers to rewrite tracked files locally.
-repository_maven() {
-  if [[ -n "${MSYSTEM:-}" ]]; then
-    # Git Bash otherwise rewrites cmd.exe's /d and /c switches as paths.
-    MSYS_NO_PATHCONV=1 cmd.exe /d /c mvnw.cmd "$@"
-  elif [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
-    cmd.exe /d /c mvnw.cmd "$@"
-  else
-    ./mvnw "$@"
-  fi
-}
 
 # The platform job jar the cluster mounts. Built by the reactor, not by this
 # harness (P1-0.1): the scripts fail with the build command rather than

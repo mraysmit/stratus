@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * Proves the platform batch pipeline end to end against the live cluster
@@ -59,6 +60,9 @@ import org.junit.jupiter.api.TestMethodOrder;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 final class SparkPipelineVerificationTest {
 
+    @RegisterExtension
+    private static final SparkSuiteContext SPARK = new SparkSuiteContext();
+
     private static final Duration JOB = Duration.ofMinutes(10);
     private static final String JOBS = "dev.stratus.jobs.spark.";
 
@@ -71,7 +75,8 @@ final class SparkPipelineVerificationTest {
     private static final String GOLD = "stratus.gold.pipeline_customers_by_country_" + SUFFIX;
     private static final String QUALITY_RUN = "quality-" + SUFFIX;
     private static final String BATCH = "pipeline-" + SUFFIX;
-    private static final String RESULTS = "stratus.platform.quality_check_results";
+    private static final String RESULTS =
+            "stratus.platform.quality_check_results_pipeline_" + SUFFIX;
 
     private static StratusSparkClient client;
     private static PlatformJobs jobs;
@@ -110,9 +115,11 @@ final class SparkPipelineVerificationTest {
                 LANDING_PREFIX + "/customers.csv", FIXTURE_CSV, JOB);
         assertTrue(written.succeeded(), "the landing fixture must upload: " + written.describe());
 
-        client = StratusSparkClient.connect(
-                SparkClientConfig.serviceIdentity("stratus-pipeline-verification", 17083, 17084));
-        jobs = new PlatformJobs(client);
+        client = SPARK.client(
+                SparkClientConfig.serviceIdentity("stratus-pipeline-verification", 17083, 17084)
+                        .withApplicationCores(2));
+        QualityResultFixture.create(client, RESULTS);
+        jobs = new PlatformJobs(client, RESULTS);
 
         jobLogCapture = new TestLogCapture("dev.stratus.jobs.spark");
     }
@@ -149,7 +156,7 @@ final class SparkPipelineVerificationTest {
                 // Asserted by execution: session.sql throws if the drop fails,
                 // so a cleanup that silently left probe tables in a governed
                 // zone cannot report green.
-                for (String table : new String[] {GOLD, SILVER, BRONZE}) {
+                for (String table : new String[] {RESULTS, GOLD, SILVER, BRONZE}) {
                     client.sql("DROP TABLE IF EXISTS " + table + " PURGE");
                 }
             }
@@ -211,16 +218,18 @@ final class SparkPipelineVerificationTest {
         assertTrue(result.output().contains("\"type\": \"INGESTION\""),
                 "the lineage payload must declare its type: " + result.describe());
 
-        assertEquals("4", client.scalar("SELECT count(*) FROM " + BRONZE),
+        Row bronze = onlyRow("SELECT count(*) AS rows, "
+                + "count_if(email IS NULL) AS null_emails FROM " + BRONZE);
+        String bronzeRows = bronze.get(0).toString();
+        assertEquals("4", bronzeRows,
                 "all four source rows must land in bronze");
 
         // Normalisation is part of the contract: the blank email must have
         // become a null, or the completeness rule below measures nothing.
-        assertEquals("1", client.scalar("SELECT count(*) FROM " + BRONZE + " WHERE email IS NULL"),
+        assertEquals("1", bronze.get(1).toString(),
                 "the blank email must be normalised to null");
 
-        SparkVerificationLogging.batchIngested(BRONZE, BATCH,
-                client.scalar("SELECT count(*) FROM " + BRONZE),
+        SparkVerificationLogging.batchIngested(BRONZE, BATCH, bronzeRows,
                 client.scalar("SELECT count(*) FROM " + BRONZE + ".partitions"),
                 SOURCE_FILE, "inferred");
     }
@@ -250,48 +259,53 @@ final class SparkPipelineVerificationTest {
         assertTrue(outcome.detail().contains("5"),
                 "the job must report how many results it recorded: " + outcome.describe());
 
-        assertEquals("5", client.scalar(
-                        "SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + QUALITY_RUN + "'"),
+        Row recorded = onlyRow("SELECT count(*) AS results, "
+                + "count_if(status = 'FAILED') AS failures FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "'");
+        assertEquals("5", recorded.get(0).toString(),
                 "every rule must be recorded, passing or not");
 
-        SparkVerificationLogging.qualityRunRecorded(QUALITY_RUN, BRONZE, "5",
-                client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + QUALITY_RUN
-                        + "' AND status = 'FAILED'"));
+        SparkVerificationLogging.qualityRunRecorded(QUALITY_RUN, BRONZE,
+                recorded.get(0).toString(), recorded.get(1).toString());
     }
 
     @Test
     @Order(5)
     void uniquenessCheckDetectsDuplicates() {
-        Row unique = onlyRow("SELECT status, failure_detail FROM " + RESULTS
-                + " WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'customer_id_unique'");
+        Map<String, Row> observed = new LinkedHashMap<>();
+        for (Row row : client.sql("SELECT check_name, status, failure_detail FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "' AND check_name IN "
+                + "('customer_id_unique', 'email_mandatory', 'email_mostly_present')")) {
+            observed.put(row.getString(0), row);
+        }
+        assertEquals(3, observed.size(), "all three quality observations must be present");
+        Row unique = observed.get("customer_id_unique");
 
-        assertEquals("FAILED", unique.getString(0),
+        assertEquals("FAILED", unique.getString(1),
                 "the duplicated business key must fail a blocking uniqueness rule");
-        assertTrue(unique.getString(1).contains("duplicate"),
-                "the record must say what failed: " + unique.getString(1));
+        assertTrue(unique.getString(2).contains("duplicate"),
+                "the record must say what failed: " + unique.getString(2));
 
         // Nulls in a mandatory column must fail with a detail that says how
         // far off it was, which is the Phase 1 plan's own quality-fail row.
-        Row mandatory = onlyRow("SELECT status, failure_detail FROM " + RESULTS
-                + " WHERE run_id = '" + QUALITY_RUN + "' AND check_name = 'email_mandatory'");
-        assertEquals("FAILED", mandatory.getString(0),
+        Row mandatory = observed.get("email_mandatory");
+        assertEquals("FAILED", mandatory.getString(1),
                 "a mandatory column with nulls must fail a blocking rule");
-        assertTrue(mandatory.getString(1).contains("null rate"),
-                "the record must quantify the failure: " + mandatory.getString(1));
+        assertTrue(mandatory.getString(2).contains("null rate"),
+                "the record must quantify the failure: " + mandatory.getString(2));
 
         // The warning rule must not be recorded as a failure: the difference
         // is exactly what the promotion gate acts on.
-        Row warning = onlyRow("SELECT status FROM " + RESULTS + " WHERE run_id = '"
-                + QUALITY_RUN + "' AND check_name = 'email_mostly_present'");
-        assertEquals("WARNING", warning.getString(0),
+        Row warning = observed.get("email_mostly_present");
+        assertEquals("WARNING", warning.getString(1),
                 "a failing non-blocking rule must be a warning, not a failure");
 
         SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "customer_id_unique",
-                unique.getString(0), unique.getString(1));
+                unique.getString(1), unique.getString(2));
         SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mandatory",
-                mandatory.getString(0), mandatory.getString(1));
+                mandatory.getString(1), mandatory.getString(2));
         SparkVerificationLogging.qualityRuleOutcome(QUALITY_RUN, "email_mostly_present",
-                warning.getString(0), "a warning rule is recorded, not enforced");
+                warning.getString(1), "a warning rule is recorded, not enforced");
     }
 
     @Test
@@ -322,17 +336,20 @@ final class SparkPipelineVerificationTest {
         assertTrue(jobLog().contains("\"type\": \"TRANSFORM\""),
                 "every job must emit its lineage payload, not only ingestion: " + jobLog());
 
-        assertEquals("3", client.scalar("SELECT count(*) FROM " + SILVER),
+        Row silver = onlyRow("SELECT count(*) AS rows, "
+                + "max(CASE WHEN customer_id = 2 THEN email END) AS corrected_email FROM " + SILVER);
+        String silverRows = silver.get(0).toString();
+        assertEquals("3", silverRows,
                 "deduplication must collapse the repeated business key");
 
         // Ordering decides which duplicate survives, and a pipeline that
         // cannot say which one is not reproducible.
-        String kept = client.scalar("SELECT email FROM " + SILVER + " WHERE customer_id = 2");
+        String kept = silver.getString(1);
         assertEquals("bob.updated@example.com", kept,
                 "the most recent row must be the one kept");
 
-        SparkVerificationLogging.silverUpserted(SILVER, BATCH,
-                client.scalar("SELECT count(*) FROM " + SILVER), "customer_id=2", kept);
+        SparkVerificationLogging.silverUpserted(
+                SILVER, BATCH, silverRows, "customer_id=2", kept);
     }
 
     @Test
@@ -379,12 +396,13 @@ final class SparkPipelineVerificationTest {
         assertTrue(outcome.detail().contains("rewrite_data_files"),
                 "file rewrite must report its metrics: " + outcome.detail());
 
-        assertEquals("4", client.scalar("SELECT count(*) FROM " + BRONZE),
+        String rowsAfter = client.scalar("SELECT count(*) FROM " + BRONZE);
+        assertEquals("4", rowsAfter,
                 "maintenance must not change what the table contains");
 
+        String snapshotsAfter = client.scalar("SELECT count(*) FROM " + BRONZE + ".snapshots");
         SparkVerificationLogging.maintenanceOutcome(BRONZE, "expire_snapshots,rewrite_data_files",
-                snapshotsBefore, client.scalar("SELECT count(*) FROM " + BRONZE + ".snapshots"),
-                client.scalar("SELECT count(*) FROM " + BRONZE));
+                snapshotsBefore, snapshotsAfter, rowsAfter);
     }
 
     @Test
@@ -420,8 +438,10 @@ final class SparkPipelineVerificationTest {
         var quality = jobs.checkQuality(SILVER, checks, cleanRun);
         assertTrue(quality.succeeded(), "the clean quality run must succeed: " + quality.describe());
 
-        assertEquals("0", client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '"
-                        + cleanRun + "' AND status <> 'PASSED'"),
+        Row clean = onlyRow("SELECT count(*) AS results, "
+                + "count_if(status <> 'PASSED') AS failures FROM " + RESULTS
+                + " WHERE run_id = '" + cleanRun + "'");
+        assertEquals("0", clean.get(1).toString(),
                 "no rule may fail on the deduplicated table");
 
         var gate = jobs.gate(cleanRun, SILVER);
@@ -429,9 +449,8 @@ final class SparkPipelineVerificationTest {
         assertEquals(JobExit.SUCCESS, gate.exitCode(),
                 "a run whose blocking rules all pass must be promoted: " + gate.describe());
 
-        SparkVerificationLogging.qualityRunRecorded(cleanRun, SILVER,
-                client.scalar("SELECT count(*) FROM " + RESULTS + " WHERE run_id = '" + cleanRun + "'"),
-                "0");
+        SparkVerificationLogging.qualityRunRecorded(
+                cleanRun, SILVER, clean.get(0).toString(), clean.get(1).toString());
         SparkVerificationLogging.promotionDecided(cleanRun, SILVER, "PROMOTE", gate.exitCode());
         SparkVerificationLogging.scenarioPassed("gate can promote",
                 "the same rules that blocked bronze passed on the deduplicated table");
@@ -440,8 +459,9 @@ final class SparkPipelineVerificationTest {
     @Test
     @Order(12)
     void qualityResultsTableContainsAllRunRecords() {
-        List<String> names = client.sql("SELECT check_name FROM " + RESULTS
-                + " WHERE run_id = '" + QUALITY_RUN + "' ORDER BY check_name").stream()
+        List<Row> records = client.sql("SELECT check_name, zone FROM " + RESULTS
+                + " WHERE run_id = '" + QUALITY_RUN + "' ORDER BY check_name");
+        List<String> names = records.stream()
                 .map(row -> row.getString(0))
                 .toList();
 
@@ -451,8 +471,7 @@ final class SparkPipelineVerificationTest {
 
         // The zone partition is what makes this table queryable per zone; a
         // record written without it would still read back here.
-        assertEquals("bronze", client.scalar("SELECT DISTINCT zone FROM " + RESULTS
-                        + " WHERE run_id = '" + QUALITY_RUN + "'"),
+        assertTrue(records.stream().allMatch(row -> "bronze".equals(row.getString(1))),
                 "results must record the zone they were measured in");
     }
 

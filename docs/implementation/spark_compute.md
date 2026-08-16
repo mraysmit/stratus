@@ -498,9 +498,12 @@ before any row reaches a table a rule could measure.
 - `checksBase64` — the same JSON, base64-encoded. Exactly one of the two must be given. The encoded form exists because a JSON document does not survive every path to a job: submitting through a container runtime on Windows strips the double quotes
 - `runId` — unique identifier for this quality run
 - `pipelineRunId` — optional; ties this quality run to the pipeline run that caused it
+- `resultsTable` — optional fully qualified result store; defaults to the permanent
+  `stratus.platform.quality_check_results` audit table. Live verification uses
+  a unique purged table so test history cannot affect later runs
 
 **Outputs:**
-- One result record per check written to `platform.quality_check_results`
+- One result record per check written to the selected results table
 - Summary logged: total checks, passed, failed, warnings
 
 ### Job 5 — Table maintenance
@@ -563,7 +566,11 @@ PromotionGate.evaluate(runId, targetTable)
 
 The gate is called by the orchestration layer (Job 2 and Job 3) before the downstream write. If the gate returns BLOCK, the job exits with a non-zero status code that Airflow will detect as a failure in Increment 4.
 
-Override requires an explicit `--override-reason` parameter and a named `--override-principal`. Overrides are written as additional records to `platform.quality_check_results` with `status=overridden`.
+Override requires an explicit `--override-reason` parameter and a named
+`--override-principal`. `--resultsTable` may select the same explicit store as
+the quality job; if omitted it defaults to
+`stratus.platform.quality_check_results`.
+Overrides are written as additional records with `status=overridden`.
 
 ---
 

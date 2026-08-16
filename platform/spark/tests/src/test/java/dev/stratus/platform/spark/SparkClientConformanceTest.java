@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * Proves a client outside the cluster can use the platform: reach the master,
@@ -41,12 +42,15 @@ final class SparkClientConformanceTest {
             UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     private static final String PROBE_TABLE = "stratus.bronze.client_probe_" + SUFFIX;
 
+    @RegisterExtension
+    private static final SparkSuiteContext SPARK = new SparkSuiteContext();
+
     private static StratusSparkClient client;
 
     @BeforeAll
     static void connect() {
         LiveSparkCluster.require();
-        client = StratusSparkClient.connect(
+        client = SPARK.client(
                 SparkClientConfig.serviceIdentity("stratus-client-conformance", 17077, 17078)
                         .withApplicationCores(2));
     }
