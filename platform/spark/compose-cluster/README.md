@@ -81,3 +81,17 @@ Offline guardrails on this harness run in every build and need nothing
 running: loopback-only ports, no credential in a tracked file, no provider
 endpoint copied into the template, a pinned image, teardown that survives a
 missing `.env`, and no provider started transitively.
+
+## Test observability
+
+The runner defaults `STRATUS_LOG_LEVEL` to `DEBUG` and writes one complete,
+timestamped transcript under `logs/`. Stratus code logs through SLF4J 2.x with
+Spark's Log4j2 provider. The run ID is propagated into the host test JVM and
+container-side submissions so records from both driver paths can be correlated.
+
+INFO includes test/class/suite boundaries, client connection and shutdown,
+every SQL completion, catalog refreshes, platform-job phases, external command
+outcomes, and p50/p95 timing summaries. DEBUG adds sanitized SQL and command
+detail plus job diagnostic records. SQL values and command output are bounded,
+and credential-bearing options, configuration keys, bearer tokens and URI user
+information are redacted before they reach a record.

@@ -7,11 +7,11 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.apache.spark.sql.DataFrameWriterV2;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The write configuration each medallion zone's tables carry, as data.
@@ -44,7 +44,7 @@ public final class ZoneWriteProperties {
      */
     private static final Set<String> CREATE_ONLY = Set.of("format-version");
 
-    private static final Logger LOGGER = Logger.getLogger(ZoneWriteProperties.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(ZoneWriteProperties.class);
 
     private ZoneWriteProperties() {
     }
@@ -127,7 +127,7 @@ public final class ZoneWriteProperties {
             assignments.append('\'').append(key).append("' = '").append(value).append('\'');
         });
         String statement = "ALTER TABLE " + table + " SET TBLPROPERTIES (" + assignments + ")";
-        LOGGER.log(Level.FINE, () -> "ZONE PROPERTIES " + statement);
+        LOGGER.debug("ZONE PROPERTIES {}", statement);
         spark.sql(statement);
     }
 }

@@ -30,6 +30,7 @@ x-spark-common: &spark-common
     SPARK_SUBMIT_OPTS: -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks
   volumes:
     - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    - ./config/log4j2.properties:/opt/spark/conf/log4j2.properties:ro
     - ./certs/stratus-truststore.jks:/opt/stratus/certs/stratus-truststore.jks:ro
     # The Polaris CA in PEM form as well, so curl inside the container can
     # validate the catalog without a JVM.

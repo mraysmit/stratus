@@ -7,13 +7,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.DecimalType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Compares the schema of an incoming batch against the schema of the table it
@@ -41,7 +41,7 @@ import org.apache.spark.sql.types.StructType;
  */
 public final class SchemaDrift {
 
-    private static final Logger LOGGER = Logger.getLogger(SchemaDrift.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(SchemaDrift.class);
 
     private SchemaDrift() {
     }
@@ -77,10 +77,10 @@ public final class SchemaDrift {
             }
         }
 
-        LOGGER.log(Level.FINE, () -> String.format(
-                "SCHEMA COMPARE table=%s tableColumns=%d batchColumns=%d added=%s conflicts=%d",
+        LOGGER.debug(
+                "SCHEMA COMPARE table={} tableColumns={} batchColumns={} added={} conflicts={}",
                 table, existing.fields().length, incoming.fields().length,
-                added.isEmpty() ? "none" : String.join(",", added), conflicts.size()));
+                added.isEmpty() ? "none" : String.join(",", added), conflicts.size());
         return List.copyOf(conflicts);
     }
 

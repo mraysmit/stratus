@@ -15,7 +15,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Shared entry point for the live Spark tests: enforces the profile's opt-in
@@ -108,7 +112,8 @@ final class LiveSparkCluster {
         // and every diagnostic record would be discarded before it could reach
         // the transcript.
         var argv = new ArrayList<>(List.of("docker", "compose", "--project-name", PROJECT,
-                "exec", "-T", "-e", "STRATUS_LOG_LEVEL=" + logLevel(), service));
+                "exec", "-T", "-e", "STRATUS_LOG_LEVEL=" + logLevel(),
+                "-e", "STRATUS_RUN_ID=" + SparkTelemetry.runId(), service));
         argv.addAll(List.of(command));
         return run(timeout, argv);
     }
@@ -236,32 +241,78 @@ final class LiveSparkCluster {
     }
 
     private static CommandResult run(Duration timeout, List<String> argv, String description) {
-        long startedAt = System.nanoTime();
-        var builder = new ProcessBuilder(argv).redirectErrorStream(true);
-        builder.directory(harnessDirectory().toFile());
-        Process process;
-        try {
-            process = builder.start();
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to start: " + String.join(" ", argv), exception);
-        }
-        String output;
-        try (var stream = process.getInputStream()) {
-            output = new String(stream.readAllBytes());
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                throw new IllegalStateException(
-                        "Timed out after " + timeout + ": " + String.join(" ", argv) + "\n" + output);
+        SparkVerificationLogging.commandStarted(description, argv, timeout.toMillis());
+        String metric = "spark.command." + description.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9.]+", "_");
+        try (var observed = SparkTelemetry.start("cluster_command", metric,
+                "action=" + SparkLogSanitizer.token(description)
+                        + " timeoutMs=" + timeout.toMillis())) {
+            var builder = new ProcessBuilder(argv).redirectErrorStream(true);
+            builder.directory(harnessDirectory().toFile());
+            Process process;
+            try {
+                process = builder.start();
+            } catch (IOException exception) {
+                observed.failed(exception, "phase=process_start");
+                throw new UncheckedIOException("Failed to start: "
+                        + String.join(" ", SparkVerificationLogging.redact(argv)), exception);
             }
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to read output of " + String.join(" ", argv), exception);
+            long processStartMillis = observed.elapsedMillis();
+            var reader = Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "spark-command-output");
+                thread.setDaemon(true);
+                return thread;
+            });
+            Future<String> outputFuture = reader.submit(() -> {
+                try (var stream = process.getInputStream()) {
+                    return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            });
+            try {
+                if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor(10, TimeUnit.SECONDS);
+                    String output = completedOutput(outputFuture);
+                    var failure = new IllegalStateException("Timed out after " + timeout + ": "
+                            + String.join(" ", SparkVerificationLogging.redact(argv)) + "\n"
+                            + SparkLogSanitizer.token(output, 4096));
+                    observed.failed(failure, "phase=process_wait processStartMs=" + processStartMillis
+                            + " outputBytes=" + output.getBytes(StandardCharsets.UTF_8).length);
+                    throw failure;
+                }
+                String output = outputFuture.get(10, TimeUnit.SECONDS);
+                long totalMillis = observed.elapsedMillis();
+                SparkVerificationLogging.commandCompleted(
+                        description, argv, process.exitValue(), totalMillis, output);
+                observed.succeeded("exitCode=" + process.exitValue()
+                        + " processStartMs=" + processStartMillis
+                        + " outputBytes=" + output.getBytes(StandardCharsets.UTF_8).length);
+                return new CommandResult(process.exitValue(), output);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                process.destroyForcibly();
+                observed.failed(exception, "phase=process_wait");
+                throw new IllegalStateException("Interrupted waiting for "
+                        + String.join(" ", SparkVerificationLogging.redact(argv)), exception);
+            } catch (ExecutionException | TimeoutException exception) {
+                observed.failed(exception, "phase=output_read");
+                throw new IllegalStateException("Failed to read output of "
+                        + String.join(" ", SparkVerificationLogging.redact(argv)), exception);
+            } finally {
+                reader.shutdownNow();
+            }
+        }
+    }
+
+    private static String completedOutput(Future<String> output) {
+        try {
+            return output.get(10, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted waiting for " + String.join(" ", argv), exception);
+            return "<interrupted while reading command output>";
+        } catch (ExecutionException | TimeoutException exception) {
+            return "<command output unavailable: " + exception.getClass().getSimpleName() + ">";
         }
-        SparkVerificationLogging.commandCompleted(description, argv, process.exitValue(),
-                (System.nanoTime() - startedAt) / 1_000_000L, output);
-        return new CommandResult(process.exitValue(), output);
     }
 
     /** Exit status and combined output of one command run in the cluster. */

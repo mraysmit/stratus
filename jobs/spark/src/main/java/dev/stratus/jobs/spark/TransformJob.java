@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.functions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Job 2 — transform: bronze rows become conformed silver rows, upserted on a
@@ -51,13 +51,12 @@ public final class TransformJob {
             "sourceTable", "targetTable", "businessKey", "sequenceColumn", "sourceBatch",
             "runId", "qualityRunId");
 
-    private static final Logger LOGGER = Logger.getLogger(TransformJob.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(TransformJob.class);
 
     private TransformJob() {
     }
 
     public static void main(String... argv) {
-        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String sourceTable = arguments.require("sourceTable");
         String targetTable = arguments.require("targetTable");
@@ -72,7 +71,7 @@ public final class TransformJob {
         try {
             arguments.optional("qualityRunId").ifPresent(qualityRunId -> {
                 var decision = PromotionGate.evaluate(spark, qualityRunId, sourceTable);
-                LOGGER.info(decision.describe());
+                LOGGER.info("{}", decision.describe());
                 if (decision.blocked()) {
                     // Non-zero exit rather than an exception: the orchestrator
                     // reads the status code, and a stack trace would bury the
@@ -84,10 +83,10 @@ public final class TransformJob {
 
             long written = run(spark, sourceTable, targetTable, businessKey, sequenceColumn,
                     sourceBatch, runId, Clock.systemUTC());
-            LOGGER.info(String.format(
-                    "TRANSFORM COMPLETE table=%s rows=%d businessKey=%s sequence=%s batch=%s runId=%s",
+            LOGGER.info(
+                    "TRANSFORM COMPLETE table={} rows={} businessKey={} sequence={} batch={} runId={}",
                     targetTable, written, String.join(",", businessKey), sequenceColumn,
-                    sourceBatch == null ? "all" : sourceBatch, runId));
+                    sourceBatch == null ? "all" : sourceBatch, runId);
         } finally {
             spark.stop();
         }
@@ -95,17 +94,21 @@ public final class TransformJob {
 
     public static long run(SparkSession spark, String sourceTable, String targetTable, String[] businessKey,
                     String sequenceColumn, String sourceBatch, String runId, Clock clock) {
-        Dataset<Row> source = spark.table(sourceTable);
-        for (String column : businessKey) {
-            requireColumn(source, sourceTable, column, "Business key column");
-        }
-        requireColumn(source, sourceTable, sequenceColumn, "Sequence column");
+        Dataset<Row> source = JobTelemetry.measure("TRANSFORM", "resolve_source", runId,
+                targetTable, () -> spark.table(sourceTable));
+        JobTelemetry.measure("TRANSFORM", "validate_columns", runId, targetTable, () -> {
+            for (String column : businessKey) {
+                requireColumn(source, sourceTable, column, "Business key column");
+            }
+            requireColumn(source, sourceTable, sequenceColumn, "Sequence column");
+        });
 
         if (sourceBatch != null) {
-            boolean present = !spark.table(sourceTable)
-                    .filter(functions.col(IngestionJob.BATCH_COLUMN)
-                            .equalTo(functions.lit(sourceBatch)))
-                    .limit(1).isEmpty();
+            boolean present = JobTelemetry.measure("TRANSFORM", "validate_source_batch", runId,
+                    targetTable, () -> !spark.table(sourceTable)
+                            .filter(functions.col(IngestionJob.BATCH_COLUMN)
+                                    .equalTo(functions.lit(sourceBatch)))
+                            .limit(1).isEmpty());
             if (!present) {
                 // Merging nothing succeeds and changes nothing, so a mistyped
                 // batch id would otherwise be a green run that did no work.
@@ -114,28 +117,33 @@ public final class TransformJob {
             }
         }
 
-        String batchQuery = batchQuery(sourceTable, source.columns(), businessKey, sequenceColumn,
-                sourceBatch);
+        String batchQuery = JobTelemetry.measure("TRANSFORM", "plan_upsert", runId, targetTable,
+                () -> batchQuery(sourceTable, source.columns(), businessKey, sequenceColumn, sourceBatch));
 
-        if (spark.catalog().tableExists(targetTable)) {
-            spark.sql(mergeStatement(targetTable, batchQuery, businessKey, sequenceColumn));
-        } else {
-            LOGGER.log(Level.FINE, () -> "TRANSFORM creating " + targetTable);
-            try {
-                ZoneWriteProperties.onCreate(spark.sql(batchQuery).writeTo(targetTable),
-                        ZoneWriteProperties.silver()).create();
-            } catch (TableAlreadyExistsException raced) {
-                // Another transform created it between the check and the
-                // create. Merging into what is now there is the right
-                // continuation; replacing it would discard that run's work.
-                LOGGER.log(Level.FINE, "silver table appeared concurrently: " + targetTable, raced);
+        JobTelemetry.measure("TRANSFORM", "write_upsert", runId, targetTable, () -> {
+            if (spark.catalog().tableExists(targetTable)) {
                 spark.sql(mergeStatement(targetTable, batchQuery, businessKey, sequenceColumn));
+            } else {
+                LOGGER.debug("TRANSFORM creating {}", targetTable);
+                try {
+                    ZoneWriteProperties.onCreate(spark.sql(batchQuery).writeTo(targetTable),
+                            ZoneWriteProperties.silver()).create();
+                } catch (TableAlreadyExistsException raced) {
+                    // Another transform created it between the check and the
+                    // create. Merging into what is now there is the right
+                    // continuation; replacing it would discard that run's work.
+                    LOGGER.debug("silver table appeared concurrently: {}", targetTable, raced);
+                    spark.sql(mergeStatement(targetTable, batchQuery, businessKey, sequenceColumn));
+                }
             }
-        }
+        });
 
-        ZoneWriteProperties.align(spark, targetTable, ZoneWriteProperties.silver());
-        LineageEvent.emit("TRANSFORM", sourceTable, targetTable, runId, clock);
-        return spark.table(targetTable).count();
+        JobTelemetry.measure("TRANSFORM", "align_properties", runId, targetTable,
+                () -> ZoneWriteProperties.align(spark, targetTable, ZoneWriteProperties.silver()));
+        JobTelemetry.measure("TRANSFORM", "emit_lineage", runId, targetTable,
+                () -> LineageEvent.emit("TRANSFORM", sourceTable, targetTable, runId, clock));
+        return JobTelemetry.measure("TRANSFORM", "verify_written_rows", runId, targetTable,
+                () -> spark.table(targetTable).count());
     }
 
     /**
@@ -179,7 +187,7 @@ public final class TransformJob {
                 + " ORDER BY " + quote(sequenceColumn) + " DESC, hash(" + wholeRow + ") ASC"
                 + ") AS __stratus_row FROM " + sourceTable + filter
                 + ") WHERE __stratus_row = 1";
-        LOGGER.log(Level.FINE, () -> "TRANSFORM SOURCE " + query);
+        LOGGER.debug("TRANSFORM SOURCE {}", query);
         return query;
     }
 
@@ -204,7 +212,7 @@ public final class TransformJob {
                 + " WHEN MATCHED AND (s." + sequence + " > t." + sequence
                 + " OR t." + sequence + " IS NULL) THEN UPDATE SET *"
                 + " WHEN NOT MATCHED THEN INSERT *";
-        LOGGER.log(Level.FINE, () -> "TRANSFORM MERGE " + statement);
+        LOGGER.debug("TRANSFORM MERGE {}", statement);
         return statement;
     }
 

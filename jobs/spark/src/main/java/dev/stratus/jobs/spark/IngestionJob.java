@@ -11,8 +11,6 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.DataFrameReader;
@@ -24,6 +22,8 @@ import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Job 1 — ingestion: a raw file in the landing zone becomes rows in a bronze
@@ -79,13 +79,12 @@ public final class IngestionJob {
             "sourceFile", "targetTable", "sourceSystem", "batchId", "onExistingBatch",
             "schema", "runId");
 
-    private static final Logger LOGGER = Logger.getLogger(IngestionJob.class.getName());
+    private static final Logger LOGGER = LoggerFactory.getLogger(IngestionJob.class);
 
     private IngestionJob() {
     }
 
     public static void main(String... argv) {
-        JobLogging.configureFromEnvironment();
         JobArguments arguments = JobArguments.parse(argv).rejectUnknown(ARGUMENTS);
         String sourceFile = arguments.require("sourceFile");
         String targetTable = arguments.require("targetTable");
@@ -108,13 +107,12 @@ public final class IngestionJob {
         try {
             long written = run(spark, sourceFile, targetTable, sourceSystem, batchId,
                     onExistingBatch, schema, runId, Clock.systemUTC());
-            LOGGER.info(String.format(
-                    "INGESTION COMPLETE table=%s batchId=%s rowsInBatch=%d source=%s runId=%s",
-                    targetTable, batchId, written, sourceFile, runId));
+            LOGGER.info("INGESTION COMPLETE table={} batchId={} rowsInBatch={} source={} runId={}",
+                    targetTable, batchId, written, sourceFile, runId);
         } catch (SchemaDrift.Refusal refusal) {
             // Its own status code: an orchestrator retries a failed job and
             // escalates a refused one, and drift will still be there on retry.
-            LOGGER.severe("INGESTION REFUSED " + refusal.getMessage());
+            LOGGER.error("INGESTION REFUSED {}", refusal.getMessage());
             spark.stop();
             System.exit(JobExit.SCHEMA_DRIFT);
         } finally {
@@ -129,31 +127,37 @@ public final class IngestionJob {
      */
     public static long run(SparkSession spark, String sourceFile, String targetTable, String sourceSystem,
                     String batchId, String onExistingBatch, String schema, String runId, Clock clock) {
-        Dataset<Row> batch = stamp(normalise(read(spark, sourceFile, schema)),
-                batchId, sourceFile, clock);
+        Dataset<Row> batch = JobTelemetry.measure("INGESTION", "plan_batch", runId, targetTable,
+                () -> stamp(normalise(read(spark, sourceFile, schema)), batchId, sourceFile, clock));
 
-        if (!spark.catalog().tableExists(targetTable)) {
-            create(spark, batch, targetTable, batchId);
-        } else {
-            append(spark, batch, targetTable, batchId, onExistingBatch);
-        }
+        JobTelemetry.measure("INGESTION", "write_batch", runId, targetTable, () -> {
+            if (!spark.catalog().tableExists(targetTable)) {
+                create(spark, batch, targetTable, batchId);
+            } else {
+                append(spark, batch, targetTable, batchId, onExistingBatch);
+            }
+        });
 
-        ZoneWriteProperties.align(spark, targetTable, ZoneWriteProperties.bronze());
+        JobTelemetry.measure("INGESTION", "align_properties", runId, targetTable,
+                () -> ZoneWriteProperties.align(spark, targetTable, ZoneWriteProperties.bronze()));
         // Recorded on the table so lineage survives the job that wrote it;
         // Increment 6 reads these back when registering the table in Atlas.
         // The batch id is deliberately absent — it belongs to a row, not to a
         // table that holds many batches.
-        spark.sql(String.format(
+        JobTelemetry.measure("INGESTION", "record_table_lineage", runId, targetTable,
+                () -> spark.sql(String.format(
                 "ALTER TABLE %s SET TBLPROPERTIES ("
                         + "'stratus.source-system' = '%s', "
                         + "'stratus.last-source-file' = '%s', "
                         + "'stratus.last-ingestion-run-id' = '%s')",
-                targetTable, sourceSystem, sourceFile, runId));
+                targetTable, sourceSystem, sourceFile, runId)));
 
-        LineageEvent.emit("INGESTION", "external:" + sourceSystem + "/" + sourceFile,
-                targetTable, runId, clock);
-        return spark.table(targetTable)
-                .filter(functions.col(BATCH_COLUMN).equalTo(functions.lit(batchId))).count();
+        JobTelemetry.measure("INGESTION", "emit_lineage", runId, targetTable,
+                () -> LineageEvent.emit("INGESTION", "external:" + sourceSystem + "/" + sourceFile,
+                        targetTable, runId, clock));
+        return JobTelemetry.measure("INGESTION", "verify_written_rows", runId, targetTable,
+                () -> spark.table(targetTable)
+                        .filter(functions.col(BATCH_COLUMN).equalTo(functions.lit(batchId))).count());
     }
 
     /**
@@ -168,8 +172,7 @@ public final class IngestionJob {
      */
     private static void create(SparkSession spark, Dataset<Row> batch, String targetTable,
                                String batchId) {
-        LOGGER.log(Level.FINE, () -> "INGESTION creating " + targetTable
-                + " partitioned by " + BATCH_COLUMN);
+        LOGGER.debug("INGESTION creating {} partitioned by {}", targetTable, BATCH_COLUMN);
         try {
             ZoneWriteProperties.onCreate(batch.writeTo(targetTable), ZoneWriteProperties.bronze())
                     .partitionedBy(functions.col(BATCH_COLUMN))
@@ -178,7 +181,7 @@ public final class IngestionJob {
             // Another ingestion created it between the check and the create.
             // The table now has the shape this batch needs, so continuing with
             // the append is the correct outcome, not a failure.
-            LOGGER.log(Level.FINE, "bronze table appeared concurrently: " + targetTable, raced);
+            LOGGER.debug("bronze table appeared concurrently: {}", targetTable, raced);
             append(spark, batch, targetTable, batchId, ON_EXISTING_FAIL);
         }
     }
@@ -201,16 +204,14 @@ public final class IngestionJob {
         try {
             if (present) {
                 Column predicate = functions.col(BATCH_COLUMN).equalTo(functions.lit(batchId));
-                LOGGER.log(Level.FINE, () -> "INGESTION replacing batch " + batchId
-                        + " in " + targetTable);
+                LOGGER.debug("INGESTION replacing batch {} in {}", batchId, targetTable);
                 // An explicit predicate, not overwritePartitions(): dynamic
                 // overwrite deletes the whole table when the partition spec is
                 // absent, and reports success. This either replaces the named
                 // batch or fails.
                 aligned.writeTo(targetTable).option("merge-schema", "true").overwrite(predicate);
             } else {
-                LOGGER.log(Level.FINE, () -> "INGESTION appending batch " + batchId
-                        + " to " + targetTable);
+                LOGGER.debug("INGESTION appending batch {} to {}", batchId, targetTable);
                 aligned.writeTo(targetTable).option("merge-schema", "true").append();
             }
         } catch (org.apache.spark.sql.catalyst.analysis.NoSuchTableException exception) {

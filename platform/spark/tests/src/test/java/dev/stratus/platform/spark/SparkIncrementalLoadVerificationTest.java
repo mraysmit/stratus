@@ -12,15 +12,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -121,17 +116,10 @@ final class SparkIncrementalLoadVerificationTest {
      * The jobs' own log records, so the lineage payload can be asserted on.
      *
      * <p>{@code LineageEvent.emit} is called from inside each job's
-     * {@code run}, so a job running in this driver still produces it — through
-     * {@code java.util.logging} rather than a subprocess's stdout.
+     * {@code run}, so a job running in this driver still produces it through
+     * the same SLF4J path as a packaged submission.
      */
-    private static final List<String> JOB_LOG = new ArrayList<>();
-
-    /**
-     * Held deliberately: {@code LogManager} keeps only a weak reference to a
-     * logger, so one nothing else refers to is collected and takes its handlers
-     * with it, leaving the capture silently empty.
-     */
-    private static Logger jobLogger;
+    private static TestLogCapture jobLogCapture;
 
     @BeforeAll
     static void placeTheReferenceData() {
@@ -140,23 +128,7 @@ final class SparkIncrementalLoadVerificationTest {
                 SparkClientConfig.serviceIdentity("stratus-incremental-verification", 17085, 17086));
         jobs = new PlatformJobs(client);
 
-        jobLogger = Logger.getLogger("dev.stratus.jobs.spark");
-        jobLogger.setLevel(Level.ALL);
-        Handler capture = new Handler() {
-            @Override public void publish(LogRecord record) {
-                synchronized (JOB_LOG) {
-                    JOB_LOG.add(record.getMessage());
-                }
-            }
-
-            @Override public void flush() {
-            }
-
-            @Override public void close() {
-            }
-        };
-        capture.setLevel(Level.ALL);
-        jobLogger.addHandler(capture);
+        jobLogCapture = new TestLogCapture("dev.stratus.jobs.spark");
 
         client.sql("CREATE TABLE " + COUNTRIES + " (country STRING) USING iceberg");
         client.sql("INSERT INTO " + COUNTRIES + " VALUES ('GB'), ('US'), ('DE'), ('FR')");
@@ -203,6 +175,13 @@ final class SparkIncrementalLoadVerificationTest {
             LiveSparkCluster.removeObjectPrefix(bronzeDataPrefix, JOB);
             assertEquals("", LiveSparkCluster.listObjectPrefix(bronzeDataPrefix, JOB),
                     "no probe object may remain in the governed bronze bucket");
+        }
+    }
+
+    @AfterAll
+    static void stopCapturingJobLogs() {
+        if (jobLogCapture != null) {
+            jobLogCapture.close();
         }
     }
 
@@ -766,9 +745,9 @@ final class SparkIncrementalLoadVerificationTest {
 
     /** Every job log record emitted so far, as one searchable block. */
     private static String jobLog() {
-        synchronized (JOB_LOG) {
-            return String.join("\n", JOB_LOG);
-        }
+        return jobLogCapture == null ? "" : jobLogCapture.events().stream()
+                .map(event -> event.getMessage().getFormattedMessage())
+                .reduce("", (left, right) -> left + '\n' + right);
     }
 
     private static String scalar(String expression, String from) {
