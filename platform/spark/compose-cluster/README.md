@@ -86,12 +86,20 @@ missing `.env`, and no provider started transitively.
 
 The runner defaults `STRATUS_LOG_LEVEL` to `DEBUG` and writes one complete,
 timestamped transcript under `logs/`. Stratus code logs through SLF4J 2.x with
-Spark's Log4j2 provider. The run ID is propagated into the host test JVM and
-container-side submissions so records from both driver paths can be correlated.
+Spark's Log4j2 provider. The level and suite run ID are propagated into the
+host test JVM, Compose services, submitted drivers, and Spark executors so
+records from every execution path use the same controls and correlation root.
+
+Every record can carry three distinct correlation fields: `suiteRunId` for the
+complete test invocation, `jobRunId` for one packaged platform job, and
+`operationId` for a timed SQL, command, catalog, or job-phase operation. Nested
+operations restore the caller's MDC values when they finish.
 
 INFO includes test/class/suite boundaries, client connection and shutdown,
 every SQL completion, catalog refreshes, platform-job phases, external command
 outcomes, and p50/p95 timing summaries. DEBUG adds sanitized SQL and command
-detail plus job diagnostic records. SQL values and command output are bounded,
-and credential-bearing options, configuration keys, bearer tokens and URI user
-information are redacted before they reach a record.
+detail plus job diagnostic records and bounded, single-line failure stack
+traces. SQL values, exception text, stack traces, assertion diagnostics, and
+command output are bounded; credential-bearing options, quoted JSON/SQL secret
+values, configuration keys, bearer tokens, and URI user information are
+redacted before they reach a record.

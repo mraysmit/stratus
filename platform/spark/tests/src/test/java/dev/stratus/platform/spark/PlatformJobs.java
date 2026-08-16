@@ -55,7 +55,7 @@ final class PlatformJobs {
         }
 
         String describe() {
-            return "exit=" + exitCode + " " + detail;
+            return "exit=" + exitCode + " " + SparkLogSanitizer.token(detail, 4096);
         }
     }
 
@@ -86,9 +86,9 @@ final class PlatformJobs {
                             client.session().catalog().refreshTable(table);
                         }
                         observed.succeeded("exists=" + exists);
-                    } catch (RuntimeException failure) {
+                    } catch (Exception failure) {
                         observed.failed(failure, "");
-                        throw failure;
+                        throw unchecked(failure);
                     }
                 }
             }
@@ -182,9 +182,9 @@ final class PlatformJobs {
                 observed.succeeded("blocked=" + decision.blocked()
                         + " checks=" + decision.checksExamined());
                 return decision;
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 observed.failed(failure, "");
-                throw failure;
+                throw unchecked(failure);
             }
         }
     }
@@ -210,7 +210,7 @@ final class PlatformJobs {
                         JobExit.SCHEMA_DRIFT, refusal.getMessage());
                 observed.failed(refusal, "exitCode=" + JobExit.SCHEMA_DRIFT);
                 return new Outcome(JobExit.SCHEMA_DRIFT, refusal.getMessage());
-            } catch (RuntimeException failure) {
+            } catch (Exception failure) {
                 String detail = failure.getMessage() == null
                         ? failure.getClass().getName() : failure.getMessage();
                 SparkVerificationLogging.jobCompleted(client.config().principalId(),
@@ -224,5 +224,10 @@ final class PlatformJobs {
     @FunctionalInterface
     private interface ThrowingSupplier {
         String get();
+    }
+
+    private static RuntimeException unchecked(Exception failure) {
+        return failure instanceof RuntimeException runtimeFailure
+                ? runtimeFailure : new IllegalStateException(failure.getMessage(), failure);
     }
 }

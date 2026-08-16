@@ -46,12 +46,12 @@ final class SparkClusterConformanceTest {
 
         long alive = Pattern.compile("\"state\"\\s*:\\s*\"ALIVE\"").matcher(result.output()).results().count();
         assertEquals(EXPECTED_WORKERS, alive,
-                "both workers must have registered and be ALIVE, master view: " + result.output());
+                "both workers must have registered and be ALIVE, master view: " + result.describe());
 
         // A registered worker with no cores would satisfy the count above and
         // still be unable to run anything.
         var cores = Pattern.compile("\"cores\"\\s*:\\s*(\\d+)").matcher(result.output());
-        assertTrue(cores.find(), "the master must report core capacity: " + result.output());
+        assertTrue(cores.find(), "the master must report core capacity: " + result.describe());
         assertTrue(Integer.parseInt(cores.group(1)) > 0,
                 "the cluster must offer at least one core, got: " + cores.group(1));
 
@@ -65,7 +65,7 @@ final class SparkClusterConformanceTest {
 
         assertTrue(result.output().contains("\"status\" : \"ALIVE\"")
                         || result.output().contains("\"status\":\"ALIVE\""),
-                "the master must be ALIVE rather than in standby or recovery: " + result.output());
+                "the master must be ALIVE rather than in standby or recovery: " + result.describe());
     }
 
     @Test
@@ -80,7 +80,7 @@ final class SparkClusterConformanceTest {
         for (String artifact : new String[] {
                 "stratus-iceberg-aws-runtime", "hadoop-aws"}) {
             assertTrue(result.output().contains(artifact),
-                    artifact + " must be in the image, found: " + result.output());
+                    artifact + " must be in the image, found: " + result.describe());
         }
     }
 
@@ -140,8 +140,8 @@ final class SparkClusterConformanceTest {
 
         assertTrue(result.succeeded(), "the artifact lock must ship in the image: " + result.describe());
         assertTrue(result.output().contains("stratus-iceberg-aws-runtime-1.0-SNAPSHOT-runtime.jar"),
-                "the lock must name the isolated Iceberg runtime: " + result.output());
+                "the lock must name the isolated Iceberg runtime: " + result.describe());
         assertTrue(result.output().contains("hadoop-aws-3.4.3.jar"),
-                "the lock must name the pinned S3A connector: " + result.output());
+                "the lock must name the pinned S3A connector: " + result.describe());
     }
 }

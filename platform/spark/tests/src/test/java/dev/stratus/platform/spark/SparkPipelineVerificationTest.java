@@ -207,9 +207,9 @@ final class SparkPipelineVerificationTest {
 
         assertTrue(result.succeeded(), "ingestion must succeed: " + result.describe());
         assertTrue(result.output().contains("STRATUS_LINEAGE"),
-                "ingestion must emit a lineage payload: " + result.output());
+                "ingestion must emit a lineage payload: " + result.describe());
         assertTrue(result.output().contains("\"type\": \"INGESTION\""),
-                "the lineage payload must declare its type: " + result.output());
+                "the lineage payload must declare its type: " + result.describe());
 
         assertEquals("4", client.scalar("SELECT count(*) FROM " + BRONZE),
                 "all four source rows must land in bronze");
