@@ -1,0 +1,14 @@
+# Stratus Airflow direct dependency intent.
+#
+# The provider versions are the known-compatible selections in Airflow 3.3.1's
+# official Python 3.14 constraints. PySpark is explicit because Spark provider
+# 6.x no longer installs it by default; this image uses spark-submit rather than
+# Spark Connect. boto3 1.43.56 is the exact version in Airflow 3.3.1's official
+# Python 3.14 constraint set. PySpark stays on the Spark 4.1 patch line so this
+# submission client remains aligned with the wider Stratus Spark platform.
+apache-airflow==3.3.1
+apache-airflow-providers-apache-spark[pyspark]==6.3.1
+apache-airflow-providers-amazon==9.34.0
+boto3==1.43.56
+pyspark==4.1.3
+py4j==0.10.9.9
