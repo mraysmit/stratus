@@ -1782,7 +1782,7 @@ Minimum version matrix to maintain:
 | Apache Flink | align Flink major version, Java support, connectors, checkpointing, and Iceberg runtime |
 | FreeIPA / Keycloak | use current identity-provider documentation for LDAP/Kerberos/OIDC integration and avoid stale user-guide assumptions |
 
-Current Phase 1 target baseline as of 2026-07-10:
+Current Phase 1 target baseline as of 2026-08-17:
 
 | Component | Target |
 |---|---|
@@ -1793,12 +1793,12 @@ Current Phase 1 target baseline as of 2026-07-10:
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
-| Apache Airflow | 3.3.0 |
-| Airflow Python runtime | Python 3.14, using the matching official image and constraints/provider compatibility tests |
-| Airflow metadata database | PostgreSQL 17.10, latest patch in Airflow 3.3.0's newest tested PostgreSQL major |
-| Airflow Spark provider | 6.2.0 |
-| Airflow Amazon provider | 9.31.0 |
-| boto3 | 1.43.40 |
+| Apache Airflow | 3.3.1 |
+| Airflow Python runtime | Python 3.14; the official Airflow 3.3.1 image currently embeds 3.14.3 while upstream 3.14.6 remains a monitored base-image update |
+| Airflow metadata database | PostgreSQL 17.10, retained approved matrix entry within Airflow 3.3.1's tested PostgreSQL 14-18 range |
+| Airflow Spark provider | 6.3.1 |
+| Airflow Amazon provider | 9.34.0 |
+| boto3 | 1.43.56 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
 | Keycloak metadata database | PostgreSQL 18.4, latest patch in Keycloak's newest supported PostgreSQL major |

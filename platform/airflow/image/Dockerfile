@@ -15,6 +15,9 @@ COPY artifacts/spark-4.1.3-bin-hadoop3.tgz /tmp/spark-4.1.3-bin-hadoop3.tgz
 RUN tar -xzf /tmp/spark-4.1.3-bin-hadoop3.tgz -C /opt \
     && mv /opt/spark-4.1.3-bin-hadoop3 /opt/spark \
     && rm /opt/spark/jars/derby-10.16.1.1.jar \
+    && rm -f /usr/bin/docker \
+       /home/airflow/.local/bin/uv \
+       /home/airflow/.local/bin/uvx \
     && rm /tmp/spark-4.1.3-bin-hadoop3.tgz \
     && mkdir -p /opt/stratus/wheelhouse \
     && chown -R airflow:0 /opt/spark /opt/stratus
@@ -40,7 +43,7 @@ RUN python -m pip install \
       --no-build-isolation \
       --require-hashes \
       --requirement /opt/stratus/requirements.lock \
-    && python -m pip uninstall --yes litellm \
+    && python -m pip uninstall --yes litellm ray \
     && PYSPARK_PACKAGE="$(python -c 'import pathlib, pyspark; print(pathlib.Path(pyspark.__file__).parent)')" \
     && rm -rf "${PYSPARK_PACKAGE}/jars" \
     && rm -rf /opt/stratus/wheelhouse

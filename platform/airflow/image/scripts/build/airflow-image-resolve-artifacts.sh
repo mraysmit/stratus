@@ -65,6 +65,7 @@ fi
 for required in \
   'apache-airflow-providers-amazon==9.34.0' \
   'apache-airflow-providers-apache-spark==6.3.1' \
+  'aiohttp==3.14.3' \
   'boto3==1.43.56'; do
   if ! grep -Fx "${required}" "${ARTIFACT_DIR}/${CONSTRAINTS_NAME}" >/dev/null; then
     log ERROR incompatible_constraint "requirement=${required}"
