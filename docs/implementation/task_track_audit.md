@@ -74,6 +74,16 @@ Phase 2 has a build order and developer/production model but no work-package IDs
 
 The detailed findings in sections 5 through 7 record the initial deficiencies that drove remediation. They are retained as audit history; those deficiencies are closed by the implementation task-track sections now present in every active increment and by the Phase 1 and Phase 2 portfolio roll-ups.
 
+Implementation status checkpoint (2026-08-17): Increment 4 remains in progress.
+The shared Airflow 3.3.1 image task `P1-4.1-S1` is accepted for developer use
+under `WAIVER-P1-4.1-S1-20260817` through 2026-09-16. Production promotion is
+prohibited, the 35 unique residual Spark/Hadoop JAR High findings still require
+permanent disposition, and `P1-4.1-D1` is the next engineering task. The
+LocalExecutor/PostgreSQL developer deployment, executable orchestration
+verification, Increment 4 developer gate, and every Increment 4 production task
+remain not started. This checkpoint updates delivery state only; the detailed
+gap lists below remain the dated 2026-07-11 audit history.
+
 ---
 
 ## 5. Phase 1 Findings

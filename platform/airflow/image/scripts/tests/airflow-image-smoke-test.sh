@@ -37,6 +37,7 @@ expected = {
     "apache-airflow": "3.3.1",
     "apache-airflow-providers-amazon": "9.34.0",
     "apache-airflow-providers-apache-spark": "6.3.1",
+    "aiohttp": "3.14.3",
     "boto3": "1.43.56",
     "pyspark": "4.1.3",
     "py4j": "0.10.9.9",
@@ -55,11 +56,20 @@ except PackageNotFoundError:
     pass
 else:
     raise AssertionError("unused LiteLLM distribution is installed")
-print(f"provider_imports=ok versions={actual} litellm=absent pyspark_jars=canonical")
+try:
+    version("ray")
+except PackageNotFoundError:
+    pass
+else:
+    raise AssertionError("unused Ray distribution is installed")
+print(f"provider_imports=ok versions={actual} litellm=absent ray=absent pyspark_jars=canonical")
 PY
   java -version
   spark-submit --version
   test ! -e /opt/spark/jars/derby-10.16.1.1.jar
+  test ! -e /usr/bin/docker
+  test ! -e /home/airflow/.local/bin/uv
+  test ! -e /home/airflow/.local/bin/uvx
   test -r /opt/stratus/artifact-lock.properties
   grep -Fx "airflow.version=3.3.1" /opt/stratus/artifact-lock.properties
 '

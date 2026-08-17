@@ -13,7 +13,11 @@ Product directories may contain:
 - bootstrap and policy automation
 - product-specific operational helpers
 
-The Airflow image baseline has passed its zero-Critical vulnerability gate;
-remaining High findings require triage before the shared baseline is accepted.
+The Airflow 3.3.1 image baseline passed its 2026-08-17 zero-Critical
+vulnerability gate. Its remaining 84 High occurrences represent 35 unique
+package/CVE pairs, all in the upstream Spark/Hadoop JAR set. They require an
+upstream upgrade and reachability analysis. The shared baseline is accepted for
+developer use under `WAIVER-P1-4.1-S1-20260817` through 2026-09-16; production
+promotion remains prohibited.
 
 Stratus-owned Java services belong under `applications/`, compute jobs under `jobs/`, and conformance tests under `verification/`.

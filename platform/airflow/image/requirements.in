@@ -4,11 +4,15 @@
 # official Python 3.14 constraints. PySpark is explicit because Spark provider
 # 6.x no longer installs it by default; this image uses spark-submit rather than
 # Spark Connect. boto3 1.43.56 is the exact version in Airflow 3.3.1's official
-# Python 3.14 constraint set. PySpark stays on the Spark 4.1 patch line so this
-# submission client remains aligned with the wider Stratus Spark platform.
+# Python 3.14 constraint set. aiohttp is explicit because the upstream image's
+# unused Ray bundle contains stale vendored 3.14.1 metadata; Ray is removed and
+# the supported runtime is locked to the constraint's fixed 3.14.3 version.
+# PySpark stays on the Spark 4.1 patch line so this submission client remains
+# aligned with the wider Stratus Spark platform.
 apache-airflow==3.3.1
 apache-airflow-providers-apache-spark[pyspark]==6.3.1
 apache-airflow-providers-amazon==9.34.0
 boto3==1.43.56
+aiohttp==3.14.3
 pyspark==4.1.3
 py4j==0.10.9.9
