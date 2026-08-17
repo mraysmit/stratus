@@ -46,7 +46,7 @@ Reference baseline: 2026-07-10.
 
 The current FreeIPA documentation page points users toward Red Hat Enterprise Linux Identity Management documentation for maintained operational guidance. Keycloak's current documentation line is 26.6.4 and its supported-configuration matrix includes PostgreSQL 18.x. Stratus pins PostgreSQL 18.4 for Keycloak, uses an optimized Keycloak image, enables HTTPS in production mode, and exposes health/metrics only on the management network. Trino 482 documentation confirms that OAuth2 client authentication is configured on the coordinator, requires TLS and a shared secret, and does not require the same client-auth changes on workers.
 
-Airflow is standardized on Airflow 3.3.0 in Increment 4. Increment 7 hardens that Airflow 3.x topology using the Airflow 3 public API and auth-manager model rather than the retired Airflow 2.x webserver/Flask AppBuilder assumption.
+Airflow is standardized on Airflow 3.3.1 in Increment 4. Increment 7 hardens that Airflow 3.x topology using the Airflow 3 public API and auth-manager model rather than the retired Airflow 2.x webserver/Flask AppBuilder assumption.
 
 ---
 
@@ -210,7 +210,7 @@ Existing service ports from earlier increments remain in place, but their TLS an
 |---|---|
 | Ceph RGW | TLS chain trusted; encryption-at-rest enabled on sensitive buckets |
 | Polaris | HTTPS with trusted certificate; OIDC integration where supported |
-| Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.3.0 |
+| Airflow | HTTPS and Keycloak-backed UI/API auth for Airflow 3.3.1 |
 | Trino | HTTPS coordinator endpoint; Keycloak/OIDC client auth |
 | Atlas | HTTPS and FreeIPA LDAP authentication |
 | Ranger | HTTPS, FreeIPA LDAP usersync, group-based policies |
@@ -614,7 +614,7 @@ The user identity used for authorization is the authenticated Trino user. The Ce
 
 ### Airflow authentication
 
-Airflow hardening targets the Airflow 3.3.0 topology from Increment 4. Use the Airflow 3 public API and selected auth-manager configuration, with Keycloak as the OIDC identity provider. If a reverse proxy is used in front of Airflow, it must preserve the same authentication and authorization contracts and must not create a second identity source.
+Airflow hardening targets the Airflow 3.3.1 topology from Increment 4. Use the Airflow 3 public API and selected auth-manager configuration, with Keycloak as the OIDC identity provider. If a reverse proxy is used in front of Airflow, it must preserve the same authentication and authorization contracts and must not create a second identity source.
 
 Verification must prove:
 
@@ -1091,7 +1091,7 @@ Increment 7 is accepted only when all of the following are true:
 - [ ] **P19** - Ranger policies are migrated to FreeIPA groups
 - [ ] **P20** - Atlas authenticates against FreeIPA LDAP
 - [ ] **P21** - Trino coordinator uses HTTPS and Keycloak/OIDC for client access
-- [ ] **P22** - Airflow UI/API authentication is hardened for Airflow 3.3.0 and Keycloak
+- [ ] **P22** - Airflow UI/API authentication is hardened for Airflow 3.3.1 and Keycloak
 - [ ] **P23** - Polaris rejects unauthenticated catalog access
 - [ ] **P24** - Polaris, Trino, Spark, and Airflow still resolve Iceberg tables only through Polaris
 - [ ] **P25** - FreeIPA-issued certificates replace lab self-signed certificates for platform endpoints

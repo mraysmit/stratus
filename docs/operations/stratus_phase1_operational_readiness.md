@@ -14,9 +14,19 @@ Phase 1 is accepted only when the platform can prove three things:
 
 This is exclusively the **production-profile gate**. Developer-profile evidence is useful regression input, but Docker Desktop/Podman convenience topology, reduced replicas, disposable or local-only state, local CA certificates, plaintext endpoints, bootstrap identities, and embedded production dependencies cannot satisfy this document. The evidence bundle must include a promotion manifest mapping every developer shortcut to the production setting that replaced it.
 
+Current implementation status (2026-08-17): the shared Airflow 3.3.1 image
+baseline `P1-4.1-S1` is accepted for developer use under
+`WAIVER-P1-4.1-S1-20260817` through 2026-09-16. Production promotion is
+prohibited. The 35 unique residual Spark/Hadoop JAR High findings require
+permanent disposition, and `P1-4.1-D1` has not started. No Increment 4
+developer gate, Increment 4 production gate, or Phase 1 production-readiness
+acceptance is claimed by that waiver.
+
 Reference:
 - [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](../implementation/stratus_implementation_plan_phase1.md)
+- [airflow_orchestration.md](../implementation/airflow_orchestration.md)
+- [Airflow vulnerability waiver](../../platform/airflow/image/vulnerability-waiver.md)
 
 ---
 
@@ -55,7 +65,7 @@ At minimum, review current documentation for:
 - Keycloak
 - Prometheus, Grafana, and Loki
 
-Current Phase 1 target baseline as of 2026-07-10:
+Current Phase 1 target baseline as of 2026-08-17:
 
 | Component | Target |
 |---|---|
@@ -66,12 +76,12 @@ Current Phase 1 target baseline as of 2026-07-10:
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
-| Apache Airflow | 3.3.0 |
-| Airflow Python runtime | Python 3.14, using the matching official image and constraints/provider compatibility tests |
-| Airflow metadata database | PostgreSQL 17.10, latest patch in Airflow 3.3.0's newest tested PostgreSQL major |
-| Airflow Spark provider | 6.2.0 |
-| Airflow Amazon provider | 9.31.0 |
-| boto3 | 1.43.40 |
+| Apache Airflow | 3.3.1 |
+| Airflow Python runtime | Python 3.14; the official Airflow 3.3.1 image currently embeds 3.14.3 while upstream 3.14.6 remains a monitored base-image update |
+| Airflow metadata database | PostgreSQL 17.10, retained approved matrix entry within Airflow 3.3.1's tested PostgreSQL 14-18 range |
+| Airflow Spark provider | 6.3.1 |
+| Airflow Amazon provider | 9.34.0 |
+| boto3 | 1.43.56 |
 | Trino | 482 |
 | Keycloak | 26.6.4 |
 | Keycloak metadata database | PostgreSQL 18.4, latest patch in Keycloak's newest supported PostgreSQL major |
