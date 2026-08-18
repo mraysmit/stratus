@@ -26,7 +26,7 @@ Increment 7 still has two tracks. The developer profile may use a disposable Fre
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on the identity and Keycloak hosts, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution:
   - `ipa.stratus.local`
   - `keycloak.stratus.local`

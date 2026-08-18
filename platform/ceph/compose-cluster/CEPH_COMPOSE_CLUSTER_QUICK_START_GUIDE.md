@@ -60,7 +60,7 @@ Install or confirm:
 
 - Docker Desktop or Docker Engine with Compose v2
 - Bash on Linux or macOS, or Git Bash on Windows
-- JDK 25, which is the Java release configured by the repository build
+- JDK 21, which is the Java release configured by the repository build
 - `curl` when using the optional command-line Dashboard connectivity check
 - enough free Docker disk for the Ceph and client images
 - enough free Docker storage for three disposable 1 GiB OSD volumes

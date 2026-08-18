@@ -14,18 +14,23 @@ Phase 1 is accepted only when the platform can prove three things:
 
 This is exclusively the **production-profile gate**. Developer-profile evidence is useful regression input, but Docker Desktop/Podman convenience topology, reduced replicas, disposable or local-only state, local CA certificates, plaintext endpoints, bootstrap identities, and embedded production dependencies cannot satisfy this document. The evidence bundle must include a promotion manifest mapping every developer shortcut to the production setting that replaced it.
 
-Current implementation status (2026-08-17): the shared Airflow 3.3.1 image
+Current implementation status (2026-08-18): the shared Airflow 3.3.1 image
 baseline `P1-4.1-S1` is accepted for developer use under
 `WAIVER-P1-4.1-S1-20260817` through 2026-09-16. Production promotion is
 prohibited. The 35 unique residual Spark/Hadoop JAR High findings require
-permanent disposition, and `P1-4.1-D1` has not started. No Increment 4
-developer gate, Increment 4 production gate, or Phase 1 production-readiness
-acceptance is claimed by that waiver.
+permanent disposition. Its host-side Spark/PySpark assembly path has been
+superseded by `P1-4.1-S2` after performance profiling; it is retained only as
+historical waiver evidence. The `P1-4.1-D1` developer harness and offline
+guardrails are implemented, but live acceptance is paused until `S2` publishes a
+registry-layer image consumed by immutable digest. No Increment 4 developer gate,
+Increment 4 production gate, or Phase 1 production-readiness acceptance is
+claimed by that waiver or the offline harness evidence.
 
 Reference:
 - [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](../implementation/stratus_implementation_plan_phase1.md)
 - [airflow_orchestration.md](../implementation/airflow_orchestration.md)
+- [Airflow/Spark runtime reassessment](../implementation/airflow_spark_runtime_reassessment_20260818.md)
 - [Airflow vulnerability waiver](../../platform/airflow/image/vulnerability-waiver.md)
 
 ---
@@ -69,10 +74,10 @@ Current Phase 1 target baseline as of 2026-08-17:
 
 | Component | Target |
 |---|---|
-| Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch, vendor and image digest recorded |
+| Stratus Java build and verifier baseline | Java 21 LTS, latest approved patch, vendor and image digest recorded |
 | Java build tool | Apache Maven 3.9.16; Maven 4 remains pre-GA and is not the production build baseline |
 | OCI runtime baseline | Podman 5.8.2 preferred; Docker Engine 29.5.3 permitted where selected and component-supported; exact package and patch pinned per environment |
-| Component runtime exceptions | Spark 4.1 on its supported Java 17 runtime; Airflow Spark client on Java 21; Atlas/Ranger on selected-release-supported runtimes; each exception documented and retested on upgrade |
+| Component runtime exceptions | Spark 4.1 and the Airflow Spark client use Java 21; Atlas/Ranger use selected-release-supported runtimes when required; each exception is documented and retested on upgrade |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
@@ -201,10 +206,12 @@ Acceptance checks:
 - [ ] Verifier images define stable entrypoints, non-zero failure exit codes, machine-readable results, human-readable summaries, and correlation identifiers.
 - [ ] Protected verifier environment files or secret injection are access-controlled and are not included in evidence bundles.
 - [ ] Airflow uses the approved 3.x image and service split.
+- [ ] Airflow deployment consumes a published immutable image digest; runtime hosts and lifecycle tests do not resolve dependencies, build images, or run release scans.
+- [ ] The Airflow image sources Spark and Java 21 from pinned registry layers, carries one canonical Spark/Hadoop JAR tree, and has recorded image-assembly, lifecycle, and submission timings.
 - [ ] Trino, Spark, and Iceberg dependency versions are mutually compatible.
-- [ ] Stratus-owned Java artifacts and verifier images use Java 25 LTS at the latest approved patch level.
-- [ ] Component-bound artifacts built with JDK 25 use the documented `--release` target matching the deployed component runtime.
-- [ ] Every non-Java-25 component runtime has a recorded compatibility exception, owner, supported-version evidence, and removal or retest trigger.
+- [ ] Stratus-owned Java artifacts, verifier images, and supported component runtimes use Java 21 LTS at the latest approved patch level.
+- [ ] Any component-mandated Java exception records its owner, pinned runtime, verification evidence, and removal trigger.
+- [ ] Every non-Java-21 component runtime has a recorded compatibility exception, owner, supported-version evidence, and removal or retest trigger.
 - [ ] Ranger plugin and Trino version compatibility is documented.
 - [ ] Keycloak and FreeIPA versions are supported by their upstream projects or the selected Linux distribution.
 - [ ] The deployed configuration matches the reviewed configuration in source control.

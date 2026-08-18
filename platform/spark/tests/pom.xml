@@ -16,12 +16,9 @@
     <description>Live Spark cluster conformance and Spark harness guardrails</description>
 
     <properties>
-        <!-- The approved Spark runtime image is built on Java 17. This module
-             holds a driver that submits to it and exchanges serialised closures
-             with its executors, so it must target the same release for the same
-             reason jobs/spark does: a newer class file is refused at submission
-             time, not at build time. -->
-        <maven.compiler.release>17</maven.compiler.release>
+        <!-- Java 21 is the Stratus build, verifier, and approved Spark runtime
+             policy, so submitted drivers and executors use that release. -->
+        <maven.compiler.release>21</maven.compiler.release>
     </properties>
 
     <dependencies>

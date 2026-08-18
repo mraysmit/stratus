@@ -123,6 +123,8 @@ final class AirflowArtifactBaselineTest {
                         "The root build/ ignore rule must not hide Airflow's build scripts"),
                 () -> assertTrue(resolver.contains("requirements.lock")),
                 () -> assertTrue(resolver.contains("artifact-lock.properties")),
+                () -> assertTrue(resolver.contains("sub(/\\r$/"),
+                        "The resolver must strip CRLF endings from lock values on Windows"),
                 () -> assertTrue(resolver.contains("aiohttp==3.14.3"),
                         "Resolution must verify the fixed aiohttp version against Airflow's constraint"),
                 () -> assertTrue(resolver.contains(
@@ -197,7 +199,7 @@ final class AirflowArtifactBaselineTest {
     }
 
     @Test
-    void implementationStatusDocumentsPreserveTheDeveloperOnlyAcceptanceBoundary() {
+    void implementationStatusDocumentsPreserveThePausedAcceptanceBoundary() {
         String phasePlan = readRepo(Path.of(
                 "docs", "implementation", "stratus_implementation_plan_phase1.md"));
         String incrementPlan = readRepo(Path.of(
@@ -214,14 +216,19 @@ final class AirflowArtifactBaselineTest {
                 () -> assertCurrentDeveloperBoundary(taskAudit),
                 () -> assertCurrentDeveloperBoundary(readiness),
                 () -> assertCurrentDeveloperBoundary(verifierIndex),
-                () -> assertTrue(phasePlan.contains("developer deployment has not started")),
-                () -> assertTrue(incrementPlan.contains("`P1-4.1-D1`")
-                        && incrementPlan.contains("LocalExecutor")
-                        && incrementPlan.contains("Not started")),
-                () -> assertTrue(taskAudit.contains("`P1-4.1-D1` is the next engineering task")),
-                () -> assertTrue(readiness.contains("`P1-4.1-D1` has not started")),
-                () -> assertTrue(verifierIndex.contains(
-                        "deployment and executable verification have not started")));
+                () -> assertTrue(phasePlan.contains("`P1-4.1-S2`")
+                        && phasePlan.contains("live acceptance is paused")),
+                () -> assertTrue(incrementPlan.contains("`P1-4.1-S2`")
+                        && incrementPlan.contains("registry layers")
+                        && incrementPlan.contains("live acceptance paused")),
+                () -> assertTrue(taskAudit.contains("`P1-4.1-S2`")
+                        && taskAudit.contains("live lifecycle")
+                        && taskAudit.contains("acceptance is paused")),
+                () -> assertTrue(readiness.contains("`P1-4.1-S2`")
+                        && readiness.contains("live acceptance is paused")),
+                () -> assertTrue(verifierIndex.contains("live lifecycle")
+                        && verifierIndex.contains("acceptance is")
+                        && verifierIndex.contains("paused pending a published registry-layer image digest")));
     }
 
     private static void assertLocked(String lock, String distribution, String version) {
