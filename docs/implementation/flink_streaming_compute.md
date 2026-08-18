@@ -26,7 +26,7 @@ Flink is not the batch ETL engine and it is not the scheduler. Spark remains the
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Flink host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Flink job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Flink runtime.
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Flink job artifacts target the same Java 21 release as the selected Flink runtime.
 - Kafka client truststore from Increment 8 is available
 - `svc-flink` can read the verification event and CDC topics
 - `svc-flink` can write to the approved checkpoint and savepoint storage path
@@ -109,7 +109,7 @@ Target artifacts:
 |---|---|
 | Apache Flink | 2.1.3 |
 | Flink Kafka Connector | 5.0.0-2.1 |
-| JDK | Java 17 runtime for Flink 2.1; Java 25 build toolchain with Flink job modules compiled using `--release 17` |
+| JDK | Java 21 build and runtime for Flink 2.1, aligned with the repository baseline |
 | Prometheus metrics reporter | bundled or pinned compatible reporter |
 
 Example image tag:
@@ -130,7 +130,7 @@ The image must include:
 
 The implementation runbook must record image tag, digest, Flink version, connector version, JDK version, and artifact checksums.
 
-Java 25 is the Stratus build and verifier baseline. Flink 2.1 recommends Java 17 and supports Java 21, but does not document Java 25 support; its runtime therefore remains Java 17 until an approved Flink release supports Java 25. This exception must be retested when the Flink version changes.
+Java 21 is the Stratus build, verifier, and runtime baseline. Flink 2.1 supports Java 21, so its runtime and job artifacts use the repository policy without a component exception. Compatibility must still be retested when the Flink version changes.
 
 ---
 

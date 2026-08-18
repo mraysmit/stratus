@@ -28,7 +28,7 @@ When this increment is complete, streaming data is not invisible side traffic. I
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on the governance host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - Atlas endpoint is reachable at `https://atlas.stratus.local`
 - Ranger endpoint is reachable at `https://ranger.stratus.local`
 - Kafka brokers are reachable on `9092` with TLS and SASL/SCRAM

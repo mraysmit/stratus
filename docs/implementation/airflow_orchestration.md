@@ -19,7 +19,7 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on the Airflow host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
+- JDK 21 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
 - DNS resolution: `airflow.stratus.local` resolves to the Airflow host
 - Airflow host can reach:
   - Spark master on port 7077
@@ -138,80 +138,57 @@ For Increment 4, Airflow's own endpoint may be HTTP inside the lab network. TLS 
 
 ## 5. Airflow Image
 
-The official Airflow image is used as the base. A custom image adds Java, Spark client binaries, and the Airflow providers required for Spark and S3-compatible object storage.
+The target design uses the official Airflow image as the control-plane base and a
+digest-pinned official Spark 4.1.3 Scala 2.13 Java 21 image as the source of the
+submission runtime. A multi-stage OCI build copies the canonical Spark runtime
+between registry-backed stages. The 546.3 MB Spark archive is not downloaded into
+or copied from the host build context.
 
-### Dockerfile
+The current `platform/airflow/image/Dockerfile` and resolver still implement the
+superseded `P1-4.1-S1` assembly path. They remain for reproducibility of the dated
+waiver evidence but must be refactored by `P1-4.1-S2` before a new image is
+accepted. Do not use that legacy path merely to unblock `P1-4.1-D1`.
 
-Create `platform/airflow/image/Dockerfile` in the Stratus repository:
+The replacement image contract is:
 
-```dockerfile
-ARG TEMURIN_21_IMAGE=eclipse-temurin:21-jre@sha256:<locked-index-digest>
-ARG AIRFLOW_BASE_IMAGE=apache/airflow:3.3.1-python3.14@sha256:<locked-index-digest>
+| Layer | Source and rule |
+|---|---|
+| Airflow control plane | Airflow 3.3.1 Python 3.14 official image, pinned by immutable digest |
+| Spark submission runtime | Spark 4.1.3 Scala 2.13 Java 21 official image, pinned by immutable digest and copied through an OCI stage |
+| Python providers | hash-locked small artifacts resolved by the approved build worker; no mutable resolution during image assembly |
+| PySpark Python distribution | include only after the focused compatibility gate proves it is required; never transfer a second complete JAR tree through the host context |
+| Hardening | remove unused inherited executables and server components, retain a single Spark/Hadoop JAR tree, and rerun smoke and vulnerability gates |
+| Publication | publish once, record digest/provenance/SBOM, and deploy that digest without rebuilding |
 
-FROM ${TEMURIN_21_IMAGE} AS temurin
-FROM ${AIRFLOW_BASE_IMAGE}
+Provider 6.3.1 declares `pyspark-client` as a normal dependency and `pyspark` as
+an optional extra. Upstream directs non-Spark-Connect modes to the PySpark extra,
+while `SparkSubmitOperator` invokes the `spark-submit` binary. `P1-4.1-S2` must
+therefore prove imports, dependency validation, executable discovery, and a real
+JAR submission before changing the PySpark lock. An unsupported dependency
+suppression or an untested `PYTHONPATH` workaround is prohibited.
 
-USER root
-
-COPY --from=temurin /opt/java/openjdk /opt/java/openjdk
-
-# The build system downloads the pinned Spark distribution, verifies its
-# recorded checksum, and places it in the build context before this build.
-COPY artifacts/spark-4.1.3-bin-hadoop3.tgz /tmp/spark-4.1.3-bin-hadoop3.tgz
-RUN tar -xzf /tmp/spark-4.1.3-bin-hadoop3.tgz -C /opt \
-    && mv /opt/spark-4.1.3-bin-hadoop3 /opt/spark \
-    && rm /opt/spark/jars/derby-10.16.1.1.jar \
-    && rm -f /usr/bin/docker \
-       /home/airflow/.local/bin/uv \
-       /home/airflow/.local/bin/uvx \
-    && rm /tmp/spark-4.1.3-bin-hadoop3.tgz
-
-COPY --chown=airflow:0 artifacts/wheelhouse/ /opt/stratus/wheelhouse/
-COPY --chown=airflow:0 requirements.lock /opt/stratus/requirements.lock
-COPY --chown=airflow:0 artifact-lock.properties /opt/stratus/artifact-lock.properties
-
-ENV JAVA_HOME=/opt/java/openjdk \
-    SPARK_HOME=/opt/spark \
-    PATH=/opt/java/openjdk/bin:/opt/spark/bin:${PATH}
-
-USER airflow
-
-RUN python -m pip install \
-      --no-cache-dir --no-index --no-deps --no-build-isolation \
-      --find-links=/opt/stratus/wheelhouse --require-hashes \
-      --requirement /opt/stratus/requirements.lock \
-    && python -m pip uninstall --yes litellm ray \
-    && PYSPARK_PACKAGE="$(python -c 'import pathlib, pyspark; print(pathlib.Path(pyspark.__file__).parent)')" \
-    && rm -rf "${PYSPARK_PACKAGE}/jars" \
-    && rm -rf /opt/stratus/wheelhouse
-```
-
-The Airflow image carries Java 21 only as the Spark 4.1 client runtime because Spark 4.1 supports Java 17/21 and not Java 25. Java is copied from a Temurin JRE image rather than assumed to exist in the Airflow base distribution's package repository. The Spark provider's `pyspark` extra is explicit because provider 6.x no longer includes it by default for `spark-submit` style connections. The lock resolves PySpark 4.1.3 and its required Py4J 0.10.9.9 runtime consistently with the copied Spark distribution. Stratus application and verifier builds use JDK 25; Spark-submitted job artifacts use the compatible `--release 17` target defined by Increment 3.
-
-The build system resolves the Python packages from the approved package repository using `requirements.lock`, which carries SHA-256 hashes for Airflow 3.3.1, Spark provider 6.3.1, Amazon provider 9.34.0, boto3 1.43.56, aiohttp 3.14.3, PySpark 4.1.3, and Py4J 0.10.9.9. These provider, boto3, and aiohttp versions are the exact selections in Airflow 3.3.1's official Python 3.14 constraint set. Image assembly uses only the verified local wheelhouse and performs no mutable resolution.
-
-The pinned Airflow base also contains LiteLLM, Ray, a Docker client, and the
-`uv`/`uvx` package-manager binaries, none of which Stratus runs in this image.
-The PySpark source distribution additionally duplicates the Spark archive's JAR
-tree. Image assembly removes those unused components and the duplicate JARs.
-The canonical Spark archive remains under `/opt/spark`; its unused Derby
-10.16.1.1 server JAR is removed because this image is a remote Spark submission
-client, not a Derby-backed Spark SQL or Hive server. Runtime smoke tests enforce
-these absences and the archive scanner fails on any Critical finding.
+The dated evidence, compatibility gate, and time budgets are defined in
+[`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md).
 
 ### Build-system image publication
 
-The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Airflow runtime hosts.
+The container build is a build-pipeline step. It runs on an approved build worker,
+pulls digest-qualified Airflow and Spark source layers, uses a small verified
+context, and is followed by smoke tests, scanning, registry publication, and
+digest recording. Do not build the image on Airflow runtime hosts or as part of a
+developer lifecycle test.
 
 ```bash
-bash platform/airflow/image/scripts/build/airflow-image-resolve-artifacts.sh
-export STRATUS_AIRFLOW_IMAGE=stratus/airflow:3.3.1
-bash platform/airflow/image/scripts/build/airflow-image-build.sh
-bash platform/airflow/image/scripts/tests/airflow-image-smoke-test.sh
-bash platform/airflow/image/scripts/tests/airflow-image-vulnerability-scan-test.sh
+# Commands are restored by P1-4.1-S2 after the registry-layer refactor.
+# The legacy P1-4.1-S1 resolver/build pair is not the deployment path.
 ```
 
-The checked-in defaults and `artifact-lock.properties` contain immutable multi-platform image-index digests. Release automation may override them only with newly approved digest-qualified references after regression and scan review; floating defaults are not permitted. The vulnerability scan exports the image and gives Trivy only a read-only archive, never the host container-engine control socket.
+The checked-in defaults and artifact lock contain immutable multi-platform image
+digests. Release automation may override them only with newly approved
+digest-qualified references after regression and scan review; floating defaults
+are not permitted. The vulnerability scan exports the image and gives Trivy only
+a read-only archive, never the host container-engine control socket. Deployment
+manifests consume the published result digest and never invoke the resolver.
 
 ---
 
@@ -1236,8 +1213,9 @@ These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/
 
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `platform/airflow/image/`; dependency locks | build, scan, import and provider smoke tests | D1, P1-P3 | Platform owner | Developer waiver expires 2026-09-16; 35 unique upstream Spark/Hadoop JAR High findings require permanent disposition | Accepted for developer use 2026-08-17 under `WAIVER-P1-4.1-S1-20260817`; production prohibited |
-| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S1` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output | D1 | Platform owner | Local resources | Not started |
+| `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `platform/airflow/image/`; dependency locks | build, scan, import and provider smoke tests | Historical D1 input | Platform owner | Developer waiver expires 2026-09-16; 35 unique upstream Spark/Hadoop JAR High findings require permanent disposition | Accepted for developer use 2026-08-17 under `WAIVER-P1-4.1-S1-20260817`; retained as historical evidence and superseded for new builds by `P1-4.1-S2` |
+| `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned registry layers, decide the PySpark compatibility contract, and publish a timed, scanned immutable image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan, digest, provenance, phase timings | D1, P1-P3 | Platform owner | PySpark non-Connect support contract and registry publication | In progress - direction accepted 2026-08-18; implementation pending |
+| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using a prebuilt digest | D1 | Platform owner | Published `P1-4.1-S2` image digest | Harness and offline guardrails implemented 2026-08-18; live acceptance paused pending `P1-4.1-S2` |
 | `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/dags/`; `platform/airflow/config/`; `environments/developer/airflow/` | Spark task and secret-redaction evidence | D1 | Security owner | Connection leakage | Not started |
 | `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | DAG modules/tests | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | Alert sink availability | Not started |
 | `P1-4.1-P1` | `P1-4.1` | Production | Provision external PostgreSQL TLS/backup/restore and production Airflow service placement. | Database and operations owners | `P1-4.1-S1` | `platform/airflow/`; `environments/production/airflow/`; DB runbook | migration, failover/recovery, service restart | P1-P6 | Platform owner | DB HA decision | Not started |
@@ -1291,21 +1269,32 @@ production promotion, and does not close the residual findings:
   compensating controls, actions, invalidation rules, and expiry are recorded in
   `platform/airflow/image/vulnerability-waiver.md`.
 
+On 2026-08-18, a Java 21 rebuild attempt showed that the legacy resolver and host
+build context carried more than 1 GB of duplicate Spark/PySpark payload. Artifact
+resolution took 663.689 seconds, and the Docker Desktop transfer was stopped after
+about 305 seconds with only about 310 MB transferred. This invalidated the old
+assembly path as an acceptable developer workflow; it did not invalidate the
+historical digest or its time-bounded waiver evidence.
+
 Remaining work, in dependency order:
 
-1. Execute `P1-4.1-D1`: LocalExecutor, PostgreSQL 17.10, lifecycle scripts,
-   migrations, health checks, and two complete start/stop cycles.
-2. Execute `P1-4.2-D1`: prove the Spark 4.1.3 submission client against the
+1. Execute `P1-4.1-S2`: source Spark/Java from a pinned official Spark image
+   layer, eliminate gigabyte-scale host build inputs, complete the PySpark
+   compatibility gate, scan, publish, and record the accepted digest and timings.
+2. Resume `P1-4.1-D1` using that prebuilt digest. The LocalExecutor/PostgreSQL
+   harness, lifecycle scripts, migrations, health checks, and offline guardrails
+   are implemented; two complete live start/stop cycles remain acceptance work.
+3. Execute `P1-4.2-D1`: prove the Spark 4.1.3 submission client against the
    current Spark 4.1.2 developer cluster or align the exact patch versions,
    then verify Ceph/Polaris trust, protected Airflow connections, immutable DAG
    delivery, secret-redaction evidence, and residual-JAR reachability before the
    developer waiver expires.
-3. Monitor compatible Spark/Hadoop releases and permanently disposition all 35
+4. Monitor compatible Spark/Hadoop releases and permanently disposition all 35
    unique residual High findings by 2026-09-16; no automatic waiver renewal is
    permitted.
-4. Execute `P1-4.3-V1`, then the Increment 4 developer gate. The Java
+5. Execute `P1-4.3-V1`, then the Increment 4 developer gate. The Java
    orchestration verifier and full DAG behavior remain unimplemented.
-5. Production tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P` remain not
+6. Production tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P` remain not
    started and retain their existing production prerequisites.
 
 ## 16. Completion Gates

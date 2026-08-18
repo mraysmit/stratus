@@ -17,13 +17,17 @@ Current modules:
 | `governance` | Metadata and policy — Apache Atlas + Apache Ranger | Placeholder |
 | `identity` | Identity and security — FreeIPA + Keycloak | Placeholder |
 
-Orchestration status checkpoint (2026-08-17): the shared Airflow 3.3.1 image
+Orchestration status checkpoint (2026-08-18): the shared Airflow 3.3.1 image
 baseline is accepted for developer use under `WAIVER-P1-4.1-S1-20260817`
 through 2026-09-16. Production promotion is prohibited. The 35 unique residual
-Spark/Hadoop JAR High findings still require permanent disposition, while
-deployment and executable verification have not started. The `orchestration`
-module therefore correctly remains a placeholder; the image baseline is not a
-live-platform verification result.
+Spark/Hadoop JAR High findings still require permanent disposition. Its
+gigabyte-scale host assembly path is superseded by `P1-4.1-S2`. The developer
+harness and offline guardrails are implemented, but live lifecycle acceptance is
+paused pending a published registry-layer image digest. Executable orchestration
+verification has not started. The `orchestration` module therefore correctly
+remains a placeholder; neither the historical image nor offline harness is a
+live-platform verification result. See
+[`airflow_spark_runtime_reassessment_20260818.md`](../docs/implementation/airflow_spark_runtime_reassessment_20260818.md).
 
 ## Quality Gate
 

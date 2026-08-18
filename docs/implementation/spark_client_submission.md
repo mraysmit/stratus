@@ -177,9 +177,9 @@ cost real time to diagnose:
   3.4.1 called `Subject.getSubject`, which JDK 24 permanently disabled, so the
   raw-object path failed on the workstation while Iceberg's S3 client worked.
   Hadoop 3.4.3 contains HADOOP-19212 and uses the replacement Subject API. The
-  verifier now runs that line on Java 26 and the S3A round trip is mandatory;
+  verifier now runs that line on the repository-standard Java 21 runtime and the S3A round trip is mandatory;
   the version-based assumption was removed. The Spark containers remain on
-  Spark 4.1.2's supported Java 17 component runtime.
+  Spark 4.1.2's supported Java 21 component runtime.
 - **Polaris refuses rather than filters.** A principal granted nothing does not
   receive an empty list; it receives
   `not authorized for op LIST_NAMESPACES`, naming the principal and the roles

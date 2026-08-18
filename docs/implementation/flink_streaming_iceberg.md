@@ -29,7 +29,7 @@ The developer profile may write verification tables with reduced Flink paralleli
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Flink host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Streaming job artifacts target the Java 17 runtime selected in Increment 10.
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Streaming job artifacts target the Java 21 runtime selected in Increment 10.
 - Flink target is `2.1.3`, the latest patch in the Iceberg 1.11.0-compatible Flink 2.1 line
 - Iceberg target is `1.11.0`
 - Flink Kafka Connector target is `5.0.0-2.1`

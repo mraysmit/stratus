@@ -217,7 +217,7 @@ For a smaller lab, co-locate roles on fewer hosts only if the runbook labels the
 - firewall rules opened for selected Ozone service ports
 - TLS certificates for S3 Gateway and Ozone web endpoints
 - Kerberos and Ranger planned for production-like environments
-- Maven 3.9+ and JDK 25 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- Maven 3.9+ and JDK 21 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 
 ### Version discipline
 

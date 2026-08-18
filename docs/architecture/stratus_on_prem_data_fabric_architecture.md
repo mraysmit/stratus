@@ -628,6 +628,22 @@ The initial deployment uses Airflow 3.x with one API server, one DAG processor, 
 
 Airflow's metadata database is part of the control plane and must be backed up. Losing it means losing run history, task state, retry state, and operational audit context.
 
+Airflow image assembly and Airflow deployment are separate lifecycle stages. The
+control-plane layer is based on the pinned official Airflow image; the Spark
+submission layer is sourced from a pinned official Spark Java 21 image through
+OCI registry layers. Spark and PySpark distributions are not copied as duplicate
+gigabyte-scale artifacts through a developer workstation build context. The
+result is built, scanned, published, and recorded once, then consumed by immutable
+digest during deployment.
+
+Developer lifecycle tests never build or scan images. Repository guardrails,
+candidate-image smoke tests, Airflow lifecycle tests, real Spark submission, and
+release security assessment are separate gates with phase timings. Live tests
+reuse a suite-scoped stack where isolation allows and use unique run identifiers
+instead of repeatedly starting the data plane for tiny assertions. The dated
+decision and measured baseline are recorded in
+[`airflow_spark_runtime_reassessment_20260818.md`](../implementation/airflow_spark_runtime_reassessment_20260818.md).
+
 ---
 
 ### 4.9 Trino
@@ -1770,7 +1786,7 @@ Minimum version matrix to maintain:
 
 | Component | Version discipline |
 |---|---|
-| Java | use Java 25 LTS for Stratus-owned builds and verifier images; pin the vendor and latest approved Java 25 patch; compile component-bound artifacts with the JDK 25 toolchain using the `--release` target supported by that component runtime |
+| Java | use Java 21 LTS for Stratus-owned builds, verifier images, and component runtimes where supported; pin the vendor and latest approved Java 21 patch; component-mandated exceptions require an explicit owner, version pin, evidence, and removal trigger |
 | Ceph RGW | choose a supported Ceph release and pin all images/packages; do not use `latest` |
 | Apache Polaris | pin the catalog release and validate REST catalog behavior against Iceberg clients |
 | Apache Iceberg | align Java API, Spark runtime, Flink runtime, and Trino connector expectations |
@@ -1786,10 +1802,10 @@ Current Phase 1 target baseline as of 2026-08-17:
 
 | Component | Target |
 |---|---|
-| Stratus Java build and verifier baseline | Java 25 LTS, latest approved patch |
+| Stratus Java build and verifier baseline | Java 21 LTS, latest approved patch |
 | Java build tool | Apache Maven 3.9.16; Maven 4 remains pre-GA and is not the production build baseline |
 | OCI runtime baseline | Podman 5.8.2 preferred; Docker Engine 29.5.3 permitted where selected and component-supported; exact package and patch pinned per environment |
-| Component runtime exceptions | Spark 4.1 uses its supported Java 17 runtime; Airflow's Spark client uses Java 21; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
+| Component runtime exceptions | Spark 4.1 and Airflow's Spark client use the Java 21 baseline; Trino 482 requires Java 25 and remains an explicit component exception; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |
@@ -1825,8 +1841,8 @@ The following contract applies to every increment:
 - verification results are written to a dedicated evidence volume or collected from standard output; the application artifact and runtime filesystem remain read-only where practical
 - Dockerfiles and Containerfiles are build inputs executed by the build system, never ad hoc production-host build instructions
 - `spark-submit`, Flink job submission, Airflow task execution, and similar commands must reference an already-built, checksummed job artifact
-- the standard Stratus build JDK and verifier runtime is Java 25 LTS at the latest approved patch level
-- the JDK 25 build toolchain may emit a lower bytecode/API target with `--release` only when a third-party runtime does not support Java 25; the exception, owning component, target release, and removal trigger must be recorded in the version matrix
+- the standard Stratus build JDK, verifier runtime, and supported component runtime is Java 21 LTS at the latest approved patch level
+- a component may use a different Java release only when its selected upstream release requires it; the exception, owner, pinned runtime, evidence, and removal trigger must be recorded in the version matrix
 
 An increment document may show a build-system command such as `mvn verify` only in a clearly labelled build/publish stage. Its deployment and acceptance steps must execute the published verifier image without invoking Maven, Gradle, a compiler, or a package build. Verifier images use the verifier artifact as their entrypoint, accept configuration through a protected environment file or approved secret injection, mount trust material read-only, and write only to a dedicated evidence mount.
 
@@ -1988,7 +2004,7 @@ Get them wrong and you will just have an expensive collection of tools.
 
 ## 18. Source References
 
-- OpenJDK JDK 25: https://openjdk.org/projects/jdk/25/
+- OpenJDK JDK 21: https://openjdk.org/projects/jdk/21/
 - Oracle Java SE Support Roadmap: https://www.oracle.com/java/technologies/java-se-support-roadmap.html
 - Apache Iceberg documentation: https://iceberg.apache.org/docs/latest/
 - Apache Iceberg REST Catalog spec: https://iceberg.apache.org/docs/latest/rest-catalog/

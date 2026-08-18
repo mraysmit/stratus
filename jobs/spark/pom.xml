@@ -17,12 +17,10 @@
 
     <properties>
         <!--
-          The approved Spark runtime image is built on Java 17, so these
-          classes must target it. The repository default is 25, which would
-          produce a jar the cluster refuses with UnsupportedClassVersionError
-          only at submission time.
+          Java 21 is the Stratus build and Spark runtime policy, so these
+          classes target the same release as the approved cluster image.
         -->
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.release>21</maven.compiler.release>
         <spark.version>4.1.2</spark.version>
         <spark.scala.binary>2.13</spark.scala.binary>
         <iceberg.spark.runtime.version>1.11.0</iceberg.spark.runtime.version>

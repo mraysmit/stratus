@@ -21,7 +21,7 @@ elapsed_ms() {
 property() {
   local key="$1"
   local value
-  value="$(awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "${LOCK_FILE}")"
+  value="$(awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit}' "${LOCK_FILE}")"
   if [[ -z "${value}" ]]; then
     log ERROR missing_lock_property "key=${key}"
     return 1
