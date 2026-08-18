@@ -63,6 +63,8 @@ final class HarnessShutdownBehaviorTest {
     private static final List<Harness> HARNESSES = List.of(
         new Harness("ceph", "platform/ceph/compose-cluster",
             "scripts/lifecycle/ceph-compose-shutdown.sh"),
+        new Harness("airflow", "platform/airflow/developer",
+            "scripts/lifecycle/airflow-compose-shutdown.sh"),
         new Harness("openbao", "platform/openbao/compose-service",
             "scripts/lifecycle/openbao-compose-shutdown.sh"),
         new Harness("polaris", "platform/polaris/compose-service",

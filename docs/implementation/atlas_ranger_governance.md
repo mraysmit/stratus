@@ -23,7 +23,7 @@ This increment has two explicit tracks. The developer profile uses the disposabl
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on the governance host and Trino coordinator, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Atlas and Ranger runtime Java versions remain pinned to the versions supported by the selected releases and are recorded as component-runtime exceptions where they differ from Java 25.
+- JDK 21 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Atlas and Ranger runtime Java versions remain pinned to the versions supported by the selected releases and are recorded as component-runtime exceptions where they differ from Java 21.
 - DNS resolution:
   - `atlas.stratus.local`
   - `ranger.stratus.local`

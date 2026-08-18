@@ -44,7 +44,7 @@ if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
 fi
 export CEPH_HARNESS_CA_FILE POLARIS_HARNESS_CA_FILE
 
-SPARK_BASE_IMAGE='apache/spark:4.1.2-scala2.13-java17-python3-ubuntu'
+SPARK_BASE_IMAGE='apache/spark:4.1.2-scala2.13-java21-python3-ubuntu'
 SPARK_IMAGE="${SPARK_IMAGE:-stratus/spark-runtime:dev}"
 export SPARK_BASE_IMAGE SPARK_IMAGE
 

@@ -25,7 +25,7 @@ Kafka is not the data lake, the catalog, the governance system, or the scheduler
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Kafka host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - FreeIPA manages or delegates DNS for the Kafka hostnames
 - FreeIPA Dogtag PKI issues Kafka TLS certificates
 - Kafka brokers can reach each other on the broker and controller ports
@@ -114,7 +114,7 @@ Use a pinned Kafka image or internally built image from the approved Apache Kafk
 The image must include:
 
 - Apache Kafka 4.3.1 or the approved replacement release
-- Java 25 runtime using the latest approved patch version; Kafka 4.3 fully supports Java 25 and recommends the most recent LTS
+- Java 21 runtime using the latest approved patch version, aligned with the Stratus baseline
 - JMX exporter Java agent compatible with the selected Kafka release
 - no embedded ZooKeeper dependency or startup path
 

@@ -224,7 +224,7 @@ For a smaller lab, roles may be co-located, but the lab must be clearly marked n
 - firewall rules opened for selected Ceph service ports
 - TLS certificates for RGW and dashboard endpoints
 - approved Ceph release and deployment method
-- Maven 3.9.16 and JDK 25 on the approved build worker; the verification host requires only the approved container runtime, registry access, target network access, trust material, protected configuration, and evidence storage
+- Maven 3.9.16 and JDK 21 on the approved build worker; the verification host requires only the approved container runtime, registry access, target network access, trust material, protected configuration, and evidence storage
 - approved build pipeline capable of producing the storage verifier artifact and immutable verifier image
 - approved artifact repository and container registry with checksum, digest, scan, and provenance retention
 - approved read-only trust-material path, protected verifier environment-file path, and writable evidence destination

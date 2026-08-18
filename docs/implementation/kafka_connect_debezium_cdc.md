@@ -25,7 +25,7 @@ Kafka Connect and Debezium do not replace Spark, Flink, Polaris, Iceberg, or Air
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Kafka Connect host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Kafka Connect uses the Java 25 runtime inherited from the approved Kafka 4.3 image; connector compatibility is verified in the image pipeline.
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs. Kafka Connect uses the Java 21 runtime selected by the approved Kafka 4.3 image; connector compatibility is verified in the image pipeline.
 - Kafka client truststore from Increment 8 is available
 - `svc-connect` SCRAM user exists in Kafka
 - `svc-connect` has access to Connect internal topics and connector-created CDC topics

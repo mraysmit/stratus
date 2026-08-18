@@ -20,7 +20,7 @@ The Podman topology in this document is the developer profile. Production uses t
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Spark node, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Spark job artifacts are compiled with the build-system toolchain to the Java release supported by the selected Spark runtime.
+- JDK 21 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Spark job artifacts target the same Java 21 release as the selected Spark runtime.
 - DNS resolution: `spark-master.stratus.local`, `spark-worker1.stratus.local`, `spark-worker2.stratus.local` resolve correctly
 - Nodes can reach Ceph RGW at `object-store.stratus.local` (HTTPS) and Polaris on port 8181
 - `svc-spark` Ceph RGW credentials and Polaris principal credentials from earlier increments are available
@@ -124,7 +124,7 @@ released patch line containing HADOOP-19212 for current-JDK Subject handling.
 Create `platform/spark/image/Dockerfile` in the Stratus repository:
 
 ```dockerfile
-FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
+FROM apache/spark:4.1.2-scala2.13-java21-python3-ubuntu
 
 USER root
 
@@ -137,12 +137,11 @@ COPY jars/ /opt/spark/jars/
 USER spark
 ```
 
-Java 26 is the Stratus build and verifier baseline. Spark 4.1.2 does not list
-Java 26 as a supported runtime, so the selected cluster image remains on Java
-17 and jobs remain compiled with `--release 17`. The external verification
-driver deliberately runs on Java 26 as a tested compatibility exception; the
-live client, S3A, catalog, worker-distribution and latency checks are its
-evidence. This is not a claim of upstream Spark support for Java 26.
+Java 21 is the Stratus build, verifier, and component-runtime baseline. Spark
+4.1.2 lists Java 21 as supported, so the cluster image, submitted job artifacts,
+and external verification driver use one policy without a Spark-specific Java
+exception. The live client, S3A, catalog, worker-distribution, and latency checks
+remain the required compatibility evidence after changing the runtime image.
 
 ### Build-system image publication
 

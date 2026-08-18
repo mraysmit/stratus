@@ -11,7 +11,7 @@
 # Versions are the Increment 3 approved matrix (spark_compute.md section 5):
 #   stratus-iceberg-aws-runtime     Iceberg Spark 4.1 1.11.0, AWS SDK relocated
 #   hadoop-client / hadoop-aws      3.4.3  (+ its resolved runtime dependencies)
-FROM apache/spark:4.1.2-scala2.13-java17-python3-ubuntu
+FROM apache/spark:4.1.2-scala2.13-java21-python3-ubuntu
 
 USER root
 

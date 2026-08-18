@@ -22,7 +22,7 @@ The one-coordinator/two-worker Podman layout and HTTP examples are the developer
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Trino node, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs. Trino 482 runs on Java 25 using the latest approved Java 25 patch image.
+- JDK 21 and Maven 3.9.16 are the Stratus build and verifier baseline. Trino 482 is an explicit component-runtime exception: it requires Java 25 and uses the latest approved Java 25 patch image. The exception must be retested and removed or re-approved when the Trino version changes.
 - DNS resolution:
   - `trino-coordinator.stratus.local`
   - `trino-worker1.stratus.local`

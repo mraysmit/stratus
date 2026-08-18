@@ -17,7 +17,7 @@ Increment 2 delivers Apache Polaris as the central REST catalog and Apache Icebe
 - Increment 1 complete in the target track — Ceph RGW cluster running, buckets and service accounts in place
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on the Polaris host, or a newer approved stable patch after regression testing
-- JDK 25 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
+- JDK 21 and Maven 3.9.16 on the approved build worker; the verification host requires only the approved container runtime and verifier runtime inputs
 - DNS resolution: `polaris.stratus.local` resolves to the Polaris host
 - `svc-polaris` S3 credentials from Increment 1 are available
 
