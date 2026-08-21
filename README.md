@@ -1,6 +1,8 @@
 
 <img src="docs/images/stratus-logo.png" alt="Stratus logo: an iceberg beneath a waterline, capped by a cloud and mountain peak" width="220">
 
+# Stratus
+
 An on-prem data fabric platform built on open standards, governed data lifecycle, and separated compute concerns.
 
 The foundational decision is that **Apache Iceberg is the mandatory table abstraction**. Every analytical dataset — bronze, silver, and gold — is an Iceberg table. Without that constraint the platform degenerates into a file swamp.
@@ -45,14 +47,14 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 
   ┌─────────────────────────────────┐      ┌──────────────────────────────────────┐
   │      Apache Polaris             │      │   Kafka / Kafka Connect / Debezium   │
-  │      REST Catalog               │      │   (streaming stage — CDC + events)   │
+  │      REST Catalog               │      │ (streaming capability — CDC/events)  │
   │  metadata control plane         │      │                                      │
   │  consulted by all engines       │      │                                      │
   └─────────────────────────────────┘      └──────────────────────────────────────┘
 
   ┌──────────────────────────────────────────────────────────────────────────────┐
   │ Governance / Control Plane                                                   │
-  │ Apache Atlas (JanusGraph + embedded Solr) — metadata, lineage, glossary     │
+  │ Apache Atlas — metadata, lineage, glossary, classification, ownership       │
   │ Apache Ranger — policy enforcement, classification-driven access control     │
   │ Airflow — orchestration, scheduling, promotion gates, maintenance            │
   │ FreeIPA — Kerberos, LDAP, PKI          Keycloak — OIDC for REST services   │
@@ -69,9 +71,9 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 | **Apache Spark** | Batch ETL/ELT, backfills, historical reprocessing, quality checks, silver/gold materialisation |
 | **Apache Flink** | CDC ingestion, event streams, continuous enrichment, near-real-time Iceberg writes |
 | **Trino** | Default shared interactive SQL query plane over governed Iceberg datasets |
-| **Apache Kafka** | Durable event backbone for CDC and streaming (streaming stage) |
-| **Kafka Connect** | Connector framework for source system integration (streaming stage) |
-| **Debezium** | CDC connector — captures database change events into Kafka (streaming stage) |
+| **Apache Kafka** | Durable event backbone for CDC and streaming |
+| **Kafka Connect** | Connector framework for source system integration |
+| **Debezium** | CDC connector — captures database change events into Kafka |
 | **Apache Atlas** | Technical metadata catalog, business glossary, lineage, classification, ownership |
 | **Apache Ranger** | Policy enforcement — classification-driven access control across all engines |
 | **Apache Airflow** | Bounded workflow orchestration, Spark scheduling, promotion gates, table maintenance |
@@ -80,13 +82,13 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 | **OpenBao** | Platform secret store — pull-based service-credential distribution |
 | **Prometheus + Grafana** | Metrics collection, dashboards, and alerting |
 | **Grafana Loki** | Log aggregation |
-| **Firebolt Core** | Optional low-latency SQL serving over curated Iceberg datasets (serving stage) |
+| **Firebolt Core** | Optional low-latency SQL serving over curated Iceberg datasets |
 
 **Apache Pulsar** was evaluated as the event backbone and is documented as a qualified alternative rather than adopted. It would gain independent broker/storage scaling, tiered-storage offload onto the existing Ceph RGW cluster, and native multi-tenancy; it would cost a three-part runtime, a second CDC runtime for Oracle and SQL Server, and — because Apache Atlas supports Kafka only for entity change notification — a permanent second messaging system rather than a replacement. The evaluation and its reconsideration triggers are recorded in the architecture document.
 
 ## Repository Organization
 
-The monorepo is organized by stable capability, not implementation sequence:
+The monorepo is organized by stable capability:
 
 | Directory | Purpose |
 |---|---|
@@ -94,19 +96,21 @@ The monorepo is organized by stable capability, not implementation sequence:
 | `jobs/` | Spark and Flink workloads |
 | `verification/` | executable platform conformance suites |
 | `platform/` | open-source product integration and deployment assets |
-| `environments/` | developer, acceptance, and production inventory and overlays without secrets |
+| `environments/` | environment inventory and overlays without secrets |
 | `operations/` | monitoring, alerting, backup/restore, security, drills, and runbooks |
 | `testing/` | cross-component end-to-end and non-functional suites |
 | `schemas/` | shared governed event and data contracts |
 | `build-support/` | centralized dependency and Maven build policy |
 | `docs/` | architecture, decisions, implementation, operations, and reference documentation |
 | `scripts/` | repository maintenance tooling (license and copyright headers) |
-| `evidence/` | verification and acceptance evidence anchor; generated evidence is not committed |
+| `evidence/` | verification and operational evidence anchor; generated evidence is not committed |
 | `logs/` | git-ignored local Maven build logs, created per workstation |
 
 The authoritative layout table — including the placement rules for new artifacts and the guardrail test that enforces the directory set — is `docs/reference/repository-layout.md`.
 
-The current executable module is the storage conformance verifier in `verification/storage/`. The corresponding Docker/Podman environment is the Ceph Compose cluster in `platform/ceph/compose-cluster/`.
+Maven conformance modules live under `verification/`. Spark's executable tests
+are under `platform/spark/tests/`, with packaged workloads under `jobs/spark/`.
+Each verification directory corresponds to a stable platform capability.
 
 Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versions are owned by `build-support/stratus-build-parent`. Child module POMs do not pin dependency or plugin versions.
 
@@ -120,12 +124,152 @@ Dependency versions are owned by `build-support/stratus-bom`. Build-plugin versi
 
 All three zones are implemented as **Iceberg tables**, not folder conventions.
 
+## Governance, Accountability, and Traceability
+
+Governance in Stratus is an operating contract, not just a catalog screen. Every
+governed dataset must be attributable to named accountable identities, every
+material processing step must emit durable evidence, and every control must
+identify both an accountable owner and an independent evidence approver.
+
+The terms below follow the common distinction that lineage explains where data
+came from and how it changed, while traceability adds the evidence needed to
+verify integrity, access, responsibility, and control across the lifecycle.
+External overviews include [SAP's data-governance
+guide](https://www.sap.com/hk/resources/what-is-data-governance), [Data Dynamics'
+traceability glossary](https://www.datadynamicsinc.com/glossary/data-traceability/),
+and [Atlan's lineage and traceability
+comparison](https://atlan.com/data-lineage-vs-data-traceability/). The normative
+Stratus requirements remain the repository architecture, capability
+specifications, and operational controls.
+
+### 1. Accountability & Ownership
+
+Every Iceberg table, source, pipeline, quality rule, policy, and data product must
+have a named owner. “Data team” or an unowned service account is not sufficient.
+Atlas is the target system of record for dataset `owner`, `steward`, `domain`,
+`source`, `zone`, classification, quality status, and latest snapshot identity.
+Control records connect changes to an accountable owner, approver, evidence
+location, affected datasets, and applicable policy.
+
+The names themselves are environment-specific and therefore are not hard-coded
+in this README. In a deployed environment, each owner and steward field must
+resolve to an active person or managed group with contact, escalation, delegate,
+and review-date information; stale or unresolvable ownership fails governance
+reconciliation.
+
+The minimum lifecycle assignment is:
+
+| Lifecycle stage | Named accountability | Required responsibility and evidence |
+|---|---|---|
+| Source onboarding and landing | Source-system owner and data steward | Approve purpose, schema contract, sensitivity, retention, expected volume, and landing access; record the source identity and approval. |
+| Bronze ingestion | Ingestion/pipeline owner and source-domain steward | Preserve source fidelity, identify the producer and run, quarantine invalid input, and reconcile landed versus written records. |
+| Silver conformance | Transformation owner and domain data steward | Own mapping, deduplication, reference data, schema changes, quality rules, and failed-record disposition. |
+| Gold products and metrics | Data-product owner and metric/business steward | Approve definitions, fitness for use, consumer expectations, freshness, and material changes to published metrics. |
+| Access and query | Security policy owner and dataset steward | Approve least-privilege policy, classifications, exceptions, periodic access review, and allow/deny evidence. |
+| Movement, export, or sharing | Pipeline/service owner and receiving steward | Record source, destination, purpose, run identity, transformation, receiving owner, and transfer result. |
+| Retention, legal hold, and deletion | Data owner, compliance approver, and storage custodian | Approve retention and hold rules; prove snapshot expiry, object deletion, exceptions, and final disposition without silently removing audit evidence. |
+| Platform operation and recovery | Platform service owner and recovery control approver | Own availability, backup/restore, monitoring, incident response, recovery evidence, and unresolved risk. |
+
+One writer owns each table at a time. Ownership changes, schema changes, policy
+changes, quality overrides, and retention exceptions require an identified
+approver and a durable record. The full metadata and enforcement contract is in
+[the Atlas and Ranger governance
+specification](docs/implementation/atlas_ranger_governance.md).
+
+### 2. Compliance & Auditing
+
+Stratus is designed to produce evidence that an organization can use in a legal,
+regulatory, or internal-control assessment. It does **not** make a deployment
+GDPR-, HIPAA-, or otherwise compliant by itself. Applicability, lawful purpose,
+retention, consent, data-subject handling, access-review frequency, and evidence
+retention must be configured and approved by the responsible organization.
+
+The evidence chain is designed to answer who did what, to which data, when, why,
+through which approved process, and with what result:
+
+- **Ranger** records query allow/deny decisions with user, resource, access type,
+  timestamp, result, and policy identity.
+- **Polaris and Ceph RGW** provide catalog authorization and object-access
+  evidence at the storage and metadata boundaries.
+- **Airflow** records workflow, task, retry, approval, failure, and promotion-gate
+  outcomes under stable run identities.
+- **Spark and Flink** emit processing and lineage payloads linking inputs,
+  outputs, jobs, code/artifact versions, and run identities.
+- **Iceberg** snapshots preserve table-state history, schema evolution, and the
+  metadata required to identify which files composed a table state.
+- **Atlas** records ownership, classification, glossary, entity, and lineage
+  state; governance reconciliation detects missing or stale metadata.
+- **Git, change records, and evidence bundles** connect configuration and code
+  changes to reviewers, approved artifacts, control results, exceptions, and
+  audit evidence.
+
+Audit records are protected operational data: they require access control,
+retention, backup, time synchronization, integrity monitoring, and tested
+retrieval. General traceability guidance similarly treats the lifecycle record as
+an audit trail for governance and compliance ([Monte Carlo](https://montecarlo.ai/blog-data-traceability-101));
+the GDPR accountability principle is defined in Article 5(2) of the [official EU
+regulation](https://eur-lex.europa.eu/eli/reg/2016/679/oj).
+
+### 3. Data Integrity & Quality
+
+Traceability must show whether data remained accurate and reliable, not merely
+that a job ran. Stratus therefore links every quality result to the dataset,
+snapshot, rule version, pipeline run, observed value, threshold, severity, and
+owner responsible for disposition.
+
+- Spark and Flink validate schema, completeness, uniqueness, freshness,
+  referential integrity, reconciliation totals, and business rules.
+- Results are appended to `platform.quality_check_results`; clean, blocking,
+  warning, and missing-result cases are distinguishable.
+- Blocking failures stop promotion. No result is never interpreted as a pass.
+- Iceberg snapshots and time travel support before/after comparison and
+  investigation without relying on mutable folder state.
+- Atlas carries the current quality status and latest quality-run identity so
+  discovery does not hide known defects.
+- Overrides require a named steward, reason, scope, expiry, affected snapshot,
+  and approval record.
+
+This implements the principle that lineage tracks movement while traceability
+validates integrity at each step, described in [Atlan's
+comparison](https://atlan.com/data-lineage-vs-data-traceability/) and the [DEV
+Community overview supplied for this
+review](https://dev.to/buzzgk/data-traceability-key-concepts-and-best-practices-15f5).
+
+### 4. Lineage Mapping
+
+The required lineage graph follows data from source to consumption:
+
+```text
+source system / file / CDC record
+  -> landing object or Kafka topic
+  -> bronze Iceberg table and snapshot
+  -> silver transformation and snapshot
+  -> gold product, metric, or semantic view
+  -> Trino/serving query, report, API, or downstream product
+```
+
+Every process edge records the input and output dataset identities, pipeline/job
+identity, immutable code or artifact version, `run_id`, event time, processing
+time, and outcome. Dataset and process lineage is mandatory; column-level lineage
+is added where the transformation contract can produce it reliably. Spark and
+Flink emit the same lineage contract, while Atlas publication and reconciliation
+keep batch, streaming, and CDC metadata consistent.
+
+Lineage must survive retries, backfills, compaction, snapshot expiry, replay, and
+recovery. Maintenance may replace physical files without pretending that the
+logical dataset history or accountable processing chain disappeared. This use of
+lineage to expose origin, movement, and transformation is consistent with the
+[Vanta governance overview](https://www.vanta.com/collection/grc/data-governance),
+[Data Dynamics traceability
+definition](https://www.datadynamicsinc.com/glossary/data-traceability/), and
+[Hyperbots traceability glossary](https://www.hyperbots.com/glossary/data-traceability).
+
 ## Data Quality
 
 The quality subsystem is built entirely from platform components — no additional framework.
 
 - **Spark** executes quality checks as bounded jobs (schema, completeness, uniqueness, freshness, referential integrity, business rules)
-- **Iceberg** stores quality results in `platform.quality_check_results` — append-only, permanent audit trail, partitioned by zone and check date
+- **Iceberg** stores quality results in `platform.quality_check_results` — append-only durable evidence, partitioned by zone and check date and retained under approved policy
 - **Airflow** enforces promotion gates — blocking check failures halt the pipeline
 - **Atlas** carries current quality status as a metadata attribute on every dataset
 - **Trino** provides ad-hoc query access to quality results
@@ -151,26 +295,17 @@ The design explicitly separates three planes:
 
 ## Identity and Security
 
-The platform is Linux-only with no Windows dependencies.
+Production runtimes are Linux-only. Windows developer workstations are supported
+through Git Bash and a Linux container engine, but no platform service depends on
+a Windows runtime.
+
+The production target is:
 
 - **FreeIPA** — Kerberos authentication, LDAP directory, Dogtag PKI; single identity source of truth
 - **Keycloak** — OIDC broker backed by FreeIPA for REST-facing services
 - **Ranger** — enforces data access policy backed by FreeIPA groups; tag-based policies driven by Atlas classifications
 - **Polaris** — enforces catalog-level access at namespace and table level
 - All inter-service communication is TLS; certificates issued by FreeIPA Dogtag PKI
-
-## Delivery Sequence
-
-Each stage leaves the platform in a working, demonstrable state. Later stages build on earlier ones and are not started until the one below is accepted.
-
-| Stage | Delivers | Outcome |
-|---|---|---|
-| **Foundation** | Ceph RGW, Iceberg, Polaris, Spark, Trino, Airflow, Atlas, Ranger, FreeIPA, Keycloak, bronze/silver/gold | Governed batch lakehouse |
-| **Streaming** | Kafka, Kafka Connect, Debezium, Flink, CDC pipelines, Atlas on the platform backbone, lineage automation | Near-real-time ingestion |
-| **Serving** | Firebolt Core, curated business marts, semantic views, domain data products | Low-latency consumption |
-| **Self-Service** | Policy-driven classification, dataset discovery, domain templates | Scalable operating model |
-
-The foundation stage is the current work. Sequencing detail, work-package IDs, and acceptance gates live in the delivery plans under `docs/implementation/`, not here.
 
 ## Key Risks
 
@@ -179,7 +314,7 @@ The foundation stage is the current work. Sequencing detail, work-package IDs, a
 - **Governance shelfware** — mitigated by making metadata and lineage publication mandatory in every pipeline.
 - **Orchestration sprawl** — mitigated by keeping Airflow focused on finite workflows only.
 - **Firebolt too early** — mitigated by keeping it optional until the Iceberg and governance foundations are stable.
-- **Atlas operational underestimation** — mitigated by running embedded JanusGraph/BerkeleyDB/Solr in the foundation stage with no external cluster dependencies.
+- **Atlas operational underestimation** — mitigated by limiting embedded dependencies to the developer profile and explicitly tasking production HBase, SolrCloud/ZooKeeper, notification Kafka, backup/restore, capacity, and failure recovery.
 
 ## Running the Platform
 
@@ -220,14 +355,14 @@ All documentation lives under `docs/`, organized by kind:
 | Directory | Contents |
 |---|---|
 | `docs/architecture/` | The system architecture and enduring design constraints — the full specification, the component selection decisions, and the write-mode model |
-| `docs/decisions/` | Accepted decision records: storage baseline, harness scripting, harness networking, secret distribution, and event backbone selection |
-| `docs/implementation/` | Delivery plans and per-capability implementation documents, each carrying its own task track, verification steps, and acceptance gates |
-| `docs/operations/` | Operational runbooks, the harness operations runbook, the production-readiness acceptance gate, and dated session handover records |
+| `docs/decisions/` | Architecture decision records: storage baseline, harness scripting, harness networking, secret distribution, and event backbone selection |
+| `docs/implementation/` | Per-capability implementation, configuration, verification, and operating specifications |
+| `docs/operations/` | Operational runbooks, harness operation, monitoring, recovery, and production-readiness controls |
 | `docs/reference/` | Stable references: code style and engineering rules, Maven test and build commands, repository layout |
 | `docs/images/` | Image assets referenced by the documents above; no prose lives here |
 
-Start with the architecture for the system design, then the delivery plans for sequencing, then the document for the capability you are working on. Implementation documents are named for their capability — `ceph_storage`, `iceberg_polaris_catalog`, `spark_compute`, `airflow_orchestration`, `trino_query`, `atlas_ranger_governance`, `freeipa_keycloak_identity`, `kafka_event_backbone`, `kafka_connect_debezium_cdc`, `flink_streaming_compute`, `flink_streaming_iceberg`, `atlas_streaming_lineage`, and `streaming_production_readiness`.
+Start with the architecture for the system design, then use the specification for the capability you are working on. Implementation documents are named for their capability — `ceph_storage`, `iceberg_polaris_catalog`, `spark_compute`, `airflow_orchestration`, `trino_query`, `atlas_ranger_governance`, `freeipa_keycloak_identity`, `kafka_event_backbone`, `kafka_connect_debezium_cdc`, `flink_streaming_compute`, `flink_streaming_iceberg`, `atlas_streaming_lineage`, and `streaming_production_readiness`.
 
 ### Naming Conventions
 
-Capability documents are named for the capability they describe, for example `ceph_storage.md` rather than `increment1_ceph.md`. Stage and increment identifiers appear only inside plan and tracking documents. Runtime artifacts, Java packages, Maven modules, images, and deployment paths must use stable capability names as well.
+Capability documents are named for the capability they describe, for example `ceph_storage.md`. Runtime artifacts, Java packages, Maven modules, images, and deployment paths must use stable capability names as well.
