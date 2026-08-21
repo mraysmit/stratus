@@ -12,12 +12,12 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 ```text
                     ┌───────────────────────────────────────────────┐
                     │                 Users / Apps                  │
-                    │ BI / SQL / APIs / ML / Data Science / AI     │
+                    │ BI / SQL / APIs / ML / Data Science / AI      │
                     └───────────────────────────────────────────────┘
                                           │
                          ┌────────────────┴────────────────┐
-                         │                                 │
-                         ▼               ▼                 ▼
+                         │                |                │
+                         ▼                ▼                ▼
           ┌─────────────────────┐  ┌──────────────┐  ┌──────────────────────┐
           │   Firebolt Core     │  │    Trino     │  │ Spark SQL / Notebook │
           │ low-latency serving │  │ shared query │  │ engineering access   │
@@ -54,10 +54,10 @@ The foundational decision is that **Apache Iceberg is the mandatory table abstra
 
   ┌──────────────────────────────────────────────────────────────────────────────┐
   │ Governance / Control Plane                                                   │
-  │ Apache Atlas — metadata, lineage, glossary, classification, ownership       │
+  │ Apache Atlas — metadata, lineage, glossary, classification, ownership        │
   │ Apache Ranger — policy enforcement, classification-driven access control     │
   │ Airflow — orchestration, scheduling, promotion gates, maintenance            │
-  │ FreeIPA — Kerberos, LDAP, PKI          Keycloak — OIDC for REST services   │
+  │ FreeIPA — Kerberos, LDAP, PKI          Keycloak — OIDC for REST services     │
   └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
