@@ -1,5 +1,13 @@
 # Stratus Implementation Plan - Phase 2
 
+> **Status: planned development work.** Phase 2 development starts only after its required Phase 1
+> development contracts are accepted. Phase 2 production deployment hardening remains deferred
+> with the rest of the production-hardening stage.
+
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 ## 1. Purpose
 
 This document defines how Stratus Phase 2 is built and verified.
@@ -17,7 +25,11 @@ References:
 
 ## 2. Phase 2 Entry Criteria
 
-Phase 2 production-profile deployment should not begin until:
+Phase 2 development implementation may begin when the Phase 1 development-system contracts it
+consumes are accepted and the Phase 1 end-to-end development regression remains green. It does not
+wait for production deployment hardening or operational-readiness signoff.
+
+The later Phase 2 production-hardening work should not begin until:
 
 - Phase 1 operational acceptance has passed.
 - Polaris, Iceberg, Ceph RGW, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are operational.
@@ -29,7 +41,10 @@ Phase 2 production-profile deployment should not begin until:
 
 Phase 2 should be delayed if the platform still cannot answer who owns a dataset, which table is the source of truth, how access is enforced, or how a failed pipeline is recovered.
 
-Developer-profile prototyping may begin earlier against isolated test topics and non-production data when it does not bypass a blocking Phase 1 architecture decision. That work may validate versions, connector packaging, schemas, and verifier code; it does not satisfy a Phase 2 entry or production gate.
+Development work uses isolated test topics and non-production data while proving the complete Kafka,
+CDC, Flink, streaming-Iceberg and lineage behavior. It may validate versions, connector packaging,
+schemas and verifier code and may satisfy Phase 2 developer gates. It does not satisfy the deferred
+production-hardening entry gate.
 
 ---
 
@@ -48,7 +63,7 @@ Increment 13 - Streaming Operations and Production Readiness
 
 Kafka comes before Kafka Connect and Debezium because Connect stores connector configuration, offsets, and status in Kafka topics. Flink comes after Kafka because the first Phase 2 streaming jobs consume Kafka topics. Streaming writes to Iceberg come after Flink because they require the runtime, checkpointing, catalog, and object-storage path to be stable.
 
-### 3.1 Developer and production tracks
+### 3.1 Sequential implementation stages
 
 | Concern | Developer profile | Production profile |
 |---|---|---|
@@ -58,20 +73,24 @@ Kafka comes before Kafka Connect and Debezium because Connect stores connector c
 | Identity and secrets | generated test identities and local protected environment files | FreeIPA/Keycloak-integrated service identities, approved secret injection, rotation, and least privilege |
 | Acceptance | startup/reset plus functional event-flow tests | shared functional regression plus security, recovery, replay, failure, capacity, observability, and runbook evidence |
 
-No Increment 8-13 production gate accepts a developer-only replica count, plaintext control API, local filesystem state, generated bootstrap identity, or untested reset procedure. Promotion is an explicit configuration change with evidence, not a relabelling of the same deployment.
+The development stage completes Increments 8-12 and their integrated streaming verification before
+any production task is activated. Increment 13 and every production (`P`) task are later-stage
+hardening/readiness work. No production gate accepts a developer-only replica count, plaintext
+control API, local filesystem state, generated bootstrap identity, or untested reset procedure.
+Those facts do not prevent development acceptance; they are inputs to the later promotion manifest.
 
-### 3.2 Phase 2 Task and Gate Tracker
+### 3.2 Phase 2 development tracker and deferred production gates
 
-The owning increment documents contain the executable task rows. Their `P2-*` IDs are canonical and must be used in issues, pull requests, evidence directories, blockers, and acceptance records. This table is the portfolio roll-up; it does not replace task-level status in the increment documents.
+The owning increment documents contain the executable task rows. Their `P2-*` IDs are canonical and must be used in issues, pull requests, evidence directories, blockers, and acceptance records. Developer tasks and gates drive the active implementation sequence. Production tasks and gates remain inactive backlog until the separate [production deployment hardening plan](stratus_production_deployment_hardening.md) is activated.
 
 | Increment | Canonical task IDs | Delivery owner | Depends on | Roll-up exit evidence | Developer gate | Production gate | Status |
 |---|---|---|---|---|---|---|---|
-| 8 Kafka event backbone | `P2-8.S1`, `P2-8.D1`-`D2`, `P2-8.P1`-`P2`, `P2-8.R1`, `P2-8.V1`, `P2-8.G-D`, `P2-8.G-P` | Data-platform owner | Phase 1 readiness | immutable artifacts, KRaft health, topic/ACL inventory, client tests, failure/rebuild evidence | Not started | Not started | Not started |
-| 9 Connect and Debezium | `P2-9.S1`, `P2-9.D1`-`D2`, `P2-9.P1`-`P2`, `P2-9.R1`, `P2-9.V1`, `P2-9.G-D`, `P2-9.G-P` | Data-integration owner | Increment 8 appropriate gate | image/plugin lock, connector/offset/schema evidence, restart/recovery results | Not started | Not started | Not started |
-| 10 Flink compute | `P2-10.S1`, `P2-10.D1`-`D2`, `P2-10.P1`-`P2`, `P2-10.R1`, `P2-10.V1`, `P2-10.G-D`, `P2-10.G-P` | Streaming-platform owner | Increment 8 appropriate gate | runtime/job artifacts, checkpoint/savepoint/HA and recovery evidence | Not started | Not started | Not started |
-| 11 Streaming Iceberg | `P2-11.S1`, `P2-11.D1`-`D2`, `P2-11.P1`-`P2`, `P2-11.R1`, `P2-11.V1`, `P2-11.G-D`, `P2-11.G-P` | Data-engineering owner | Increment 10 appropriate gate | table/commit/replay/maintenance/query evidence | Not started | Not started | Not started |
-| 12 Atlas event lineage | `P2-12.S1`, `P2-12.D1`-`D2`, `P2-12.P1`-`P2`, `P2-12.R1`, `P2-12.V1`, `P2-12.G-D`, `P2-12.G-P` | Governance owner | Increment 11 appropriate gate | event/model/publisher, reconciliation, DLQ and recovery evidence | Not started | Not started | Not started |
-| 13 Production readiness | `P2-13.E-D`, `P2-13.S1`, `P2-13.R1`-`R4`, `P2-13.V1`, `P2-13.G-P` | Platform owner | Increments 8-12 production gates | frozen manifest, completed drills, defect reruns, residual-risk decisions, signoff | Evidence only | Not started | Not started |
+| 8 Kafka event backbone | `P2-8.S1`, `P2-8.D1`-`D2`, `P2-8.P1`-`P2`, `P2-8.R1`, `P2-8.V1`, `P2-8.G-D`, `P2-8.G-P` | Data-platform owner | Applicable Phase 1 development contracts | immutable inputs, KRaft health, topic/ACL inventory and client tests in development; later hardening adds failure-domain evidence | Not started | Deferred - later stage | Development not started |
+| 9 Connect and Debezium | `P2-9.S1`, `P2-9.D1`-`D2`, `P2-9.P1`-`P2`, `P2-9.R1`, `P2-9.V1`, `P2-9.G-D`, `P2-9.G-P` | Data-integration owner | Increment 8 developer gate | image/plugin lock, connector/offset/schema evidence and development restart behavior | Not started | Deferred - later stage | Development not started |
+| 10 Flink compute | `P2-10.S1`, `P2-10.D1`-`D2`, `P2-10.P1`-`P2`, `P2-10.R1`, `P2-10.V1`, `P2-10.G-D`, `P2-10.G-P` | Streaming-platform owner | Increment 8 developer gate | runtime/job artifacts, checkpoint/savepoint and development recovery evidence | Not started | Deferred - later stage | Development not started |
+| 11 Streaming Iceberg | `P2-11.S1`, `P2-11.D1`-`D2`, `P2-11.P1`-`P2`, `P2-11.R1`, `P2-11.V1`, `P2-11.G-D`, `P2-11.G-P` | Data-engineering owner | Increment 10 developer gate | table/commit/replay/maintenance/query evidence | Not started | Deferred - later stage | Development not started |
+| 12 Atlas event lineage | `P2-12.S1`, `P2-12.D1`-`D2`, `P2-12.P1`-`P2`, `P2-12.R1`, `P2-12.V1`, `P2-12.G-D`, `P2-12.G-P` | Governance owner | Increment 11 developer gate | event/model/publisher, reconciliation and DLQ evidence | Not started | Deferred - later stage | Development not started |
+| 13 Production readiness | `P2-13.E-D`, `P2-13.S1`, `P2-13.R1`-`R4`, `P2-13.V1`, `P2-13.G-P` | Platform owner | Accepted Phase 2 development system and activated production-hardening stage | frozen manifest, completed drills, defect reruns, residual-risk decisions, signoff | Development-system evidence input | Deferred - later stage | Deferred - later stage |
 
 Valid task states are `Not started`, `In progress`, `Blocked`, `Built`, `Verified`, and `Accepted`. A roll-up may become `Accepted` only when every canonical child task required by the applicable gate is accepted and its evidence link resolves. Aggregate wording such as “appropriate gate” means the developer gate for downstream engineering and the production gate for production acceptance.
 
@@ -372,7 +391,9 @@ This traceability keeps Phase 2 from becoming a local tool installation exercise
 
 ## 12. Phase 2 Completion Gate
 
-Phase 2 is complete when:
+Phase 2 development is functionally accepted when the developer gates for Increments 8-12 and the
+integrated development streaming regression pass. The production completion conditions below are
+deferred to the later production deployment hardening and readiness stage:
 
 - [ ] Every Increment 8-12 developer shortcut has been replaced by its documented production setting and the shared functional suite has been rerun.
 - [ ] Kafka is running in KRaft mode with TLS, authentication, ACLs, retention, monitoring, and broker failure recovery.
@@ -412,6 +433,7 @@ Phase 2 should hand off:
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) - Phase 3 query acceleration and data products implementation plan
 - [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate
+- [stratus_production_deployment_hardening.md](stratus_production_deployment_hardening.md) - deferred production deployment hardening stage
 - [kafka_event_backbone.md](kafka_event_backbone.md) - Increment 8 Kafka event backbone implementation plan
 - [kafka_connect_debezium_cdc.md](kafka_connect_debezium_cdc.md) - Increment 9 Kafka Connect and Debezium CDC implementation plan
 - [flink_streaming_compute.md](flink_streaming_compute.md) - Increment 10 Flink streaming compute implementation plan

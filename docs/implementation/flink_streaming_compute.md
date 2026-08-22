@@ -1,5 +1,16 @@
 # Stratus Increment 10 - Flink Streaming Compute
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 10 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
@@ -534,7 +545,9 @@ Increment 10 is accepted when:
 - [ ] **P14** - operational runbook covers submit, stop, drain, savepoint, restore, restart, and upgrade
 - [ ] **P15** - checkpoints and savepoints use Ceph RGW durable shared paths and survive loss of a JobManager host; no production state path uses `file://`
 
-The developer gate may unblock Increment 11 engineering. Only the production gate marks Increment 10 accepted in the Phase 2 tracker.
+The developer gate marks Increment 10 functionally accepted for the development stage and unblocks
+Increment 11 engineering. The production gate remains inactive until the later production deployment
+hardening stage.
 
 ---
 

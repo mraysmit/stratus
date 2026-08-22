@@ -1,4 +1,7 @@
-.gitignore
-README.md
-scripts/
-artifacts/constraints-3.14.txt
+**
+!Dockerfile
+!requirements.lock
+!artifact-lock.properties
+!artifacts/
+!artifacts/wheelhouse/
+!artifacts/wheelhouse/**

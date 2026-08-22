@@ -1,5 +1,16 @@
 # Stratus Increment 7 — FreeIPA, Keycloak, and Security Hardening
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 7 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -8,7 +19,13 @@ Increment 7 hardens the working platform from Increments 1 through 6. It introdu
 
 This is a migration and hardening increment, not a greenfield install. The existing platform must continue to work after identity is made real.
 
-Increment 7 still has two tracks. The developer profile may use a disposable FreeIPA/Keycloak realm, local CA hierarchy, test users, and protected local secret files to exercise enrollment, OIDC, LDAPS, and certificate replacement. The production profile uses backed-up identity databases and CA state, production DNS, approved certificate profiles, managed secrets, rotation, high availability or accepted RTO/RPO, and recovery drills. Increment 7 is not accepted until the production profile has replaced the earlier local CA, local users, plaintext endpoints, and bootstrap credentials.
+The current development implementation may use a disposable FreeIPA/Keycloak realm, local CA
+hierarchy, test users, and protected local secret files to exercise the production-intended
+enrollment, OIDC, LDAPS, authorization and certificate-replacement behavior. Its developer gate
+marks the functional identity layer accepted. The later production-hardening stage replaces the
+deployment fixtures with backed-up identity databases and CA state, production DNS, approved
+certificate profiles, managed secrets, rotation, high availability or accepted RTO/RPO, and
+recovery drills without changing the proven identity contracts.
 
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW storage running with all buckets and service credentials
@@ -18,7 +35,10 @@ Increment 7 still has two tracks. The developer profile may use a disposable Fre
 - Increment 5 complete — Trino query plane operational
 - Increment 6 complete — Atlas metadata and Ranger policy enforcement operational
 
-**Track rule:** Increment 7 engineering requires the developer gates of Increments 1-6 plus their production-capable configuration overlays. It does not require formal production acceptance of controls that Increment 7 supplies. After hardening, the production suites for Increments 1-7 are rerun and their production gates close before Phase 1 readiness.
+**Track rule:** Increment 7 development requires only the developer gates and functional
+configuration contracts of Increments 1-6. Production overlays, production PKI, HA, managed secret
+stores and operational readiness are not prerequisites. After the full development system is
+accepted, the later production-hardening stage activates those controls and reruns the same suites.
 
 ---
 
@@ -1104,7 +1124,10 @@ Increment 7 is accepted only when all of the following are true:
 - [ ] **P32** - The Increment 1-6 functional suites pass after all developer identities, local CAs, plaintext endpoints, and bootstrap credentials are removed from the production configuration.
 - [ ] **P33** - Increment 4, 5, and 6 verification behavior still passes after hardening
 
-The developer gate supports regression work. Only the production gate completes the Phase 1 batch, query, governance, and identity foundation and permits operational-readiness signoff.
+The developer gate completes Increment 7 for the current development stage. After all Phase 1
+developer gates pass, the integrated development-system acceptance—not a production gate—is the
+next active milestone. Production gates and operational-readiness signoff belong to the later
+production deployment hardening stage.
 
 ---
 
