@@ -1,5 +1,9 @@
 # Verification
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 This directory contains executable platform conformance suites. Each verifier is an independently testable Maven module and may own an image under its local `image/` directory.
 
 Verifiers test stable platform requirements rather than implementation increments. They must not contain administrator credentials, environment inventory, or third-party service deployment configuration.
@@ -17,17 +21,18 @@ Current modules:
 | `governance` | Metadata and policy — Apache Atlas + Apache Ranger | Placeholder |
 | `identity` | Identity and security — FreeIPA + Keycloak | Placeholder |
 
-Orchestration status checkpoint (2026-08-18): the shared Airflow 3.3.1 image
-baseline is accepted for developer use under `WAIVER-P1-4.1-S1-20260817`
-through 2026-09-16. Production promotion is prohibited. The 35 unique residual
-Spark/Hadoop JAR High findings still require permanent disposition. Its
-gigabyte-scale host assembly path is superseded by `P1-4.1-S2`. The developer
-harness and offline guardrails are implemented, but live lifecycle acceptance is
-paused pending a published registry-layer image digest. Executable orchestration
-verification has not started. The `orchestration` module therefore correctly
-remains a placeholder; neither the historical image nor offline harness is a
-live-platform verification result. See
-[`airflow_spark_runtime_reassessment_20260818.md`](../docs/implementation/airflow_spark_runtime_reassessment_20260818.md).
+Orchestration status checkpoint (2026-08-22): `P1-4.1-S2` produced the accepted
+Airflow 3.3.1 development image, `P1-4.1-D1` passed two complete
+LocalExecutor/PostgreSQL lifecycle cycles, and `P1-4.2-D1` passed a real packaged
+Java submission to the Spark/Polaris/Ceph development stack. The S2 scan reported
+zero Critical and 61 High occurrences across 38 unique package/CVE pairs; those
+High findings remain tracked. The `orchestration` module correctly remains a
+placeholder because `P1-4.3-V1` is only partly implemented: the landing-to-bronze
+source contract parses and registers in Airflow, but the executable verifier and
+complete live ingestion, transform, quality-halt, maintenance, retry and alert
+scenarios remain. Registry publication and readiness controls remain deferred to the
+later production-hardening stage. See
+[`platform/airflow/development-acceptance-20260822.md`](../platform/airflow/development-acceptance-20260822.md).
 
 ## Quality Gate
 

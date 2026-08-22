@@ -1,5 +1,16 @@
 # Stratus Increment 3 — Apache Spark Batch Compute
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 3 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -143,9 +154,9 @@ and external verification driver use one policy without a Spark-specific Java
 exception. The live client, S3A, catalog, worker-distribution, and latency checks
 remain the required compatibility evidence after changing the runtime image.
 
-### Build-system image publication
+### Development image build and later production publication
 
-The following container build is a build-pipeline step. It runs on an approved build worker, followed by tests, scanning, registry publication, and digest recording. Do not build the image on Spark runtime hosts. The dependency-resolution job must materialise `artifacts/s3a-runtime/` from the committed lock, reject undeclared JARs and duplicate Hadoop client classes, and verify every checksum before `podman build` runs.
+During development, the following container build runs on the development build host from pinned inputs and is followed by the local compatibility and live conformance suites. The dependency-resolution job must materialise `artifacts/s3a-runtime/` from the committed lock, reject undeclared JARs and duplicate Hadoop client classes, and verify every checksum before `podman build` runs. Registry publication, scanning, SBOM, provenance, signing, and immutable digest enforcement follow later under `P1-0.1`; do not build images on production runtime hosts.
 
 ```bash
 cd docker/spark
@@ -1093,8 +1104,8 @@ These child tasks execute Phase 1 parents `P1-3.1` through `P1-3.6`. IDs are sta
 
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done when Hadoop ABI and Ceph S3A smoke tests pass. | Build owner | P1-2 developer gate | `platform/spark/image/`; `platform/spark/aws-runtime/`; job modules; lock manifest | Scan, digest, ABI check, S3A create/read/list/delete | D1, P1-P3 | Platform owner | Revalidated 2026-08-16: the matched Hadoop 3.4.3 line, relocated Iceberg 1.11.0 AWS runtime, raw S3A path and complete pipeline passed 46/46 live tests in `spark-conformance-tests-20260816T071313Z.log`. Developer compatibility evidence is current; image scan, immutable digest publication, SBOM and provenance remain with `P1-0.1`. | In progress |
-| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Verified 2026-08-16: one loopback-published master and two workers, private tmpfs scratch, a two-core application ceiling and one-core executors passed the complete 46-test live suite with task placement on both workers. Production topology and recovery remain in `P1-3.1-P1`. | Verified |
+| `P1-3.1-S1` | `P1-3.1` | Shared | Build and lock Spark, Iceberg, S3A, job, and verifier artifacts; done for development when the pinned local image passes Hadoop ABI, Ceph S3A, and complete live compatibility checks. | Build owner | P1-2 developer gate | `platform/spark/image/`; `platform/spark/aws-runtime/`; job modules; lock manifest; local image identity | Pinned-input and duplicate-class checks, ABI check, S3A create/read/list/delete, complete live suite | D1 | Platform owner | Revalidated 2026-08-16: the matched Hadoop 3.4.3 line, relocated Iceberg 1.11.0 AWS runtime, raw S3A path and complete pipeline passed 46/46 live tests in `spark-conformance-tests-20260816T071313Z.log`. Immutable publication, scan, SBOM, and provenance remain later production deployment-hardening work under `P1-0.1`. | Accepted |
+| `P1-3.1-D1` | `P1-3.1` | Developer | Deploy idempotent reduced Spark cluster with local event history and scratch. | Data-engineering owner | `P1-3.1-S1` | `platform/spark/compose-cluster/` | repeated lifecycle, master/worker health | D1 | Platform owner | Accepted and revalidated 2026-08-16: one loopback-published master and two workers, private tmpfs scratch, a two-core application ceiling and one-core executors passed the complete 46-test live suite with task placement on both workers. Production topology and recovery remain in `P1-3.1-P1`. | Accepted |
 | `P1-3.1-V1` | `P1-3.1` | Shared | Implement correlated, sanitized Spark job and live-suite telemetry through the production SLF4J path; done when lifecycle, outcome, duration and scheduler/executor records are machine-searchable under one run ID and provider conflicts fail offline. | Data-engineering owner | `P1-3.1-D1` | `jobs/spark/`; `platform/spark/tests/`; Spark Log4j2 configuration | logging unit tests, harness guardrails, complete live transcript | D1-D2 | Platform owner | Verified 2026-08-16: commits `1d2c3b5` and `14c9fd6`; 46/46 live tests in `spark-conformance-tests-20260816T071313Z.log`, including 185 job-phase records, 30 timing summaries and per-SQL scheduler/executor statistics. Production export is deliberately separate in `P1-3.6-P2`. | Verified |
 | `P1-3.1-V2` | `P1-3.1` | Developer | Reduce live feedback latency without weakening observable contracts; done when prepared snapshots fail closed on stale inputs, one suite context supplies isolated sessions, repeated observations are batched, quality history is isolated, and test entry points are separated from verification scripts. | Data-engineering owner | `P1-3.1-V1` | `platform/spark/compose-cluster/scripts/tests/`; `platform/spark/tests/` | artifact behavior tests, harness guardrails, focused and complete live transcripts | D1-D2 | Platform owner | Verified 2026-08-16: commit `14c9fd6`; authoritative 46/46 run recorded 198 jobs and 141.894 seconds of JUnit time; relocated focused runner passed 5/5; current full offline reactor passed 213/213 after adding the task-track guard. | Verified |
 | `P1-3.1-V3` | `P1-3.1` | Verification | Add explicit cold-start, catalog, Iceberg and fixture phase metrics and establish reviewed performance baselines; done when named events cover every listed boundary, at least five comparable complete runs define an advisory baseline, and any relative regression thresholds state their sample, environment and owner. | QA/performance owner | `P1-3.1-V2` | telemetry classes; harness scripts; profiling report | correlated transcripts, baseline report, threshold decision record | P10-P13 | Platform owner | Do not turn workstation timings into blocking production limits; first executor/job, catalog initialization, scan/commit, external application lifetime and fixture boundaries remain implicit today. | Not started |
@@ -1132,7 +1143,7 @@ blocks the developer gate.
 | Two disposable lab CAs trusted by the engine — Ceph's for object storage and Polaris's for the catalog | `P1-7.4` replaces both with FreeIPA Dogtag-issued material | never fall back to plain HTTP or relax client verification to make a TLS check pass |
 | Harness-generated `svc-spark` catalog secret in the ignored `.env`, reset into Polaris on every bootstrap | `P1-3.2-P1` with Increment 7 controls | rotate after any real use; never promote a harness credential |
 | `svc-spark` holds the `catalog_admin` catalog role rather than a least-privilege engine role | `P1-3.2-P1` | a production engine principal never carries catalog administration; promotion stops until the role is narrowed and a negative test proves the boundary |
-| Runtime image pinned by tag `stratus/spark-runtime:dev`, built on the workstation from a local artifact lock | `P1-3.1-S1` under `P1-0.1` publishes it by immutable digest with scan, SBOM, and provenance | production runs by digest only; this clause shares the `P1-0.1` publication deferral and cannot be closed from a tag pin |
+| Runtime image pinned by tag `stratus/spark-runtime:dev`, built on the workstation from a local artifact lock | `P1-0.1` and `P1-3.1-P1` publish and deploy it by immutable digest with scan, SBOM, and provenance | production runs by digest only; this later-stage condition cannot be closed from a tag pin |
 | No Spark authentication or network encryption between master, workers, and driver | `P1-3.2-P1` applies Spark auth and encrypted transport | no shared or representative use until both are on; a shared lab without them is a stop condition |
 | Submission is unrestricted from any container on the harness network | `P1-3.1-P1` restricts submission | never expose the master port beyond loopback in this mode |
 
@@ -1208,7 +1219,9 @@ Increment 3 is accepted when all of the following are true:
 - [ ] **P12** - production event logs persist at `s3a://stratus-platform/spark-event-logs/` and remain readable after history-server relocation; trusted TLS, managed credentials, capacity evidence, and worker failure recovery are proven
 - [ ] **P13** - Spark master availability matches the approved RTO/RPO design or has an accepted exception
 
-The developer gate may unblock Increment 4 engineering. Only the production gate marks Increment 3 accepted in the Phase 1 tracker.
+The developer gate marks Increment 3 functionally accepted for the current development stage and
+unblocks Increment 4 engineering. The production gate remains inactive until the later production
+deployment hardening stage.
 
 ---
 

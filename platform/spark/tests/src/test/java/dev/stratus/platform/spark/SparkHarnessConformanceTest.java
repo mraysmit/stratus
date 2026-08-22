@@ -112,10 +112,8 @@ final class SparkHarnessConformanceTest {
         // is generated into the ignored .env; neither may be committed.
         String template = read(ENVIRONMENT_TEMPLATE_PATH);
 
-        assertFalse(template.contains("SPARK_RGW_ACCESS_KEY="),
-                "RGW credentials must come from the secret store, never the template");
-        assertFalse(template.contains("SPARK_RGW_SECRET_KEY="),
-                "RGW credentials must come from the secret store, never the template");
+        assertFalse(template.contains("SPARK_RGW_ACCESS_KEY="), "RGW credentials must come from the secret store, never the template");
+        assertFalse(template.contains("SPARK_RGW_SECRET_KEY="), "RGW credentials must come from the secret store, never the template");
         assertTrue(template.contains("SPARK_POLARIS_CLIENT_SECRET=\n")
                         || template.contains("SPARK_POLARIS_CLIENT_SECRET=" + System.lineSeparator()),
                 "the principal secret field must be empty in the template; startup generates it");
@@ -128,26 +126,19 @@ final class SparkHarnessConformanceTest {
         // would leave two places to change and one of them silently stale.
         String template = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
-        assertFalse(template.contains("object-store.stratus.local"),
-                "the Ceph endpoint must be rendered from connection.env, not written here");
-        assertFalse(template.contains("polaris.stratus.local"),
-                "the Polaris endpoint must be rendered from connection.env, not written here");
-        assertTrue(template.contains("__CEPH_RGW_ENDPOINT__") && template.contains("__POLARIS_ENDPOINT__"),
-                "the template must carry the placeholders the startup script fills");
+        assertFalse(template.contains("object-store.stratus.local"), "the Ceph endpoint must be rendered from connection.env, not written here");
+        assertFalse(template.contains("polaris.stratus.local"), "the Polaris endpoint must be rendered from connection.env, not written here");
+        assertTrue(template.contains("__CEPH_RGW_ENDPOINT__") && template.contains("__POLARIS_ENDPOINT__"), "the template must carry the placeholders the startup script fills");
 
-        assertTrue(read(".gitignore").contains("config/spark-defaults.conf"),
-                "the rendered configuration holds the principal secret and must never be committed");
+        assertTrue(read(".gitignore").contains("config/spark-defaults.conf"), "the rendered configuration holds the principal secret and must never be committed");
     }
 
     @Test
     void catalogAuthenticationIsExplicitRatherThanInferred() {
         String template = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
-        assertTrue(template.contains(".rest.auth.type") && template.contains("oauth2"),
-                "the REST catalog must declare OAuth2 instead of relying on credential inference");
-        assertTrue(template.contains(".oauth2-server-uri")
-                        && template.contains("__POLARIS_ENDPOINT__/api/catalog/v1/oauth/tokens"),
-                "the OAuth token endpoint must be rendered explicitly");
+        assertTrue(template.contains(".rest.auth.type") && template.contains("oauth2"), "the REST catalog must declare OAuth2 instead of relying on credential inference");
+        assertTrue(template.contains(".oauth2-server-uri") && template.contains("__POLARIS_ENDPOINT__/api/catalog/v1/oauth/tokens"), "the OAuth token endpoint must be rendered explicitly");
     }
 
     @Test
@@ -155,16 +146,10 @@ final class SparkHarnessConformanceTest {
         String compose = read(COMPOSE_PATH);
         String defaults = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
-        assertFalse(compose.contains("spark-scratch:/opt/spark/scratch"),
-                "workers must not share a named volume for Spark local scratch");
-        assertTrue(compose.contains("tmpfs:") && compose.contains("/opt/spark/scratch"),
-                "each Spark container must receive private ephemeral scratch");
-        assertTrue(defaults.contains("spark.cores.max")
-                        && defaults.contains("spark.executor.cores"),
-                "developer applications need an explicit core ceiling and executor size");
-        assertTrue(defaults.contains("spark.default.parallelism")
-                        && defaults.contains("spark.sql.shuffle.partitions"),
-                "the four-core developer cluster must not inherit Spark's 200-way shuffle default");
+        assertFalse(compose.contains("spark-scratch:/opt/spark/scratch"), "workers must not share a named volume for Spark local scratch");
+        assertTrue(compose.contains("tmpfs:") && compose.contains("/opt/spark/scratch"), "each Spark container must receive private ephemeral scratch");
+        assertTrue(defaults.contains("spark.cores.max") && defaults.contains("spark.executor.cores"), "developer applications need an explicit core ceiling and executor size");
+        assertTrue(defaults.contains("spark.default.parallelism") && defaults.contains("spark.sql.shuffle.partitions"), "the four-core developer cluster must not inherit Spark's 200-way shuffle default");
     }
 
     @Test

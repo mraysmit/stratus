@@ -4,6 +4,7 @@
 package dev.stratus.testing.guardrails;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -36,7 +37,7 @@ import org.junit.jupiter.api.Test;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-18
- * @version 1.1.0
+ * @version 1.2.0
  */
 @Tag("unit")
 final class JavaPolicyTest {
@@ -44,8 +45,6 @@ final class JavaPolicyTest {
     private static final String JAVA_RELEASE = "21";
     private static final String REQUIRED_SPARK_IMAGE_MARKER =
             "scala2.13-java" + JAVA_RELEASE + "-python3-ubuntu";
-    private static final String REQUIRED_AIRFLOW_JAVA_IMAGE =
-            "eclipse-temurin:" + JAVA_RELEASE + "-jre";
     private static final List<String> SUPERSEDED_JAVA_POLICIES = List.of(
             "Java 25", "JDK 25", "Java 26", "JDK 26");
     private static final Set<String> ALLOWED_TRINO_JAVA_POLICIES = Set.of("Java 25", "JDK 25");
@@ -83,7 +82,10 @@ final class JavaPolicyTest {
         assertTrue(sparkDockerfile.contains(REQUIRED_SPARK_IMAGE_MARKER));
         assertTrue(sparkCommon.contains(REQUIRED_SPARK_IMAGE_MARKER));
         assertTrue(airflowLock.contains("java.version=" + JAVA_RELEASE));
-        assertTrue(airflowLock.contains("java.image=" + REQUIRED_AIRFLOW_JAVA_IMAGE));
+        assertTrue(airflowLock.contains("spark.image=apache/spark:4.1.3-"
+                + REQUIRED_SPARK_IMAGE_MARKER));
+        assertFalse(airflowLock.contains("java.image="),
+                "The pinned Spark OCI stage supplies Airflow's matched Java runtime");
     }
 
     @Test
