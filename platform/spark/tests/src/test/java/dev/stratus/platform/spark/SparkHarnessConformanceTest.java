@@ -17,37 +17,73 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guardrails on the Spark harness files themselves, run offline in every
- * build. These are static assertions about the real harness, not a simulation
- * of it: the live behaviour is proven by the {@code spark-integration} suites.
+ * Offline repository contract for the Spark developer harness and its verification interface.
  *
- * <p>They exist because the rules they enforce — loopback-only ports, no
- * credential in a tracked file, no provider endpoint copied into a consumer —
- * are invisible at runtime until something is already wrong or already
- * leaked.
+ * <h2>Rationale</h2>
+ *
+ * <p>These static assertions inspect the real harness rather than a simulation. They protect rules
+ * such as loopback-only ports, no tracked credentials, provider-owned endpoint configuration,
+ * exact dependency replacement, safe focused-test artifacts, shared Spark context ownership,
+ * bounded telemetry, and non-transitive provider startup. Many failures are otherwise visible only
+ * after a secret leaks or a live environment behaves incorrectly.
+ *
+ * <h2>Proof boundary and maintenance</h2>
+ *
+ * <p>This class proves repository structure and source-level controls; the
+ * {@code spark-integration} suites prove behavior. Reusable paths use {@code *_PATH}, approved
+ * values use {@code EXPECTED_*} or the shared {@link SparkRuntimeBaseline}, mandatory collections
+ * use {@code REQUIRED_*}, and prohibited values use {@code SUPERSEDED_*}. Update those contracts
+ * with the implementation and documentation in one change, preserving a failing assertion before
+ * acceptance.
+ *
+ * <p>Developer evidence does not authorize UAT or production. Rebuild and scan immutable images,
+ * prove the live developer suite, promote the same digest to UAT for semantic, security,
+ * performance, and recovery checks, and promote the unchanged UAT-approved digest to production.
  *
  * This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-08
- * @version 1.0.0
+ * @version 1.1.0
  */
 @Tag("unit")
 final class SparkHarnessConformanceTest {
 
-    private static final Path HARNESS = LiveSparkCluster.harnessDirectory();
+    private static final Path HARNESS_ROOT = LiveSparkCluster.harnessDirectory();
+    private static final Path COMPOSE_PATH = Path.of("compose.yaml");
+    private static final Path ENVIRONMENT_TEMPLATE_PATH = Path.of(".env.template");
+    private static final Path SPARK_DEFAULTS_TEMPLATE_PATH = Path.of(
+            "config", "spark-defaults.conf.template");
+    private static final Path SPARK_CLIENT_SOURCE_PATH = Path.of(
+            "..", "tests", "src", "test", "java", "dev", "stratus", "platform", "spark",
+            "StratusSparkClient.java");
+    private static final Path AWS_RUNTIME_POM_PATH = Path.of("..", "aws-runtime", "pom.xml");
+    private static final Path COMMON_SCRIPT_PATH = Path.of(
+            "scripts", "lib", "spark-compose-common.sh");
+    private static final Path LIVE_TEST_RUNNER_PATH = Path.of(
+            "scripts", "tests", "spark-compose-run-live-tests.sh");
+    private static final Path TEST_SCRIPTS_PATH = Path.of("scripts", "tests");
+    private static final List<String> REQUIRED_TEST_ENTRY_POINTS = List.of(
+            "spark-compose-prepare-focused-tests.sh",
+            "spark-compose-run-focused-tests.sh",
+            LIVE_TEST_RUNNER_PATH.getFileName().toString());
+
+    private static String read(Path relative) {
+        try {
+            return Files.readString(HARNESS_ROOT.resolve(relative));
+        } catch (IOException exception) {
+            throw new UncheckedIOException(
+                    "Failed to read " + relative + " under " + HARNESS_ROOT, exception);
+        }
+    }
 
     private static String read(String relative) {
-        try {
-            return Files.readString(HARNESS.resolve(relative));
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to read " + relative + " under " + HARNESS, exception);
-        }
+        return read(Path.of(relative));
     }
 
     @Test
     void everyHarnessScriptCarriesTheProductPrefix() {
-        try (Stream<Path> scripts = Files.walk(HARNESS.resolve("scripts"))) {
+        try (Stream<Path> scripts = Files.walk(HARNESS_ROOT.resolve("scripts"))) {
             List<String> misnamed = scripts
                     .filter(path -> path.toString().endsWith(".sh"))
                     .map(path -> path.getFileName().toString())
@@ -62,7 +98,7 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void publishedPortsBindToLoopbackByDefault() {
-        String compose = read("compose.yaml");
+        String compose = read(COMPOSE_PATH);
 
         assertTrue(compose.contains("${SPARK_BIND_ADDRESS:-127.0.0.1}"),
                 "published ports must default to loopback");
@@ -74,7 +110,7 @@ final class SparkHarnessConformanceTest {
     void noCredentialLivesInATrackedFile() {
         // The svc-spark key pair is pulled from OpenBao and the catalog secret
         // is generated into the ignored .env; neither may be committed.
-        String template = read(".env.template");
+        String template = read(ENVIRONMENT_TEMPLATE_PATH);
 
         assertFalse(template.contains("SPARK_RGW_ACCESS_KEY="),
                 "RGW credentials must come from the secret store, never the template");
@@ -90,7 +126,7 @@ final class SparkHarnessConformanceTest {
         // ADR-P1-003: a consumer takes endpoints, network names, and the
         // catalog name from the provider's connection.env. Copying them here
         // would leave two places to change and one of them silently stale.
-        String template = read("config/spark-defaults.conf.template");
+        String template = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
         assertFalse(template.contains("object-store.stratus.local"),
                 "the Ceph endpoint must be rendered from connection.env, not written here");
@@ -105,7 +141,7 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void catalogAuthenticationIsExplicitRatherThanInferred() {
-        String template = read("config/spark-defaults.conf.template");
+        String template = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
         assertTrue(template.contains(".rest.auth.type") && template.contains("oauth2"),
                 "the REST catalog must declare OAuth2 instead of relying on credential inference");
@@ -116,8 +152,8 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void everyContainerGetsPrivateScratchAndApplicationsHaveResourceCeilings() {
-        String compose = read("compose.yaml");
-        String defaults = read("config/spark-defaults.conf.template");
+        String compose = read(COMPOSE_PATH);
+        String defaults = read(SPARK_DEFAULTS_TEMPLATE_PATH);
 
         assertFalse(compose.contains("spark-scratch:/opt/spark/scratch"),
                 "workers must not share a named volume for Spark local scratch");
@@ -134,21 +170,25 @@ final class SparkHarnessConformanceTest {
     @Test
     void imageBuildReplacesHadoopAsOneVersionAndRelocatesIcebergsAwsSdk() {
         String imagePom = read("../image/pom.xml");
-        String awsRuntimePom = read("../aws-runtime/pom.xml");
+        String awsRuntimePom = read(AWS_RUNTIME_POM_PATH);
         String dockerfile = read("../image/Dockerfile");
 
-        assertTrue(imagePom.contains("<hadoop.aws.version>3.4.3</hadoop.aws.version>"),
-                "Hadoop 3.4.3 contains the newer-JDK Subject compatibility fix");
+        assertTrue(imagePom.contains("<hadoop.aws.version>"
+                        + SparkRuntimeBaseline.HADOOP_VERSION + "</hadoop.aws.version>"),
+                "Hadoop " + SparkRuntimeBaseline.HADOOP_VERSION
+                        + " contains the newer-JDK Subject compatibility fix");
         assertTrue(awsRuntimePom.contains("<pattern>software.amazon</pattern>"),
                 "all Iceberg-bundled Amazon libraries must be relocated away from Hadoop S3A");
-        assertTrue(dockerfile.contains("hadoop-client-api-3.4.2.jar")
-                        && dockerfile.contains("hadoop-client-runtime-3.4.2.jar"),
+        assertTrue(dockerfile.contains(
+                                SparkRuntimeBaseline.baseHadoopJar("hadoop-client-api"))
+                        && dockerfile.contains(
+                                SparkRuntimeBaseline.baseHadoopJar("hadoop-client-runtime")),
                 "the base Hadoop clients must be replaced, never mixed with the selected version");
     }
 
     @Test
     void dependencyOnlyAwsRuntimeDoesNotInvokeTaggedSurefire() {
-        String awsRuntimePom = read("../aws-runtime/pom.xml");
+        String awsRuntimePom = read(AWS_RUNTIME_POM_PATH);
 
         assertTrue(awsRuntimePom.contains("<artifactId>maven-surefire-plugin</artifactId>")
                         && awsRuntimePom.contains("<skipTests>true</skipTests>"),
@@ -184,7 +224,7 @@ final class SparkHarnessConformanceTest {
                         && suiteContext.contains("withApplicationCores(2)"),
                 "the shared two-core context must be owned and closed by JUnit's root store");
 
-        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+        String client = read(SPARK_CLIENT_SOURCE_PATH);
         assertTrue(client.contains("ownsSparkContext")
                         && client.contains("if (ownsSparkContext)")
                         && client.contains("session.catalog().clearCache()"),
@@ -221,15 +261,12 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void testEntryPointsHaveTheirOwnClearlyNamedDirectory() {
-        Path tests = HARNESS.resolve("scripts/tests");
+        Path tests = HARNESS_ROOT.resolve(TEST_SCRIPTS_PATH);
         assertTrue(Files.isDirectory(tests),
                 "Spark test entry points must live under scripts/tests");
 
         try (Stream<Path> scripts = Files.list(tests)) {
-            assertEquals(List.of(
-                            "spark-compose-prepare-focused-tests.sh",
-                            "spark-compose-run-focused-tests.sh",
-                            "spark-compose-run-live-tests.sh"),
+            assertEquals(REQUIRED_TEST_ENTRY_POINTS,
                     scripts.filter(path -> path.toString().endsWith(".sh"))
                             .map(path -> path.getFileName().toString())
                             .sorted()
@@ -285,8 +322,8 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void s3aUploadsDoNotRequireWindowsNativeUtilities() {
-        String defaults = read("config/spark-defaults.conf.template");
-        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+        String defaults = read(SPARK_DEFAULTS_TEMPLATE_PATH);
+        String client = read(SPARK_CLIENT_SOURCE_PATH);
 
         assertTrue(defaults.contains("spark.hadoop.fs.s3a.fast.upload.buffer    bytebuffer")
                         && client.contains("spark.hadoop.fs.s3a.fast.upload.buffer\", \"bytebuffer"),
@@ -295,8 +332,8 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void sqlTimestampsUseUtcInClusterAndClientMode() {
-        String defaults = read("config/spark-defaults.conf.template");
-        String client = read("../tests/src/test/java/dev/stratus/platform/spark/StratusSparkClient.java");
+        String defaults = read(SPARK_DEFAULTS_TEMPLATE_PATH);
+        String client = read(SPARK_CLIENT_SOURCE_PATH);
 
         assertTrue(defaults.contains("spark.sql.session.timeZone")
                         && defaults.contains("UTC"),
@@ -307,7 +344,8 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void onlyThePackagedSubmissionSmokeTestStartsAFreshSparkDriver() {
-        Path tests = HARNESS.resolve("../tests/src/test/java/dev/stratus/platform/spark").normalize();
+        Path tests = HARNESS_ROOT.resolve(
+                "../tests/src/test/java/dev/stratus/platform/spark").normalize();
         try (Stream<Path> sources = Files.list(tests)) {
             List<Path> submitters = sources
                     .filter(path -> path.toString().endsWith("Test.java"))
@@ -335,9 +373,10 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void theImageIsPinnedAndNeverLatest() {
-        assertFalse(read(".env.template").contains("SPARK_IMAGE=stratus/spark-runtime:latest"),
+        assertFalse(read(ENVIRONMENT_TEMPLATE_PATH)
+                        .contains("SPARK_IMAGE=stratus/spark-runtime:latest"),
                 "the runtime image must be a pinned tag");
-        assertTrue(read(".env.template").contains("SPARK_IMAGE="),
+        assertTrue(read(ENVIRONMENT_TEMPLATE_PATH).contains("SPARK_IMAGE="),
                 "the template must declare the runtime image");
     }
 
@@ -355,9 +394,9 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void providerSettingsRemainSourceableAfterAWindowsCheckout() {
-        String common = read("scripts/lib/spark-compose-common.sh");
+        String common = read(COMMON_SCRIPT_PATH);
         String mavenCommon = read("scripts/lib/spark-compose-maven-common.sh");
-        String liveRunner = read("scripts/tests/spark-compose-run-live-tests.sh");
+        String liveRunner = read(LIVE_TEST_RUNNER_PATH);
 
         assertTrue(common.contains("sed 's/\\r$//'"),
                 "the Bash harness must strip CRLF before sourcing tracked connection files");
@@ -369,9 +408,9 @@ final class SparkHarnessConformanceTest {
 
     @Test
     void liveRunsUseOneDeclarativeLoggingConfigurationAndCorrelationId() {
-        String compose = read("compose.yaml");
+        String compose = read(COMPOSE_PATH);
         String log4j = read("config/log4j2.properties");
-        String liveRunner = read("scripts/tests/spark-compose-run-live-tests.sh");
+        String liveRunner = read(LIVE_TEST_RUNNER_PATH);
 
         assertTrue(compose.contains("./config/log4j2.properties:/opt/spark/conf/log4j2.properties:ro"),
                 "every Spark container must use the tracked Log4j2 configuration");
@@ -429,7 +468,7 @@ final class SparkHarnessConformanceTest {
         // correct behaviour, so the quoted strings are removed before looking
         // for an invocation — otherwise this check would forbid the very
         // message it wants.
-        String common = read("scripts/lib/spark-compose-common.sh");
+        String common = read(COMMON_SCRIPT_PATH);
 
         assertTrue(common.contains("require_provider_harnesses"),
                 "the harness must check its providers are up");
