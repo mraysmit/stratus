@@ -107,7 +107,7 @@ final class AssertionQualityTest {
         // assertFalse(a && b) passes as soon as either side is false, so it
         // silently stops testing the other. It is almost never what was meant,
         // and the half that keeps passing is invisible.
-        Pattern conjunction = Pattern.compile("assertFalse\\((?:[^;]|\\n)*?&&", Pattern.DOTALL);
+        Pattern conjunction = Pattern.compile("assertFalse\\([^;]*?&&", Pattern.DOTALL);
         var violations = new ArrayList<String>();
         for (Path source : testSources()) {
             if (conjunction.matcher(Repo.read(source)).find()) {

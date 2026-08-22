@@ -23,6 +23,14 @@ conf="$HARNESS_DIR/service-identities.conf"
 rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 env_value_of() { awk -F= -v key="$1" '$1==key{print substr($0,index($0,"=")+1)}' "$HARNESS_DIR/.env"; }
+permission_actions() {
+  local permission="$1"
+  case "$permission" in
+    ro) printf '"s3:ListBucket","s3:GetObject"' ;;
+    rw) printf '"s3:ListBucket","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListBucketMultipartUploads","s3:ListMultipartUploadParts"' ;;
+    *) fail "Unsupported permission '$permission'; expected ro or rw" ;;
+  esac
+}
 
 identities=()
 declare -A display_names grants_of
@@ -31,8 +39,11 @@ while IFS='|' read -r raw_uid raw_display raw_grants; do
   [[ -z "$uid" || "$uid" == \#* ]] && continue
   display="$(trim "$raw_display")"
   grants="$(trim "$raw_grants")"
-  [[ -n "$display" && -n "$grants" ]] || fail "Malformed line in service-identities.conf for '$uid': expected <uid> | <display name> | <bucket>:rw ..."
+  [[ -n "$display" && -n "$grants" ]] || fail "Malformed line in service-identities.conf for '$uid': expected <uid> | <display name> | <bucket>:<ro|rw> ..."
   [[ "$uid" =~ ^[a-z0-9-]+$ ]] || fail "Identity '$uid' must be lowercase kebab-case"
+  for grant in $grants; do
+    permission_actions "${grant##*:}" >/dev/null
+  done
   identities+=("$uid")
   display_names["$uid"]="$display"
   grants_of["$uid"]="$grants"
@@ -89,41 +100,50 @@ for uid in "${identities[@]}"; do
   else
     log "READY rgw-role=$uid (already exists)"
   fi
-  role_resources=""
+  role_statements=""
   for grant in ${grants_of[$uid]}; do
     bucket="${grant%%:*}"
-    role_resources="${role_resources:+$role_resources,}\"arn:aws:s3:::$bucket\",\"arn:aws:s3:::$bucket/*\""
+    permission="${grant##*:}"
+    actions="$(permission_actions "$permission")"
+    statement=$(printf '{"Effect":"Allow","Action":[%s],"Resource":["arn:aws:s3:::%s","arn:aws:s3:::%s/*"]}' \
+      "$actions" "$bucket" "$bucket")
+    role_statements="${role_statements:+$role_statements,}$statement"
   done
   compose exec -T mon1 radosgw-admin role-policy put --role-name "$uid" \
     --policy-name "$uid-access" \
-    --policy-doc "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:ListBucket\",\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\",\"s3:AbortMultipartUpload\",\"s3:ListBucketMultipartUploads\",\"s3:ListMultipartUploadParts\"],\"Resource\":[$role_resources]}]}" >/dev/null
+    --policy-doc "{\"Version\":\"2012-10-17\",\"Statement\":[$role_statements]}" >/dev/null
   log "POLICY role=$uid buckets=$(printf '%s' "${grants_of[$uid]}" | tr ' ' ',')"
 done
 
 # One merged policy per bucket: put-bucket-policy replaces the whole policy,
 # so every identity granted on a bucket must appear in a single document.
-declare -A bucket_grantees
+declare -A bucket_grants
 for uid in "${identities[@]}"; do
   for grant in ${grants_of[$uid]}; do
     bucket="${grant%%:*}"
     permission="${grant##*:}"
-    [[ "$permission" == rw ]] || fail "Unsupported permission '$permission' for $uid on $bucket; only rw is defined"
-    bucket_grantees["$bucket"]="${bucket_grantees[$bucket]:-} $uid"
+    permission_actions "$permission" >/dev/null
+    bucket_grants["$bucket"]="${bucket_grants[$bucket]:-} $uid:$permission"
   done
 done
 
-for bucket in "${!bucket_grantees[@]}"; do
+for bucket in "${!bucket_grants[@]}"; do
   statements=""
-  for uid in ${bucket_grantees[$bucket]}; do
+  grantees=""
+  for identity_grant in ${bucket_grants[$bucket]}; do
+    uid="${identity_grant%%:*}"
+    permission="${identity_grant##*:}"
+    actions="$(permission_actions "$permission")"
     sid="Stratus$(printf '%s' "$uid" | sed 's/-//g')Access"
-    statement=$(printf '{"Sid":"%s","Effect":"Allow","Principal":{"AWS":["arn:aws:iam:::user/%s"]},"Action":["s3:ListBucket","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListBucketMultipartUploads","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::%s","arn:aws:s3:::%s/*"]}' \
-      "$sid" "$uid" "$bucket" "$bucket")
+    statement=$(printf '{"Sid":"%s","Effect":"Allow","Principal":{"AWS":["arn:aws:iam:::user/%s"]},"Action":[%s],"Resource":["arn:aws:s3:::%s","arn:aws:s3:::%s/*"]}' \
+      "$sid" "$uid" "$actions" "$bucket" "$bucket")
     statements="${statements:+$statements,}$statement"
+    grantees="${grantees:+$grantees,}$uid:$permission"
   done
   compose run --rm -T s3admin s3api put-bucket-policy \
     --endpoint-url "$CEPH_RGW_ENDPOINT" --bucket "$bucket" \
     --policy "{\"Version\":\"2012-10-17\",\"Statement\":[$statements]}" >/dev/null
-  log "POLICY bucket=$bucket grantees=$(trim "${bucket_grantees[$bucket]}")"
+  log "POLICY bucket=$bucket grantees=$grantees"
 done
 
 # Publish each identity's key pair to the developer secret store so
@@ -156,12 +176,14 @@ if [[ -f "$OPENBAO_HARNESS_DIR/connection.env" ]]; then
   fi
 fi
 
-# Probes: each identity must succeed on its first granted bucket and fail
-# closed on the denied bucket, which never carries a service grant.
+# Probes: each identity must read its first granted bucket. Read/write identities
+# additionally prove write/delete; read-only identities prove write denial.
+# Every identity also fails closed on the denied bucket.
 for uid in "${identities[@]}"; do
   env_base="CEPH_$(printf '%s' "$uid" | tr 'a-z-' 'A-Z_')"
   first_grant="${grants_of[$uid]%% *}"
   probe_bucket="${first_grant%%:*}"
+  probe_permission="${first_grant##*:}"
   probe="policy-probe/${uid}-$(date -u +%Y%m%dT%H%M%SZ)"
   rclone_env=(
     -e RCLONE_CONFIG_PROBE_TYPE=s3
@@ -171,13 +193,24 @@ for uid in "${identities[@]}"; do
     -e "RCLONE_CONFIG_PROBE_ENDPOINT=$CEPH_RGW_ENDPOINT"
     -e RCLONE_CONFIG_PROBE_FORCE_PATH_STYLE=true
   )
-  compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt touch "probe:${probe_bucket}/${probe}"
-  compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt deletefile "probe:${probe_bucket}/${probe}"
-  log "PASS service-identity-access uid=$uid bucket=$probe_bucket"
+  compose exec -T s3client rclone --ca-cert /certs/stratus-ca.crt touch "cephrgw:${probe_bucket}/${probe}"
+  compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt cat "probe:${probe_bucket}/${probe}" >/dev/null
+  log "PASS service-identity-read uid=$uid bucket=$probe_bucket permission=$probe_permission"
+  compose exec -T s3client rclone --ca-cert /certs/stratus-ca.crt deletefile "cephrgw:${probe_bucket}/${probe}"
+  if [[ "$probe_permission" == rw ]]; then
+    compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt touch "probe:${probe_bucket}/${probe}"
+    compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt deletefile "probe:${probe_bucket}/${probe}"
+    log "PASS service-identity-write uid=$uid bucket=$probe_bucket"
+  elif compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt touch "probe:${probe_bucket}/${probe}" >/dev/null 2>&1; then
+    compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt deletefile "probe:${probe_bucket}/${probe}" >/dev/null 2>&1 || true
+    fail "$uid must not be able to write to read-only bucket $probe_bucket"
+  else
+    log "PASS service-identity-write-denied uid=$uid bucket=$probe_bucket (failed closed as required)"
+  fi
   if compose exec -T "${rclone_env[@]}" s3client rclone --ca-cert /certs/stratus-ca.crt lsf "probe:${CEPH_RGW_DENIED_BUCKET}" >/dev/null 2>&1; then
     fail "$uid must not be able to list $CEPH_RGW_DENIED_BUCKET"
   fi
   log "PASS service-identity-denied uid=$uid bucket=$CEPH_RGW_DENIED_BUCKET (failed closed as required)"
 done
 
-log "Service identity provisioning complete: identities=${#identities[@]} buckets=${#bucket_grantees[@]}"
+log "Service identity provisioning complete: identities=${#identities[@]} buckets=${#bucket_grants[@]}"

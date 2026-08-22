@@ -29,7 +29,7 @@ property() {
   printf '%s' "${value}"
 }
 
-for command in awk curl docker sha256sum sha512sum; do
+for command in awk curl docker sha256sum; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     log ERROR missing_command "command=${command}"
     exit 1
@@ -41,10 +41,6 @@ AIRFLOW_DIGEST="$(property airflow.image.digest)"
 CONSTRAINTS_NAME="$(property constraints.name)"
 CONSTRAINTS_URL="$(property constraints.url)"
 CONSTRAINTS_SHA256="$(property constraints.sha256)"
-SPARK_NAME="$(property spark.archive.name)"
-SPARK_URL="$(property spark.archive.url)"
-SPARK_SHA512="$(property spark.archive.sha512)"
-
 mkdir -p "${WHEELHOUSE_DIR}"
 log INFO resolution_started "airflow_image=${AIRFLOW_IMAGE}@${AIRFLOW_DIGEST}"
 
@@ -88,20 +84,4 @@ MSYS_NO_PATHCONV=1 docker run --rm --user 0:0 --entrypoint /bin/bash \
   sha256sum --check resolved-artifacts.sha256
 )
 log INFO python_artifacts_verified "duration_ms=$(elapsed_ms "${step_ns}") count=$(find "${WHEELHOUSE_DIR}" -maxdepth 1 -type f ! -name resolved-artifacts.sha256 | wc -l | tr -d ' ')"
-
-step_ns="$(date +%s%N)"
-if [[ -f "${ARTIFACT_DIR}/${SPARK_NAME}" ]] && (
-  cd "${ARTIFACT_DIR}"
-  printf '%s  %s\n' "${SPARK_SHA512}" "${SPARK_NAME}" | sha512sum --check --status
-); then
-  log INFO artifact_reused "name=${SPARK_NAME}"
-else
-  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-    --output "${ARTIFACT_DIR}/${SPARK_NAME}" "${SPARK_URL}"
-fi
-(
-  cd "${ARTIFACT_DIR}"
-  printf '%s  %s\n' "${SPARK_SHA512}" "${SPARK_NAME}" | sha512sum --check
-)
-log INFO spark_artifact_verified "duration_ms=$(elapsed_ms "${step_ns}") sha512=${SPARK_SHA512}"
 log INFO resolution_completed "duration_ms=$(elapsed_ms "${START_NS}") artifact_dir=${ARTIFACT_DIR}"

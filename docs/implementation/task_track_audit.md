@@ -1,5 +1,13 @@
 # Stratus Increment Task-Track Audit
 
+> **Current interpretation (2026-08-22):** the July deficiency lists are retained as audit history.
+> The active portfolio is executing development tasks only. Production tasks are complete planning
+> backlog for a separate later stage, not current blockers.
+
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 ## 1. Purpose
 
 This audit determines whether the active Stratus increment documents can be used to assign, sequence, execute, verify, and accept implementation work. Architectural completeness, technically correct configuration examples, and completion gates are necessary but are not sufficient for implementation readiness.
@@ -46,11 +54,16 @@ Ratings used below:
 
 At the time of the initial audit, no active increment document passed the implementation-readiness standard. All 13 active increments were remediated on 2026-07-11 and now contain validated executable task tracks.
 
-The initial inventory found zero task IDs in all 13 active increment documents. The remediated suite now contains 144 unique task IDs with dependencies, owners, deliverable paths, evidence, acceptance roles, blockers, statuses, and gate mappings. Every one of the 266 numbered developer and production gate checks maps to at least one producing task.
+The initial inventory found zero task IDs in all 13 active increment documents. The remediated suite
+now contains 152 unique task IDs with dependencies, owners, deliverable paths, evidence, acceptance
+roles, blockers, statuses, and gate mappings. Every one of the 266 numbered developer and production
+gate checks maps to at least one producing task.
 
-Phase 1 is closer to usable because `stratus_implementation_plan_phase1.md` contains 47 central work-package IDs, owners, dependencies, evidence summaries, reviewers, and statuses. That tracker is a strong starting point, but it is disconnected from the increment documents and is too coarse to execute them without creating another plan. It also lacks a track column, repository/deployment artifact paths, blocker and risk fields, and task-to-gate mapping.
-
-Phase 2 has a build order and developer/production model but no work-package IDs or central tracker. Its implementation tracking is therefore missing rather than merely disconnected.
+Phase 1 and Phase 2 now have portfolio roll-ups connected to executable component task tracks.
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) rows drive current work.
+Production (`P`), production recovery (`R`) and production-gate (`G-P`) rows are deliberately
+inactive until development-system acceptance activates the separate
+[production deployment hardening plan](stratus_production_deployment_hardening.md).
 
 ---
 
@@ -74,25 +87,34 @@ Phase 2 has a build order and developer/production model but no work-package IDs
 
 The detailed findings in sections 5 through 7 record the initial deficiencies that drove remediation. They are retained as audit history; those deficiencies are closed by the implementation task-track sections now present in every active increment and by the Phase 1 and Phase 2 portfolio roll-ups.
 
-Implementation status checkpoint (2026-08-18): Increment 4 remains in progress.
-The shared Airflow 3.3.1 image task `P1-4.1-S1` is accepted for developer use
-under `WAIVER-P1-4.1-S1-20260817` through 2026-09-16. Production promotion is
-prohibited, the 35 unique residual Spark/Hadoop JAR High findings still require
-permanent disposition, and that artifact is now historical evidence rather than
-the build target. Profiling found more than 1 GB of duplicate host-side
-Spark/PySpark inputs and unacceptable Docker Desktop transfer time. `P1-4.1-S2`
-now precedes live acceptance and replaces that assembly path with pinned registry
-layers and a focused PySpark compatibility decision. The LocalExecutor/PostgreSQL
-harness and offline guardrails are implemented; `P1-4.1-D1` live lifecycle
-acceptance is paused pending the published `S2` digest. Executable orchestration
-verification, the Increment 4 developer gate, and every Increment 4 production
-task remain not started. This checkpoint updates delivery state only; the
-detailed gap lists below remain the dated 2026-07-11 audit history. See
-[`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md).
+Implementation status checkpoint (2026-08-22): Increment 4 remains in progress.
+The current Airflow image task `P1-4.1-S2` and two-cycle developer deployment
+task `P1-4.1-D1` were accepted on 2026-08-22. The S2 image uses pinned OCI source
+stages, a 9.93 MB build context, the Spark command-line runtime and lightweight
+`pyspark-client`, and passed smoke plus a zero-Critical scan gate. Its 61 High
+occurrences across 38 unique package/CVE pairs remain explicitly tracked as
+development risk. The historical S1 waiver does not apply to S2.
+
+`P1-4.2-D1` was also accepted on 2026-08-22: an immutable Airflow DAG submitted
+the packaged Java probe from the Spark 4.1.3 client to the Spark 4.1.2 developer
+cluster and proved distributed execution, Polaris/Ceph Iceberg operations,
+protected connection handling, immutable input hashes, secret-redacted output,
+cleanup and phase timings. `P1-4.3-V1` is now in progress: its first
+landing-to-bronze source contract and Airflow parse/registry proof passed, while
+the live and remaining DAG/verifier scenarios remain. The Increment 4 developer
+gate follows. Immutable publication and every Increment 4
+production task remain deferred to the later production-hardening stage. This
+checkpoint updates delivery state only; the detailed gap lists below remain the
+dated 2026-07-11 audit history. See
+[`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
 
 ---
 
-## 5. Phase 1 Findings
+## 5. Historical Phase 1 Findings from the Initial Audit
+
+Sections 5 through 9 preserve the 2026-07-11 findings and remediation instructions as audit history.
+They are not the current portfolio status and must not be used to block development work already
+covered by the remediated task tracks.
 
 ### Increment 1 - Ceph
 
@@ -187,7 +209,7 @@ Minimum remediation: define shared identity foundations followed by one migratio
 
 ---
 
-## 6. Phase 2 Findings
+## 6. Historical Phase 2 Findings from the Initial Audit
 
 ### Increment 8 - Kafka
 
@@ -227,7 +249,7 @@ Minimum remediation: create `P2-13.x` evidence-freeze, replay drill, Kafka recov
 
 ---
 
-## 7. Cross-Document Traceability Findings
+## 7. Historical Cross-Document Traceability Findings
 
 ### Phase 1 plan
 
@@ -277,7 +299,7 @@ Task rows must remain small enough that one owner can move a row to `Verified` w
 
 ---
 
-## 9. Remediation Order
+## 9. Historical Remediation Order
 
 1. Add the required task schema and ID conventions to both phase plans.
 2. Expand Increment 1 first and validate that its task track can drive actual implementation without a separate private checklist.
@@ -292,16 +314,16 @@ Task rows must remain small enough that one owner can move a row to `Verified` w
 
 ## 10. Audit Conclusion
 
-The Stratus documents currently describe what to build, how major parts should work, and what final acceptance looks like. They do not yet provide a complete mechanism for controlling the work between those points.
-
-The correct portfolio status is:
+The initial task-track deficiencies are remediated. The correct current portfolio status is:
 
 | Area | Status |
 |---|---|
 | Architecture and design consistency | Complete for the current baseline |
 | Technical implementation guidance | Substantially complete |
-| Phase 1 central work-package skeleton | Partial |
+| Phase 1 portfolio roll-up | Complete for current development tracking |
 | Phase 1 increment-level task tracking | Complete for Increments 1-7 |
 | Phase 2 task tracking | Complete for Increments 8-13 and portfolio roll-up |
 | Gate-to-task-to-evidence traceability | Complete for all numbered increment gates |
-| Overall implementation-document task-track readiness | Complete; implementation execution has not started |
+| Current implementation stage | Development implementation and functional acceptance; Increment 4 active |
+| Production deployment hardening | Planned but deliberately deferred until development-system acceptance |
+| Overall implementation-document task-track readiness | Complete for current development execution |
