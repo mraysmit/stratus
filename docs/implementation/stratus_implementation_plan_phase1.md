@@ -1,5 +1,13 @@
 # Stratus Implementation Plan - Phase 1
 
+> **Status: active development-system implementation.** The current objective is to build and
+> functionally accept the complete Phase 1 system in development. Production deployment hardening
+> is deliberately deferred to a separate later implementation stage.
+
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 ## 1. Purpose
 
 This document defines how Stratus Phase 1 is built and verified, increment by increment.
@@ -28,27 +36,38 @@ Layer 1 — Storage                    Ceph RGW object storage
 
 Implementation proceeds layer by layer. No layer is considered complete until its verification tests pass and the functional outcome is demonstrated.
 
-After Layer 7, Phase 1 closes with an operational acceptance and production-readiness review. That review is not a new platform layer; it proves that the integrated stack is supportable before production dataset onboarding or Phase 2 work begins.
+After Layer 7, Phase 1 closes its current stage with integrated development-system acceptance. That
+accepted functional baseline can unblock dependent development work, including Phase 2. The
+operational acceptance and production-readiness review occurs only in the separate later hardening
+stage, before production dataset onboarding; it is not a new platform layer.
 
-### 2.1 Developer and production tracks
+### 2.1 Implementation stages
 
-Each increment advances through two related tracks:
+Phase 1 is executed as two sequential implementation stages, not as interleaved delivery tracks:
 
-| Track | Exit intent | May unblock |
+| Stage | Exit intent | Current state |
 |---|---|---|
-| Developer profile | a new developer can start, stop, reset, and verify the capability on Docker Desktop or Podman with pinned artifacts and local test credentials | development of the next increment, provided the dependency contract is stable and the risk is recorded |
-| Production profile | the same capability runs on its supported on-prem topology with durable state, trusted TLS, managed identities and secrets, monitoring, backup/restore, failure drills, and named operators | production onboarding and the Phase 1 operational-readiness gate |
+| Development implementation and functional acceptance | the complete storage, catalog, compute, orchestration, query, governance and identity system starts, stops, resets and passes its end-to-end functional and negative verification in development | Active |
+| Production deployment hardening and readiness | the already proven system is deployed using immutable publication, supported topology, HA, capacity, managed identities and secrets, production PKI, monitoring, backup/restore, DR, release controls and named operators | Deferred until development-system acceptance |
 
-Developer progress is deliberately allowed to lead infrastructure procurement and hardening. It does not convert a reduced replica count, embedded dependency, local filesystem, local CA, plaintext control endpoint, or bootstrap identity into a production design. Every increment document must list those differences and the promotion actions that remove them. The shared functional verification suite runs in both tracks; production adds security, durability, recovery, capacity, and operational evidence.
+The development environment is functionally production-equivalent: it uses the intended component
+versions, application behavior, APIs, protocols, data contracts, authentication/authorization
+semantics and verification suites. Development may use reduced topology, local volumes, development
+credentials and trust material, and locally built artifacts. Those deployment differences are
+recorded for the later hardening stage; they do not block development tasks or developer gates.
 
-Phase 1 deliberately has an asymmetric gate order:
+Phase 1 therefore proceeds in this order:
 
-1. Developer gates for Increments 1-6 establish the working stack and unblock the next engineering increment.
-2. Increment 7 replaces cross-cutting local identities, certificates, plaintext endpoints, and bootstrap credentials.
-3. Production gates for Increments 1-7 are then closed against the hardened integrated stack. Earlier production preparation may proceed in parallel, but a gate that depends on Increment 7 controls remains open until those controls are verified.
-4. The Phase 1 operational-readiness gate runs only after every production gate is accepted.
+1. Accept the developer gates for Increments 1-7 in dependency order.
+2. Run and accept the integrated development-system verification across the complete Phase 1 stack.
+3. Freeze the development-system manifest and activate the separate
+   [production deployment hardening plan](stratus_production_deployment_hardening.md).
+4. Complete production deployment, security, availability, recovery and operational-readiness work.
 
-This is not a circular dependency: Increment 7 requires the Increment 1-6 developer contracts and production-capable configurations, not prior formal production acceptance of controls that Increment 7 itself supplies.
+Production work may expose a fundamental version, protocol or architecture incompatibility. That
+specific incompatibility returns to development for resolution. Missing production infrastructure,
+registry publication, HA, production PKI, managed secrets, capacity evidence or operational
+signoff does not prevent continued development implementation.
 
 ---
 
@@ -91,28 +110,28 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
-| P1-0.1 | Build and artifact delivery baseline | Build/platform engineering owner | None | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | In progress |
+| P1-0.1 | Production build and artifact delivery hardening | Build/platform engineering owner | Accepted development-system manifest | Approved build pipeline, artifact repository and container registry paths, immutable versioning rules, checksum/digest and provenance output, verifier-image template, protected configuration injection, and evidence export demonstrated with a smoke artifact | Platform owner and security owner | Deferred - later production-hardening stage |
 | P1-1.1 | Ceph decision due diligence | Platform architect | Architecture storage requirements | Confirmed Ceph baseline, retained comparison record, proof-of-fit targets, production topology, and explicit reconsideration triggers | Architecture owner | Accepted |
-| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | In progress - developer track accepted 2026-08-03 |
-| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | In progress - developer track accepted 2026-08-03 |
-| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | In progress - developer track accepted 2026-08-03 |
-| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | In progress - developer track accepted 2026-08-03 |
-| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-0.1, P1-1.4 | Pinned storage-verifier image digest and provenance plus concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results | Platform owner | In progress - developer track accepted 2026-08-03 with the quantitative-threshold variance carried to `P1-1.6-P1`; image publication remains under P1-0.1 |
-| P1-2.1 | Polaris production metadata store | Data platform owner | P1-1 accepted | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Not started |
-| P1-2.2 | Polaris service deployment | Data platform owner | P1-2.1 | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | In progress - developer track accepted 2026-08-09, verified 2026-08-03 (`P1-2.2-D1`); production deployment not started |
-| P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2, P1-1.4 | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | In progress - developer track accepted 2026-08-09, verified 2026-08-04 (`P1-2.3-D1`); production identities and bindings not started |
-| P1-2.4 | Iceberg verification tables and storage qualification | Data platform owner | P1-2.3 | Bronze/silver/gold test tables and `platform.quality_check_results` created and readable; Iceberg metadata, snapshot, manifest, listing, and S3FileIO evidence attached to storage qualification | Data engineering owner | In progress - developer track accepted 2026-08-09, verified 2026-08-06 (`P1-2.4-V1`): the live catalog conformance suite (`stratus-catalog-verifier`) passes against Polaris 1.5.0 over Ceph RGW (create/write/read/evolve/purge-drop with S3FileIO, snapshot expiry, forged-principal negative), and `platform.quality_check_results` is provisioned idempotently by the catalog bootstrap and verified live. Maintenance verification beyond snapshot expiry is carried by `P1-2.5`; production storage qualification not started |
-| P1-2.5 | Metadata-driven maintenance verification | Data platform owner | P1-2.4 | Metadata table queries and threshold-based maintenance decisions for files, snapshots, manifests, delete files, and orphan files | Data engineering owner | In progress - developer track accepted 2026-08-09, verified 2026-08-08 (`P1-2.5-D1`): the `files`, `manifests`, `delete_files`, and `snapshots` metadata tables are queried and every threshold is proven in both directions, and orphan-file detection is proven with each safeguard shown to be load-bearing. Neither component has a destructive path; wiring actions is `P1-2.5-P1`, not started |
-| P1-2.6 | Catalog backup, restore, and audit | Data platform owner | P1-2.4 | Restore drill proving catalog, Iceberg metadata, manifests, and objects return to a consistent point; audit events captured | Operations owner | Not started |
-| P1-3.1 | Spark runtime and cluster | Data engineering owner | P1-2 accepted | Spark standalone services running on Podman, image/artifact pin evidence, Spark UI or service health | Platform owner | In progress - developer track accepted 2026-08-09, verified 2026-08-08 (`P1-3.1-S1`, `P1-3.1-D1`): one master and two workers with an artifact-locked runtime image; production topology and master recovery not started |
-| P1-3.2 | Spark catalog, object-store configuration, and storage qualification | Data engineering owner | P1-3.1, P1-2.3 | Spark resolves Polaris tables and reads/writes Ceph RGW with `svc-spark`; ingestion/write throughput and multipart evidence attached to storage qualification | Data platform owner | In progress - developer track accepted 2026-08-09, verified 2026-08-08 (`P1-3.2-D1`): all four namespaces resolve, Iceberg and S3A read/write both proven as `svc-spark`. Throughput and multipart qualification belong to the production track (`P1-3.2-P1`), not started |
-| P1-3.3 | Bronze ingestion job | Data engineering owner | P1-3.2 | Landing file produces bronze Iceberg table with expected schema and row count | Data owner | In progress - developer track accepted 2026-08-09, verified 2026-08-09 (`P1-3.3-V1`): a landing CSV produces the bronze table with the expected row count and normalisation proven; production regression is `P1-3.5-V1`, not started |
-| P1-3.4 | Silver and gold transformation jobs | Data engineering owner | P1-3.3 | Deduplicated silver output and aggregated gold output validated against expected results | Data owner | In progress - developer track accepted 2026-08-09, verified 2026-08-09 (`P1-3.3-V1`): deduplication collapses a repeated business key deterministically and gold aggregates land in the governed zone; production regression is `P1-3.5-V1`, not started |
-| P1-3.5 | Quality and promotion gate | Data engineering owner | P1-3.4 | Passing and failing quality cases written to `platform.quality_check_results`; failed promotion blocked | Data owner | In progress - developer track accepted 2026-08-09, verified 2026-08-09 (`P1-3.3-V1`): both directions are proven on real data — blocking failures stop promotion naming the rule, a clean run is promoted, and a run with no recorded results blocks rather than passes. Production regression is `P1-3.5-V1`, not started |
-| P1-3.6 | Spark maintenance and lineage payloads | Data engineering owner | P1-3.5 | Metadata-driven maintenance run evidence and logged lineage payloads for each job | Data platform owner | In progress - developer track accepted 2026-08-09, verified 2026-08-09 (`P1-3.3-V1`): snapshot expiry and file rewrite report metrics, orphan deletion is refused without an explicit retention, and every job emits its lineage payload. Ceph-backed event logs and the history server are `P1-3.6-P1`, not started |
-| P1-4.1 | Airflow platform deployment | Operations owner | P1-3 accepted | Airflow services and PostgreSQL metadata database healthy; DAG directory/version recorded | Platform owner | In progress - the 2026-08-17 image remains historical developer-only evidence under `WAIVER-P1-4.1-S1-20260817`, expiring 2026-09-16 with production promotion prohibited; on 2026-08-18 the host-side gigabyte-scale Spark/PySpark assembly was superseded by `P1-4.1-S2`. The LocalExecutor/PostgreSQL harness passes offline guardrails, but live acceptance is paused until a registry-layer image is published and consumed by digest. See [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) |
-| P1-4.2 | Spark submission from Airflow | Operations owner | P1-4.1, P1-3.1 | Airflow task submits a Spark job with approved service credentials | Data engineering owner | Not started |
-| P1-4.3 | Batch pipeline DAGs | Data engineering owner | P1-4.2 | Ingestion, bronze-to-silver, and silver-to-gold DAG run evidence with run IDs | Data owner | Not started |
+| P1-1.2 | Ceph cluster baseline | Storage owner | P1-1.1 | `ceph status`, daemon inventory, pool/CRUSH/failure-domain configuration snapshot, capacity model | Operations owner | Development accepted 2026-08-03 |
+| P1-1.3 | RGW endpoint and TLS | Storage owner | P1-1.2 | HTTPS endpoint test, certificate chain validation, plaintext rejection evidence | Security owner | Development accepted 2026-08-03 |
+| P1-1.4 | Buckets and service credentials | Storage owner | P1-1.3 | Bucket listing, service-account policy matrix, positive and negative credential tests | Security owner | Development accepted 2026-08-03 |
+| P1-1.5 | Storage observability | Operations owner | P1-1.2 | Ceph Dashboard view, RGW metrics, capacity and health alert evidence | Operations owner | Development accepted 2026-08-03 |
+| P1-1.6 | Storage-only performance and cost evidence | Storage owner | P1-1.4 for development; P1-0.1 after the hardening stage is activated | Concurrent synthetic S3 access, multipart, small-object/prefix listing, latency/error, capacity, operator-effort, and exported evidence results; the later production stage adds a published verifier digest and provenance | Platform owner | Developer evidence accepted 2026-08-03 with the quantitative-threshold variance carried to `P1-1.6-P1`; production publication is deferred and does not block development |
+| P1-2.1 | Polaris production metadata store | Data platform owner | Development-system acceptance | Metadata-store product/version, owner, backup/restore plan, HA/RTO/RPO posture | Operations owner | Deferred - later production-hardening stage |
+| P1-2.2 | Polaris service deployment | Data platform owner | P1-1 developer gate accepted | Polaris endpoint health, service config snapshot, logs showing successful startup | Platform owner | Development accepted 2026-08-09, verified 2026-08-03 (`P1-2.2-D1`); production deployment deferred |
+| P1-2.3 | Catalog namespaces and storage binding | Data platform owner | P1-2.2 development accepted, P1-1.4 development accepted | Bronze/silver/gold/platform namespaces, Ceph RGW location mapping, credential validation | Platform owner | Development accepted 2026-08-09, verified 2026-08-04 (`P1-2.3-D1`); production identities and bindings deferred |
+| P1-2.4 | Iceberg verification tables and storage qualification | Data platform owner | P1-2.3 development accepted | Bronze/silver/gold test tables and `platform.quality_check_results` created and readable; Iceberg metadata, snapshot, manifest, listing, and S3FileIO evidence attached to storage qualification | Data engineering owner | Development accepted 2026-08-09, verified 2026-08-06 (`P1-2.4-V1`): live create/write/read/evolve/purge-drop, snapshot expiry and forged-principal behavior pass against Polaris 1.5.0 over Ceph RGW; production storage qualification is deferred |
+| P1-2.5 | Metadata-driven maintenance verification | Data platform owner | P1-2.4 | Metadata table queries and threshold-based maintenance decisions for files, snapshots, manifests, delete files, and orphan files | Data engineering owner | Development accepted 2026-08-09, verified 2026-08-08 (`P1-2.5-D1`): the `files`, `manifests`, `delete_files`, and `snapshots` metadata tables are queried and every threshold is proven in both directions, and orphan-file detection is proven with each safeguard shown to be load-bearing. Neither component has a destructive path; applied production actions are deferred to `P1-2.5-P1` |
+| P1-2.6 | Catalog backup, restore, and audit | Data platform owner | Development-system acceptance and P1-2.4 development evidence | Restore drill proving catalog, Iceberg metadata, manifests, and objects return to a consistent point; audit events captured | Operations owner | Deferred - later production-hardening stage |
+| P1-3.1 | Spark runtime and cluster | Data engineering owner | P1-2 developer gate accepted | Spark standalone services running on Podman, image/artifact pin evidence, Spark UI or service health | Platform owner | Development accepted 2026-08-09 and reverified 2026-08-16: one master and two workers with an artifact-locked runtime image; production topology and master recovery are deferred |
+| P1-3.2 | Spark catalog, object-store configuration, and storage qualification | Data engineering owner | P1-3.1 development accepted, P1-2.3 development accepted | Spark resolves Polaris tables and reads/writes Ceph RGW with `svc-spark`; development storage behavior verified | Data platform owner | Development accepted 2026-08-09: all four namespaces resolve and Iceberg/S3A read/write are proven as `svc-spark`; production throughput and multipart qualification are deferred to `P1-3.2-P1` |
+| P1-3.3 | Bronze ingestion job | Data engineering owner | P1-3.2 development accepted | Landing file produces bronze Iceberg table with expected schema and row count | Data owner | Development accepted 2026-08-09 (`P1-3.3-V1`, superseded where noted by `P1-3.3-V2`); production regression is deferred to `P1-3.5-V1` |
+| P1-3.4 | Silver and gold transformation jobs | Data engineering owner | P1-3.3 development accepted | Deduplicated silver output and aggregated gold output validated against expected results | Data owner | Development accepted 2026-08-09: deterministic deduplication and governed gold aggregation are proven; production regression is deferred to `P1-3.5-V1` |
+| P1-3.5 | Quality and promotion gate | Data engineering owner | P1-3.4 development accepted | Passing and failing quality cases written to `platform.quality_check_results`; failed promotion blocked | Data owner | Development accepted 2026-08-09: blocking failures, clean promotion and missing-result fail-closed behavior are proven; production regression is deferred to `P1-3.5-V1` |
+| P1-3.6 | Spark maintenance and lineage payloads | Data engineering owner | P1-3.5 development accepted | Metadata-driven maintenance run evidence and logged lineage payloads for each job | Data platform owner | Development accepted 2026-08-09: maintenance metrics, retention protection and lineage payloads are proven; production event-history and telemetry export are deferred to `P1-3.6-P1` and `P1-3.6-P2` |
+| P1-4.1 | Airflow platform deployment | Operations owner | P1-3 developer gate accepted | Airflow services and PostgreSQL metadata database healthy; DAG directory/version recorded | Platform owner | Development accepted 2026-08-22: `P1-4.1-S2` produced the pinned OCI-stage image with a 9.93 MB context, smoke and zero-Critical scan evidence; `P1-4.1-D1` passed two LocalExecutor/PostgreSQL lifecycle cycles. Registry publication remains deferred to production hardening. See [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
+| P1-4.2 | Spark submission from Airflow | Operations owner | P1-4.1, P1-3.1 | Airflow task submits a Spark job with approved service credentials | Data engineering owner | Development accepted 2026-08-22 (`P1-4.2-D1`): immutable DAG and packaged Java job completed distributed Spark work plus Polaris/Ceph Iceberg create/write/read/drop; connection, input-hash, timing and secret-redaction checks passed. See [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
+| P1-4.3 | Batch pipeline DAGs | Data engineering owner | P1-4.2 | Ingestion, bronze-to-silver, and silver-to-gold DAG run evidence with run IDs | Data owner | In progress (`P1-4.3-V1`): landing-to-bronze source contract and Airflow-native parse/registry proof passed 2026-08-22; live ingestion, transform, promotion-blocking, materialisation, maintenance, retry, alert and Java verifier scenarios remain |
 | P1-4.4 | Quality gates in orchestration | Data engineering owner | P1-4.3, P1-3.5 | DAG success path and deliberate quality-failure halt evidence | Data owner | Not started |
 | P1-4.5 | Maintenance DAG and alerts | Operations owner | P1-4.3, P1-3.6 | Metadata-threshold maintenance DAG evidence, task failure alert, Deadline Alert evidence | Operations owner | Not started |
 | P1-5.1 | Trino cluster deployment | Query platform owner | P1-4 accepted | Trino coordinator/worker health, version pin, configuration snapshot | Platform owner | Not started |
@@ -120,24 +139,49 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 | P1-5.3 | Bronze/silver/gold query and storage validation | Query platform owner | P1-5.2, P1-3.4 | Row counts, schemas, joins, and aggregates match Spark-produced outputs; Trino scan throughput evidence attached to storage qualification | Data owner | Not started |
 | P1-5.4 | Quality-results query validation | Query platform owner | P1-5.2, P1-3.5 | `platform.quality_check_results` visible through Trino with expected pass/fail rows | Data owner | Not started |
 | P1-5.5 | JDBC verification suite | Query platform owner | P1-5.3 | `TrinoQueryVerificationTest` report against the live cluster | Platform owner | Not started |
-| P1-6.1 | Atlas deployment, external dependencies, and model setup | Governance owner | P1-5 accepted | Developer Atlas functional evidence plus production HBase, SolrCloud/ZooKeeper, external notification service, Atlas availability, entity type registration, authentication, backup, and restore evidence | Governance owner | Not started |
+| P1-6.1 | Atlas developer deployment and model setup | Governance owner | P1-5 developer gate accepted | Developer Atlas functional evidence, entity type registration and API behavior; production external dependencies, HA and restore move to the later hardening stage | Governance owner | Not started |
 | P1-6.2 | Ranger deployment and baseline policies | Security owner | P1-5 accepted | Ranger health, usersync source, policy export for bronze/silver/gold zones | Security owner | Not started |
 | P1-6.3 | Dataset registration and lineage publication | Governance owner | P1-6.1, P1-3.6 | Atlas entities and lineage for source-to-bronze-to-silver-to-gold runs | Data owner | Not started |
 | P1-6.4 | Quality status metadata | Governance owner | P1-6.3, P1-3.5 | Atlas entity quality status reflects latest quality run | Data owner | Not started |
 | P1-6.5 | Ranger allow/deny and classification tests | Security owner | P1-6.2, P1-6.3 | Allow, deny, and PII classification enforcement evidence through Trino | Security owner | Not started |
-| P1-7.1 | FreeIPA deployment and service identities | Security owner | P1-6 developer gate; production-capable Increment 1-6 configurations available | FreeIPA health, groups, service principals, keytab validation | Security owner | Not started |
+| P1-7.1 | FreeIPA deployment and service identities | Security owner | P1-6 developer gate and functional configuration contracts from Increments 1-6 | FreeIPA health, groups, service principals, keytab validation in development | Security owner | Not started |
 | P1-7.2 | Keycloak federation and OIDC clients | Security owner | P1-7.1 | Keycloak realm/client export, token issuance, issuer/claim validation | Security owner | Not started |
 | P1-7.3 | Service authentication migration | Security owner | P1-7.2 | Polaris, Airflow, Trino, Ranger, and Atlas use approved FreeIPA/Keycloak paths | Platform owner | Not started |
 | P1-7.4 | TLS certificate replacement | Security owner | P1-7.1 | FreeIPA Dogtag-issued certificates deployed and validated for all service endpoints | Security owner | Not started |
 | P1-7.5 | Encryption-at-rest and credential rotation | Security owner | P1-7.1, P1-1.4 | Ceph/RGW encryption evidence for gold/platform zones and rotation runbook test | Security owner | Not started |
 | P1-7.6 | Integrated security verification | Security owner | P1-7.3, P1-7.4, P1-7.5 | Positive and negative authentication, authorization, TLS, and no-shared-credential evidence | Platform owner | Not started |
-| P1-R.1 | Phase 1 operational readiness signoff | Platform owner | P1-1 through P1-7 accepted | Completed `stratus_phase1_operational_readiness.md` checklist, concurrent Spark/Trino/Polaris/storage qualification, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Not started |
+| P1-R.1 | Phase 1 operational readiness signoff | Platform owner | Production deployment hardening activated and all component production gates accepted | Completed `stratus_phase1_operational_readiness.md` checklist, concurrent Spark/Trino/Polaris/storage qualification, restore drill evidence, monitoring evidence, and acceptance record | Platform steering group | Deferred - later production-hardening stage |
 
-On 2026-08-03 the platform owner accepted the Increment 1 developer gate (`P1-1.G-D` in [ceph_storage.md](ceph_storage.md#17-implementation-task-track)) against live full-sequence evidence, with two recorded deferrals: immutable verifier-image publication (under `P1-0.1`) and quantitative performance thresholds (carried to `P1-1.6-P1`). Increment 2 engineering is unblocked. The `P1-1.x` rows above remain `In progress` at portfolio level because their production child tasks have not started.
+### Phase 1 development-system acceptance gate
 
-### P1-0.1 Build and artifact delivery acceptance checklist
+This is the active Phase 1 completion gate. It is satisfied when:
 
-`P1-0.1` is one Phase 1 prerequisite work package. It is not an increment and does not introduce a separate child-task namespace. The work package is complete only when all of the following are true:
+- [ ] developer gates `P1-1.G-D` through `P1-7.G-D` are accepted;
+- [ ] the complete landing-to-bronze-to-silver-to-gold workflow runs under Airflow;
+- [ ] Spark and Trino return consistent results through Polaris and Ceph RGW;
+- [ ] quality failure, promotion blocking, retry and replay behavior pass;
+- [ ] Atlas lineage/classification and Ranger allow/deny behavior are proven;
+- [ ] FreeIPA/Keycloak development identities exercise the intended authentication and
+  authorization contracts across the integrated services;
+- [ ] every component uses its intended version and pinned development artifact inputs;
+- [ ] the full offline and live development verification suites pass with durable evidence;
+- [ ] a development deployment manifest records every reduced-topology, local-state, local-trust,
+  local-secret and operator shortcut for later replacement;
+- [ ] the platform owner accepts the development-system evidence and authorizes activation of the
+  separate production deployment hardening stage.
+
+Passing this gate proves the system before deployment hardening begins. It does not claim HA,
+capacity, production PKI, managed-secret infrastructure, immutable registry promotion, DR or
+operational readiness.
+
+On 2026-08-03 the platform owner accepted the Increment 1 developer gate (`P1-1.G-D` in [ceph_storage.md](ceph_storage.md#17-implementation-task-track)) against live full-sequence evidence. Immutable verifier-image publication and quantitative production thresholds are mapped to the later hardening tasks `P1-0.1` and `P1-1.6-P1`; they do not qualify or block the accepted development result. Increment 2 engineering is unblocked, and the `P1-1.x` roll-up reports development acceptance independently of later production status.
+
+### P1-0.1 Production build and artifact delivery hardening checklist
+
+`P1-0.1` belongs to the later production deployment hardening stage. It is not a prerequisite for
+building or functionally accepting the development system. Before the later stage is activated it
+must be decomposed into assignable child tasks. The production artifact-delivery capability is
+complete only when all of the following are true:
 
 - [ ] The platform and security owners approve the build service, artifact repository, container registry, publishing identity, read-only verification identity, and durable evidence location.
 - [ ] Immutable versioning maps the source revision to artifact coordinates and SHA-256, image tag and digest, SBOM, scan, provenance, and signature or attestation.
@@ -149,22 +193,30 @@ On 2026-08-03 the platform owner accepted the Increment 1 developer gate (`P1-1.
 
 Runtime and verification scripts must not invoke Maven or Gradle, build an image, mount a source tree, copy from a developer workstation `target/` directory, or resolve build dependencies.
 
-Current status: `P1-0.1` is In progress and formal CI/CD is deferred by owner direction on 2026-07-14. Local development may continue only as an explicit development-only sequencing exception: builds run outside verification containers, while immutable publication and all dependent acceptance claims remain blocked. The repository contains a local Java verifier and an image-specific Dockerfile, but no approved build service, pipeline, artifact repository, registry path, workload identities, image digest, SBOM, scan, provenance, attestation, or smoke evidence.
+Current status: `P1-0.1` is deferred until the development-system acceptance gate. Local development
+uses pinned inputs, builds outside verification containers, and records functional test evidence.
+The later hardening stage supplies the approved build service, artifact repository, registry path,
+workload identities, immutable publication, SBOM, scan, provenance, attestation and independent
+deployment smoke evidence. Their absence is not a development waiver and does not block a
+developer gate; it simply means no production deployment or readiness claim may be made.
 
-### Phase 1 Gate Tracker
+### Deferred production hardening and readiness gate tracker
 
-The table below records production-profile acceptance. Its row order mirrors the architecture, not the production signoff sequence. Developer-profile completion is recorded in the owning increment evidence and may support continued engineering, but it cannot set one of these gates to `Accepted`; Increments 1-6 close their final security-dependent checks after Increment 7 promotion.
+The table below is inactive backlog owned by the later
+[production deployment hardening plan](stratus_production_deployment_hardening.md). It does not
+control the current development sequence. Developer completion is recorded by each increment's
+developer gate and culminates in a separate integrated development-system acceptance record.
 
 | Gate | Required evidence | Accepted by | Status |
 |---|---|---|---|
-| Increment 1 accepted | Ceph decision due diligence, Ceph health, RGW TLS, buckets and credential isolation, core S3 and multipart tests, concurrent synthetic client load, small-object/prefix listing behavior, failure drill, observability, and preliminary performance/capacity/operator evidence | Platform architecture and operations owners | Not started |
-| Increment 2 accepted | Polaris production metadata store, namespace/table tests, Iceberg maintenance tests, catalog/object restore drill, audit evidence | Platform architecture and data platform owners | Not started |
-| Increment 3 accepted | Spark runtime, ingestion, transformation, materialisation, quality, promotion, maintenance, and lineage-payload evidence | Data engineering owner | Not started |
-| Increment 4 accepted | Airflow deployment, DAG runs, quality gate halt, maintenance DAG, retry and alert evidence | Platform operations and data engineering owners | Not started |
-| Increment 5 accepted | Trino deployment, Polaris table resolution, query correctness, quality-results access, JDBC test evidence | Query platform owner | Not started |
-| Increment 6 accepted | Atlas production dependencies and restore evidence, metadata registration/lineage, Ranger policies, classification enforcement, and allow/deny evidence | Governance and security owners | Not started |
-| Increment 7 accepted | FreeIPA, Keycloak, TLS, service authentication, encryption, credential rotation, positive/negative security tests | Security owner | Not started |
-| Phase 1 production-readiness accepted | All developer shortcuts replaced; integrated backup/restore, DR, observability, security, performance, support, and operational acceptance evidence | Platform owner, operations owner, security owner, and data owner | Not started |
+| Increment 1 accepted | Ceph decision due diligence, Ceph health, RGW TLS, buckets and credential isolation, core S3 and multipart tests, concurrent synthetic client load, small-object/prefix listing behavior, failure drill, observability, and preliminary performance/capacity/operator evidence | Platform architecture and operations owners | Deferred - later stage |
+| Increment 2 accepted | Polaris production metadata store, namespace/table tests, Iceberg maintenance tests, catalog/object restore drill, audit evidence | Platform architecture and data platform owners | Deferred - later stage |
+| Increment 3 accepted | Spark runtime, ingestion, transformation, materialisation, quality, promotion, maintenance, and lineage-payload evidence | Data engineering owner | Deferred - later stage |
+| Increment 4 accepted | Airflow deployment, DAG runs, quality gate halt, maintenance DAG, retry and alert evidence | Platform operations and data engineering owners | Deferred - later stage |
+| Increment 5 accepted | Trino deployment, Polaris table resolution, query correctness, quality-results access, JDBC test evidence | Query platform owner | Deferred - later stage |
+| Increment 6 accepted | Atlas production dependencies and restore evidence, metadata registration/lineage, Ranger policies, classification enforcement, and allow/deny evidence | Governance and security owners | Deferred - later stage |
+| Increment 7 accepted | FreeIPA, Keycloak, TLS, service authentication, encryption, credential rotation, positive/negative security tests | Security owner | Deferred - later stage |
+| Phase 1 production-readiness accepted | All developer shortcuts replaced; integrated backup/restore, DR, observability, security, performance, support, and operational acceptance evidence | Platform owner, operations owner, security owner, and data owner | Deferred - later stage |
 
 ---
 
@@ -498,7 +550,7 @@ The following are explicitly deferred and belong to later increments:
 
 - **Streaming and CDC** — the shared Kafka event backbone, Kafka Connect, Debezium, and Flink are not Phase 1 capabilities. An external Kafka service used solely as Atlas's supported production notification dependency remains within Increment 6 and does not constitute completion of the Phase 2 event backbone.
 - **Firebolt Core** — optional serving acceleration. Not considered until the Iceberg and governance foundations are verified in production.
-- **Multi-environment promotion** — development, staging, and production environment separation is an operational maturity concern for after the single-environment foundation works.
+- **Multi-environment promotion** — environment promotion automation is implemented in the later [production deployment hardening stage](stratus_production_deployment_hardening.md), after the complete development system works.
 - **Self-service data discovery** — policy-driven glossary workflows and self-service onboarding follow after Atlas and Ranger are operating reliably.
 
 Operational production-readiness signoff is covered by [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md). It is not a separate platform increment because it validates Increments 1 through 7 rather than adding a new capability.
@@ -516,5 +568,6 @@ Operational production-readiness signoff is covered by [stratus_phase1_operation
 - [atlas_ranger_governance.md](atlas_ranger_governance.md) — Increment 6 metadata and governance implementation plan
 - [freeipa_keycloak_identity.md](freeipa_keycloak_identity.md) — Increment 7 identity and security hardening implementation plan
 - [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md) — Phase 1 operational acceptance and production readiness checklist
+- [stratus_production_deployment_hardening.md](stratus_production_deployment_hardening.md) — deferred production deployment hardening implementation stage
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) — Phase 2 streaming and operational maturity implementation plan
 - [stratus_implementation_plan_phase3.md](stratus_implementation_plan_phase3.md) — Phase 3 query acceleration and data products implementation plan

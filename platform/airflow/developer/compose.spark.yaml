@@ -1,0 +1,36 @@
+# P1-4.2-D1 development-only overlay. The Airflow scheduler joins the provider-owned
+# Ceph network so its Spark driver can reach the standalone master and executors.
+# Provider paths and the network name are supplied by airflow-spark-common.sh.
+services:
+  airflow-scheduler:
+    environment:
+      SPARK_CONF_DIR: /opt/stratus/spark-conf
+      STRATUS_RUN_ID: ${STRATUS_RUN_ID:-unscoped-airflow-spark-run}
+      STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-DEBUG}
+      # Pulled from OpenBao by the test harness. The values are never tracked,
+      # written to the Airflow metadata database, or passed as spark-submit args.
+      AWS_ACCESS_KEY_ID: ${AIRFLOW_SPARK_RGW_ACCESS_KEY:?Spark RGW access key is required}
+      AWS_SECRET_ACCESS_KEY: ${AIRFLOW_SPARK_RGW_SECRET_KEY:?Spark RGW secret key is required}
+      AWS_REGION: ${CEPH_RGW_REGION:-default}
+      AWS_CA_BUNDLE: /opt/stratus/certs/stratus-ca.crt
+      CEPH_RGW_ENDPOINT: ${CEPH_RGW_ENDPOINT:?Ceph RGW endpoint is required}
+      AIRFLOW_LANDING_RGW_ACCESS_KEY: ${AIRFLOW_LANDING_RGW_ACCESS_KEY:?Airflow landing RGW access key is required}
+      AIRFLOW_LANDING_RGW_SECRET_KEY: ${AIRFLOW_LANDING_RGW_SECRET_KEY:?Airflow landing RGW secret key is required}
+    volumes:
+      - ${AIRFLOW_SPARK_DEFAULTS_FILE:?Spark defaults file is required}:/opt/stratus/spark-conf/spark-defaults.conf:ro
+      - ${AIRFLOW_SPARK_LOG4J_FILE:?Spark Log4j2 configuration is required}:/opt/stratus/spark-conf/log4j2.properties:ro
+      - ${AIRFLOW_SPARK_TRUSTSTORE_FILE:?Spark truststore is required}:/opt/stratus/certs/stratus-truststore.jks:ro
+      - ${AIRFLOW_CEPH_CA_CERT:?Ceph CA certificate is required}:/opt/stratus/certs/stratus-ca.crt:ro
+      - ${AIRFLOW_SPARK_JOBS_JAR:?Spark jobs JAR is required}:/opt/stratus/jobs/stratus-spark-jobs.jar:ro
+      - ${AIRFLOW_ICEBERG_RUNTIME_JAR:?Locked Iceberg driver runtime is required}:/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar:ro
+      - ${AIRFLOW_TEST_SCRIPTS_DIR:?Airflow test scripts directory is required}:/opt/stratus/airflow-tests:ro
+    networks:
+      default:
+      ceph:
+        aliases:
+          - airflow-scheduler.stratus.local
+
+networks:
+  ceph:
+    external: true
+    name: ${CEPH_HARNESS_NETWORK:?Ceph harness network is required}
