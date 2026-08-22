@@ -10,67 +10,95 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Mapping from verifier configuration to the Iceberg REST catalog client
- * property set: the OAuth client credential, the warehouse (which for a
- * Polaris catalog is the catalog name, not a storage location), and the
- * S3FileIO binding against the object-store endpoint.
+ * Offline mapping contract from verifier configuration to Iceberg REST catalog properties.
  *
- * This class is part of the Stratus on-premises data fabric platform.
+ * <h2>Rationale and proof boundary</h2>
+ *
+ * <p>Polaris OAuth, catalog naming, S3FileIO, path-style access, and credential delegation must map
+ * to exact Iceberg property names. An apparently valid configuration can otherwise fall back to a
+ * deprecated token endpoint, infer authentication, or request vended credentials unexpectedly.
+ * The shared {@link CatalogTestEnvironment} supplies one coherent set of fake inputs. This test
+ * proves mapping only; it does not contact Polaris or Ceph.
+ *
+ * <h2>Maintenance and promotion</h2>
+ *
+ * <p>When Iceberg or Polaris changes a property contract, update the named property constants,
+ * mapper, fixture, compatibility documentation, and live conformance tests together. Developer,
+ * UAT, and production must inject environment-owned secrets and endpoints and promote the same
+ * approved verifier and runtime digests; these fake values must never become deployment defaults.
+ *
+ * <p>This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-04
- * @version 1.0.0
+ * @version 1.1.0
  */
 @Tag("unit")
 final class RestCatalogPropertiesTest {
 
-    private static CatalogVerifierConfig config() {
-        return CatalogVerifierConfig.from(Map.of(
-                "STRATUS_POLARIS_URI", "https://polaris.stratus.local:8181/api/catalog",
-                "STRATUS_POLARIS_CLIENT_ID", "stratus-root",
-                "STRATUS_POLARIS_CLIENT_SECRET", "polaris-secret-value",
-                "STRATUS_POLARIS_CATALOG", "stratus",
-                "CEPH_RGW_ENDPOINT", "https://object-store.stratus.local:8443",
-                "CEPH_RGW_ACCESS_KEY", "svc-polaris-abc123",
-                "CEPH_RGW_SECRET_KEY", "storage-secret-value"));
-    }
+    private static final String PROPERTY_URI = "uri";
+    private static final String PROPERTY_CREDENTIAL = "credential";
+    private static final String PROPERTY_SCOPE = "scope";
+    private static final String PROPERTY_WAREHOUSE = "warehouse";
+    private static final String PROPERTY_FILE_IO = "io-impl";
+    private static final String PROPERTY_S3_ENDPOINT = "s3.endpoint";
+    private static final String PROPERTY_S3_ACCESS_KEY = "s3.access-key-id";
+    private static final String PROPERTY_S3_SECRET_KEY = "s3.secret-access-key";
+    private static final String PROPERTY_PATH_STYLE = "s3.path-style-access";
+    private static final String PROPERTY_ACCESS_DELEGATION =
+            "header.X-Iceberg-Access-Delegation";
+    private static final String PROPERTY_AUTH_TYPE = "rest.auth.type";
+    private static final String PROPERTY_OAUTH_SERVER_URI = "oauth2-server-uri";
+    private static final String EXPECTED_PATH_STYLE_ENABLED = "true";
+    private static final String EXPECTED_PATH_STYLE_DISABLED = "false";
+    private static final String EXPECTED_ACCESS_DELEGATION = "none";
+    private static final String EXPECTED_AUTH_TYPE = "oauth2";
 
     @Test
     void mapsTheCompleteRestCatalogClientPropertySet() {
         Map<String, String> properties = RestCatalogProperties.from(config());
 
-        assertEquals("https://polaris.stratus.local:8181/api/catalog", properties.get("uri"));
-        assertEquals("stratus-root:polaris-secret-value", properties.get("credential"));
-        assertEquals("PRINCIPAL_ROLE:ALL", properties.get("scope"));
-        assertEquals("stratus", properties.get("warehouse"),
+        assertEquals(CatalogTestEnvironment.FIXTURE_POLARIS_URI,
+                properties.get(PROPERTY_URI));
+        assertEquals(CatalogTestEnvironment.EXPECTED_CREDENTIAL,
+                properties.get(PROPERTY_CREDENTIAL));
+        assertEquals(CatalogTestEnvironment.EXPECTED_SCOPE,
+                properties.get(PROPERTY_SCOPE));
+        assertEquals(CatalogTestEnvironment.FIXTURE_CATALOG,
+                properties.get(PROPERTY_WAREHOUSE),
                 "for a Polaris catalog the warehouse property is the catalog name");
-        assertEquals("org.apache.iceberg.aws.s3.S3FileIO", properties.get("io-impl"));
-        assertEquals("https://object-store.stratus.local:8443", properties.get("s3.endpoint"));
-        assertEquals("svc-polaris-abc123", properties.get("s3.access-key-id"));
-        assertEquals("storage-secret-value", properties.get("s3.secret-access-key"));
-        assertEquals("true", properties.get("s3.path-style-access"));
-        assertEquals("none", properties.get("header.X-Iceberg-Access-Delegation"),
-                "the verifier supplies its own storage credentials and must decline vended-credential delegation");
-        assertEquals("oauth2", properties.get("rest.auth.type"),
-                "the auth type must be explicit; relying on inference logs a warning on every connection");
-        assertEquals("https://polaris.stratus.local:8181/api/catalog/v1/oauth/tokens",
-                properties.get("oauth2-server-uri"),
-                "the token endpoint must be explicit; Iceberg's automatic fallback is deprecated for removal");
+        assertEquals(CatalogTestEnvironment.EXPECTED_FILE_IO,
+                properties.get(PROPERTY_FILE_IO));
+        assertEquals(CatalogTestEnvironment.FIXTURE_CEPH_ENDPOINT,
+                properties.get(PROPERTY_S3_ENDPOINT));
+        assertEquals(CatalogTestEnvironment.FIXTURE_CEPH_ACCESS_KEY,
+                properties.get(PROPERTY_S3_ACCESS_KEY));
+        assertEquals(CatalogTestEnvironment.FIXTURE_CEPH_SECRET_KEY,
+                properties.get(PROPERTY_S3_SECRET_KEY));
+        assertEquals(EXPECTED_PATH_STYLE_ENABLED, properties.get(PROPERTY_PATH_STYLE));
+        assertEquals(EXPECTED_ACCESS_DELEGATION, properties.get(PROPERTY_ACCESS_DELEGATION),
+                "the verifier supplies its own storage credentials and must decline "
+                        + "vended-credential delegation");
+        assertEquals(EXPECTED_AUTH_TYPE, properties.get(PROPERTY_AUTH_TYPE),
+                "the auth type must be explicit; relying on inference logs a warning on every "
+                        + "connection");
+        assertEquals(CatalogTestEnvironment.EXPECTED_TOKEN_ENDPOINT,
+                properties.get(PROPERTY_OAUTH_SERVER_URI),
+                "the token endpoint must be explicit; Iceberg's automatic fallback is deprecated "
+                        + "for removal");
     }
 
     @Test
     void reflectsADisabledPathStyleFlag() {
-        var environment = new java.util.HashMap<String, String>();
-        environment.put("STRATUS_POLARIS_URI", "https://polaris.stratus.local:8181/api/catalog");
-        environment.put("STRATUS_POLARIS_CLIENT_ID", "stratus-root");
-        environment.put("STRATUS_POLARIS_CLIENT_SECRET", "secret");
-        environment.put("STRATUS_POLARIS_CATALOG", "stratus");
-        environment.put("CEPH_RGW_ENDPOINT", "https://object-store.stratus.local:8443");
-        environment.put("CEPH_RGW_ACCESS_KEY", "key");
-        environment.put("CEPH_RGW_SECRET_KEY", "secret");
-        environment.put("S3_PATH_STYLE_ACCESS", "false");
+        var environment = CatalogTestEnvironment.completeEnvironment();
+        environment.put(
+                CatalogTestEnvironment.ENV_PATH_STYLE_ACCESS, EXPECTED_PATH_STYLE_DISABLED);
 
-        assertEquals("false", RestCatalogProperties.from(
-                CatalogVerifierConfig.from(environment)).get("s3.path-style-access"));
+        assertEquals(EXPECTED_PATH_STYLE_DISABLED, RestCatalogProperties.from(
+                CatalogVerifierConfig.from(environment)).get(PROPERTY_PATH_STYLE));
+    }
+
+    private static CatalogVerifierConfig config() {
+        return CatalogVerifierConfig.from(CatalogTestEnvironment.completeEnvironment());
     }
 }
