@@ -1,5 +1,16 @@
 # Stratus Increment 4 — Apache Airflow Orchestration
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 4 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -34,7 +45,7 @@ Increment 4 delivers Apache Airflow as the orchestration and control-plane layer
 
 Reference baseline: 2026-08-17.
 
-The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.3.1 with Python 3.14 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. Airflow 3.3.1's official Python 3.14 constraints select Spark provider 6.3.1, Amazon provider 9.34.0, and boto3 1.43.56. The custom image remains on the current Spark 4.1 patch line at Spark/PySpark 4.1.3 with Py4J 0.10.9.9. This avoids carrying an obsolete Airflow 2.x webserver topology, a stale Spark 3.x client, or unnecessarily old provider dependencies into the design.
+The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.3.1 with Python 3.14 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. Airflow 3.3.1's official Python 3.14 constraints select Spark provider 6.3.1, Amazon provider 9.34.0, and boto3 1.43.56. The custom image provides the Spark 4.1.3 Java 21 command-line submission runtime and lightweight `pyspark-client` 4.1.3 dependency, without the full PySpark distribution or its duplicate JAR tree. This avoids carrying an obsolete Airflow 2.x webserver topology, a stale Spark 3.x client, or unnecessarily old provider dependencies into the design.
 
 Airflow 3.3.1 is tested with PostgreSQL 14-18. Stratus retains the approved PostgreSQL 17.10 matrix entry for Increment 4 rather than changing the database major after planning; the developer deployment work verifies that exact pairing in `P1-4.1-D1`.
 
@@ -44,10 +55,12 @@ patch-level lag as an upstream-image monitoring item. Rebuilding Python on a
 bespoke base would materially depart from the supported Airflow image and is
 not part of this shared-baseline task.
 
-The Airflow submission image uses Spark/PySpark 4.1.3, while the separately
-validated Increment 3 developer cluster remains on Spark 4.1.2. Both are on the
-Spark 4.1 compatibility line, but `P1-4.2-D1` must demonstrate live submission
-compatibility or align the exact patch versions before the developer gate.
+The Airflow submission image uses the Spark 4.1.3 client, while the separately
+validated Increment 3 developer cluster remains on Spark 4.1.2. `P1-4.2-D1`
+accepted this patch-level pairing on 2026-08-22 through a live packaged Java job
+that completed distributed work and Polaris/Ceph-backed Iceberg operations.
+Exact patch alignment remains a future upgrade consideration, not an open
+development compatibility blocker.
 
 The single-host Podman commands are the developer profile. Production uses the same DAGs, providers, images, public API, and verification suite, but requires an external durable metadata database, durable remote logs, managed secrets, trusted HTTPS/OIDC, scheduler and DAG-processor availability appropriate to the selected executor, backup/restore, and failure drills. Local volumes, bootstrap credentials, and a one-host service split cannot pass the production gate.
 
@@ -144,10 +157,10 @@ submission runtime. A multi-stage OCI build copies the canonical Spark runtime
 between registry-backed stages. The 546.3 MB Spark archive is not downloaded into
 or copied from the host build context.
 
-The current `platform/airflow/image/Dockerfile` and resolver still implement the
-superseded `P1-4.1-S1` assembly path. They remain for reproducibility of the dated
-waiver evidence but must be refactored by `P1-4.1-S2` before a new image is
-accepted. Do not use that legacy path merely to unblock `P1-4.1-D1`.
+The current `platform/airflow/image/Dockerfile` and scripts implement the accepted
+`P1-4.1-S2` assembly path. The 2026-08-17 `P1-4.1-S1` result remains historical
+evidence only; the current build does not transfer the Spark archive or a full
+PySpark distribution through the host context.
 
 The replacement image contract is:
 
@@ -156,31 +169,36 @@ The replacement image contract is:
 | Airflow control plane | Airflow 3.3.1 Python 3.14 official image, pinned by immutable digest |
 | Spark submission runtime | Spark 4.1.3 Scala 2.13 Java 21 official image, pinned by immutable digest and copied through an OCI stage |
 | Python providers | hash-locked small artifacts resolved by the approved build worker; no mutable resolution during image assembly |
-| PySpark Python distribution | include only after the focused compatibility gate proves it is required; never transfer a second complete JAR tree through the host context |
+| PySpark Python distribution | excluded by the accepted compatibility proof; `pyspark-client` is retained, and any future in-process Python Spark requirement must reopen this decision under TDD |
 | Hardening | remove unused inherited executables and server components, retain a single Spark/Hadoop JAR tree, and rerun smoke and vulnerability gates |
-| Publication | publish once, record digest/provenance/SBOM, and deploy that digest without rebuilding |
+| Later production publication | after development acceptance, publish once, record digest/provenance/SBOM, and deploy that digest without rebuilding |
 
 Provider 6.3.1 declares `pyspark-client` as a normal dependency and `pyspark` as
-an optional extra. Upstream directs non-Spark-Connect modes to the PySpark extra,
-while `SparkSubmitOperator` invokes the `spark-submit` binary. `P1-4.1-S2` must
-therefore prove imports, dependency validation, executable discovery, and a real
-JAR submission before changing the PySpark lock. An unsupported dependency
-suppression or an untested `PYTHONPATH` workaround is prohibited.
+an optional extra, while `SparkSubmitOperator` invokes the `spark-submit` binary.
+`P1-4.1-S2` proved imports, dependency validation and executable discovery;
+`P1-4.2-D1` then proved a real JAR submission. The accepted lock therefore keeps
+`pyspark-client` and excludes the full PySpark package. An in-process Python
+Spark DAG changes that contract and must begin with a failing compatibility test.
 
 The dated evidence, compatibility gate, and time budgets are defined in
 [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md).
 
-### Build-system image publication
+### Development image build and later publication
 
-The container build is a build-pipeline step. It runs on an approved build worker,
-pulls digest-qualified Airflow and Spark source layers, uses a small verified
-context, and is followed by smoke tests, scanning, registry publication, and
-digest recording. Do not build the image on Airflow runtime hosts or as part of a
-developer lifecycle test.
+During the current development stage, the container image is built locally from the pinned Airflow
+and Spark OCI source stages using the small verified context, then subjected to dependency,
+provider-import, runtime and vulnerability checks. The lifecycle test consumes that already-built
+local development image and never builds it as part of startup.
+
+After development-system acceptance, `P1-0.1` moves the same build contract to the approved build
+worker and adds registry publication, the final digest, SBOM, provenance, signing or attestation and
+independent deployment verification. Those later controls qualify the image for production; they
+are not prerequisites for functional development acceptance.
 
 ```bash
-# Commands are restored by P1-4.1-S2 after the registry-layer refactor.
-# The legacy P1-4.1-S1 resolver/build pair is not the deployment path.
+bash platform/airflow/image/scripts/build/airflow-image-resolve-artifacts.sh
+bash platform/airflow/image/scripts/build/airflow-image-build.sh
+bash platform/airflow/image/scripts/tests/airflow-image-acceptance-test.sh
 ```
 
 The checked-in defaults and artifact lock contain immutable multi-platform image
@@ -188,7 +206,7 @@ digests. Release automation may override them only with newly approved
 digest-qualified references after regression and scan review; floating defaults
 are not permitted. The vulnerability scan exports the image and gives Trivy only
 a read-only archive, never the host container-engine control socket. Deployment
-manifests consume the published result digest and never invoke the resolver.
+production manifests consume the published result digest and never invoke the resolver.
 
 ---
 
@@ -1214,11 +1232,11 @@ These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `platform/airflow/image/`; dependency locks | build, scan, import and provider smoke tests | Historical D1 input | Platform owner | Developer waiver expires 2026-09-16; 35 unique upstream Spark/Hadoop JAR High findings require permanent disposition | Accepted for developer use 2026-08-17 under `WAIVER-P1-4.1-S1-20260817`; retained as historical evidence and superseded for new builds by `P1-4.1-S2` |
-| `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned registry layers, decide the PySpark compatibility contract, and publish a timed, scanned immutable image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan, digest, provenance, phase timings | D1, P1-P3 | Platform owner | PySpark non-Connect support contract and registry publication | In progress - direction accepted 2026-08-18; implementation pending |
-| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using a prebuilt digest | D1 | Platform owner | Published `P1-4.1-S2` image digest | Harness and offline guardrails implemented 2026-08-18; live acceptance paused pending `P1-4.1-S2` |
-| `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/dags/`; `platform/airflow/config/`; `environments/developer/airflow/` | Spark task and secret-redaction evidence | D1 | Security owner | Connection leakage | Not started |
-| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | DAG modules/tests | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | Alert sink availability | Not started |
-| `P1-4.1-P1` | `P1-4.1` | Production | Provision external PostgreSQL TLS/backup/restore and production Airflow service placement. | Database and operations owners | `P1-4.1-S1` | `platform/airflow/`; `environments/production/airflow/`; DB runbook | migration, failover/recovery, service restart | P1-P6 | Platform owner | DB HA decision | Not started |
+| `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned OCI source stages, decide the PySpark compatibility contract, and produce a timed, scanned local development image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan and phase timings | D1 | Platform owner | 61 High occurrences remain tracked in the accepted upstream runtime; zero Critical | Development accepted 2026-08-22; exact image, timings, runtime inventory and scan evidence recorded in [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
+| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using an already-built local development image | D1 | Platform owner | None for this task | Development accepted 2026-08-22; two complete Airflow 3.3.1 LocalExecutor/PostgreSQL 17.10 cycles passed with migrations, component health, timing and clean shutdown evidence |
+| `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/compose.spark.yaml`; `platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh` | Spark task, catalog/object-store operation, immutable-input and secret-redaction evidence | D1 | Security owner | None for this task | Development accepted 2026-08-22; Spark 4.1.3 client submitted to Spark 4.1.2, and distributed count plus Polaris/Ceph Iceberg create/write/read/drop passed |
+| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | In progress - landing-to-bronze contract and Airflow parse/registry proof passed 2026-08-22; live and remaining DAG/verifier scenarios remain |
+| `P1-4.1-P1` | `P1-4.1` | Production | Publish the accepted S2 image through the approved artifact pipeline and provision external PostgreSQL TLS/backup/restore plus production Airflow service placement. | Database, build and operations owners | `P1-4.1-S2`, `P1-0.1`, development-system acceptance | `platform/airflow/`; `environments/production/airflow/`; DB runbook | immutable digest/SBOM/provenance, migration, failover/recovery and service restart | P1-P6 | Platform owner | Deferred production-hardening entry gate and DB HA decision | Not started |
 | `P1-4.2-P1` | `P1-4.2` | Production | Apply OIDC/HTTPS, managed secrets, immutable DAG promotion, Ceph remote logs, and restricted administration. | Security owner | `P1-4.1-P1`, Increment 7 controls | `platform/airflow/config/`; `environments/production/airflow/` | auth negative tests, log continuity, rotation | P5-P11 | Operations owner | OIDC integration | Not started |
 | `P1-4.5-R1` | `P1-4.5` | Production | Prove scheduler/service failure, DB restore, DAG rollback, retry safety, and alert routing. | Operations owner | `P1-4.2-P1` | `operations/runbooks/airflow/` | timed drills, restored run metadata, alert exercise | P12-P16 | Platform owner | Maintenance window | Not started |
 | `P1-4.4-V1` | `P1-4.4` | Production | Run production DAG and quality-gate regression with capacity and observability evidence. | QA owner | `P1-4.5-R1` | production test reports | run IDs, JUnit, metrics, failed promotion proof | P15-P18 | Data owner | Representative schedule load | Not started |
@@ -1276,26 +1294,47 @@ about 305 seconds with only about 310 MB transferred. This invalidated the old
 assembly path as an acceptable developer workflow; it did not invalidate the
 historical digest or its time-bounded waiver evidence.
 
+The replacement path was accepted on 2026-08-22:
+
+- `P1-4.1-S2` built `stratus/airflow:dev` as
+  `sha256:27f05eb17bd3ad3504faf1c53089085ddd6e31fae48c2c47716b8bc3342f6a91`
+  from digest-pinned Airflow and Spark OCI stages. Its build context was 9.93 MB,
+  the first non-cached build took 24.595 seconds, and a warm build took 5.998
+  seconds.
+- Runtime smoke verified Airflow 3.3.1, Python 3.14, Spark 4.1.3, Java 21.0.11,
+  Scala 2.13.17, both required providers, and the absence of the full PySpark
+  distribution and superseded vulnerable surfaces.
+- Trivy reported zero Critical and 61 High occurrences across 38 unique
+  package/CVE pairs. The current inventory and development disposition are in
+  `platform/airflow/image/development-vulnerability-review-s2.md`; the historical
+  S1 waiver does not apply to this image.
+- `P1-4.1-D1` passed two full migration, startup, health and shutdown cycles with
+  Airflow 3.3.1 LocalExecutor and PostgreSQL 17.10.
+- `P1-4.2-D1` ran packaged job
+  `dev.stratus.jobs.spark.SparkSubmissionProbeJob` through the immutable Airflow
+  DAG. Application `app-20260822090425-0003` completed a distributed count and
+  Polaris/Ceph-backed Iceberg create, write, read and drop, while input hashes and
+  transcript secret-redaction checks passed. Total suite time was 110.629 seconds.
+
+The durable acceptance record is
+[`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
+
 Remaining work, in dependency order:
 
-1. Execute `P1-4.1-S2`: source Spark/Java from a pinned official Spark image
-   layer, eliminate gigabyte-scale host build inputs, complete the PySpark
-   compatibility gate, scan, publish, and record the accepted digest and timings.
-2. Resume `P1-4.1-D1` using that prebuilt digest. The LocalExecutor/PostgreSQL
-   harness, lifecycle scripts, migrations, health checks, and offline guardrails
-   are implemented; two complete live start/stop cycles remain acceptance work.
-3. Execute `P1-4.2-D1`: prove the Spark 4.1.3 submission client against the
-   current Spark 4.1.2 developer cluster or align the exact patch versions,
-   then verify Ceph/Polaris trust, protected Airflow connections, immutable DAG
-   delivery, secret-redaction evidence, and residual-JAR reachability before the
-   developer waiver expires.
-4. Monitor compatible Spark/Hadoop releases and permanently disposition all 35
-   unique residual High findings by 2026-09-16; no automatic waiver renewal is
-   permitted.
-5. Execute `P1-4.3-V1`, then the Increment 4 developer gate. The Java
-   orchestration verifier and full DAG behavior remain unimplemented.
-6. Production tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P` remain not
-   started and retain their existing production prerequisites.
+1. Continue `P1-4.3-V1` under strict TDD. The shared submission helper,
+   structured development failure callback, landing-to-bronze DAG, offline
+   contract and Airflow-native parse/registry proof are complete. Live ingestion,
+   transform, quality-halt, materialisation, maintenance, retry, alert and Java
+   verifier scenarios remain. See
+   [`platform/airflow/pipeline-development-progress-20260822.md`](../../platform/airflow/pipeline-development-progress-20260822.md).
+2. Close the Increment 4 developer gate after its full DAG behavior and D2
+   development-state manifest evidence pass.
+3. Track the 61 current S2 High occurrences and reassess them when the pinned
+   Airflow or Spark upstream distributions change. They are visible development
+   risk, not evidence of production readiness.
+4. After the complete development system is accepted, activate the separate production-hardening
+   stage. It publishes the accepted S2 build contract through `P1-0.1` and then executes production
+   tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P`.
 
 ## 16. Completion Gates
 
@@ -1327,7 +1366,9 @@ Increment 4 is accepted when all of the following are true:
 - [ ] **P17** - Airflow task logs include run IDs, target tables, Spark application IDs, and quality gate decisions
 - [ ] **P18** - external metadata database and remote logs restore successfully; managed secrets and scheduler/DAG-processor availability meet the approved RTO/RPO design
 
-The developer gate may unblock Increment 5 engineering. Only the production gate marks Increment 4 accepted in the Phase 1 tracker.
+The developer gate marks Increment 4 functionally accepted for the current development stage and
+unblocks Increment 5 engineering. The production gate remains inactive until the later production
+deployment hardening stage.
 
 ---
 

@@ -1,12 +1,28 @@
 # Stratus Increment 6 — Apache Atlas and Apache Ranger Governance
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 6 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
 
 Increment 6 delivers Apache Atlas as the metadata, lineage, glossary, and classification plane, and Apache Ranger as the access policy and audit plane. When this increment is complete, Iceberg datasets created by Spark and queried through Trino have Atlas entities with ownership, schema, zone, quality status, and lineage. Ranger policies enforce zone and classification-based access through Trino. A Java verification suite confirms that governance is not decorative: metadata is searchable, lineage exists, classifications can be applied, Trino allow/deny behavior follows Ranger policy, and Ranger audit logs record the decisions.
 
-This increment has two explicit tracks. The developer profile uses the disposable Atlas dependencies and local Ranger identities shown in the runnable examples so engineers can prove metadata and policy behavior quickly. The production profile replaces them with supported external Atlas graph, search, and notification services, durable Ranger state and audit storage, managed identity, trusted TLS, availability, backup/restore, and failure drills. Developer completion may unblock Increment 7 engineering; it cannot satisfy Increment 6 production acceptance or Phase 1 readiness.
+The current development stage uses disposable Atlas dependencies and local Ranger identities so
+engineers can prove metadata, lineage, classification, policy and audit behavior. Its developer gate
+marks the functional governance layer accepted and unblocks Increment 7. The later
+production-hardening stage replaces deployment fixtures with supported external Atlas graph,
+search, and notification services, durable Ranger state and audit storage, managed identity,
+trusted TLS, availability, backup/restore and failure drills.
 
 **Prerequisites:**
 - Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
@@ -15,7 +31,9 @@ This increment has two explicit tracks. The developer profile uses the disposabl
 - Increment 4 complete — Airflow orchestrates Spark jobs, quality checks, promotion gates, and maintenance
 - Increment 5 complete — Trino queries Polaris-managed Iceberg tables and all Increment 5 gate tests pass
 
-**Track rule:** Developer work requires the developer gates of Increments 1-5. Increment 6 production preparation may proceed in parallel, but its identity, TLS, and group-sync checks close only after Increment 7; formal acceptance then requires the production gates of its dependencies.
+**Track rule:** Development work requires the developer gates of Increments 1-5. Production
+preparation is deferred rather than interleaved. After development-system acceptance, the later
+hardening stage activates external dependencies, identity, TLS, group sync and production gates.
 
 ---
 
@@ -975,7 +993,9 @@ When the developer gate is checked, Increment 7 engineering can begin.
 - [ ] **P5** - FreeIPA/Keycloak identities, LDAPS, trusted HTTPS, managed secrets, and service-specific authorization replace local users and bootstrap credentials.
 - [ ] **P6** - The developer functional checklist passes unchanged against production, followed by failure, restore, capacity, and security-negative tests.
 
-Only this production gate can mark Increment 6 accepted in the Phase 1 gate tracker.
+The developer gate marks Increment 6 functionally accepted for the current development stage and
+unblocks Increment 7 engineering. This production gate remains inactive until the later production
+deployment hardening stage.
 
 ---
 

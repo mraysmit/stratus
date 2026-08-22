@@ -60,6 +60,10 @@ final class ComposeClusterScriptTest {
     private static final Path HARNESS_SELF_TEST_PATH = SCRIPTS_ROOT.resolve(
             Path.of("verify", "ceph-compose-verify-harness.sh"));
     private static final Path CONNECTION_ENVIRONMENT_PATH = HARNESS_ROOT.resolve("connection.env");
+    private static final Path SERVICE_IDENTITIES_PATH = HARNESS_ROOT.resolve(
+            "service-identities.conf");
+    private static final Path SERVICE_IDENTITY_PROVISIONER_PATH = SCRIPTS_ROOT.resolve(
+            Path.of("verify", "ceph-compose-provision-service-identities.sh"));
     private static final Path COMPOSE_PATH = HARNESS_ROOT.resolve("compose.yaml");
     private static final Path README_PATH = HARNESS_ROOT.resolve("README.md");
 
@@ -290,6 +294,23 @@ final class ComposeClusterScriptTest {
             violations.add("the harness README must reference connection.env");
         }
         assertTrue(violations.isEmpty(), () -> String.join("\n", violations));
+    }
+
+    @Test
+    void airflowIdentityIsLandingReadOnlyAndItsDeniedWriteIsProbed() {
+        String identities = Repo.read(SERVICE_IDENTITIES_PATH);
+        String provisioner = Repo.read(SERVICE_IDENTITY_PROVISIONER_PATH);
+        assertTrue(identities.contains(
+                "svc-airflow | Stratus Airflow orchestrator | stratus-landing:ro"),
+                "svc-airflow must have only the documented read-only landing grant");
+        assertTrue(provisioner.contains("permission_actions"),
+                "the provisioner must map ro and rw grants to different S3 actions");
+        assertTrue(provisioner.contains("Unsupported permission '$permission'; expected ro or rw"),
+                "unsupported permissions must fail closed");
+        assertTrue(provisioner.contains("PASS service-identity-read uid=$uid"),
+                "every service identity must prove it can read its first grant");
+        assertTrue(provisioner.contains("PASS service-identity-write-denied uid=$uid"),
+                "read-only identities must prove writes fail closed");
     }
 
     private static List<Path> scriptFiles() {

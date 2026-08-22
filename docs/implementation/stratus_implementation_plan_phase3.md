@@ -2,6 +2,16 @@
 
 > **Status: planning baseline only.** Increments 14-19 are scoped here but their implementation documents have not been written or authorized. This plan is not an executable runbook, and no Phase 3 increment should begin until its dedicated document applies the Stratus developer/production profile contract and passes architecture review.
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+These markers describe the portfolio sequence, not an authorization to start Phase 3. If Phase 3 is
+authorized, its functional data-product work must first be proven in development. Production
+topology, immutable promotion, HA, managed security, operational drills and readiness are activated
+only afterward through the separate
+[production deployment hardening plan](stratus_production_deployment_hardening.md).
+
 ## 1. Purpose
 
 This document defines how Stratus Phase 3 is built and verified.
@@ -17,12 +27,12 @@ References:
 
 ---
 
-## 2. Phase 3 Entry Criteria
+## 2. Phase 3 Development Entry Criteria
 
-Phase 3 should not begin until:
+If Phase 3 is authorized, its development implementation should not begin until:
 
-- Phase 1 operational acceptance has passed.
-- Phase 2 streaming operations and production readiness have passed, if streaming data products are in scope.
+- the Phase 1 development-system gate and the development contracts consumed by Phase 3 are accepted;
+- the Phase 2 developer gates are accepted if streaming data products are in scope;
 - Trino has measurable query performance baselines for the candidate gold datasets.
 - Iceberg table maintenance is stable enough that query performance issues can be separated from table-health issues.
 - Atlas ownership, stewardship, classification, and lineage are current for the candidate datasets.
@@ -31,6 +41,11 @@ Phase 3 should not begin until:
 - Product success criteria are defined before acceleration technology is selected.
 
 If the platform cannot yet explain who owns a dataset, what consumer workflow it serves, what its freshness promise is, or how quality is measured, Phase 3 should pause and fix those gaps before adding serving technology.
+
+Phase 1 operational acceptance and Phase 2 production readiness are prerequisites for production
+deployment of Phase 3 outputs, not for Phase 3 development. Production topology, availability,
+managed-security and operational-readiness requirements remain inactive until the later
+production-hardening stage is activated.
 
 ---
 
@@ -338,6 +353,7 @@ The following remain deferred to Phase 4 or later:
 - [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md) - Phase 1 foundation implementation plan
 - [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md) - Phase 2 streaming implementation plan
 - [stratus_phase1_operational_readiness.md](../operations/stratus_phase1_operational_readiness.md) - Phase 1 operational acceptance gate
+- [stratus_production_deployment_hardening.md](stratus_production_deployment_hardening.md) - deferred production deployment hardening stage
 
 ---
 

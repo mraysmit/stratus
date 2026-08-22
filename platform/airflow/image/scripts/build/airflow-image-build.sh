@@ -13,7 +13,8 @@ log() {
 }
 
 for required in \
-  "${IMAGE_DIR}/artifacts/spark-4.1.3-bin-hadoop3.tgz" \
+  "${IMAGE_DIR}/requirements.lock" \
+  "${IMAGE_DIR}/artifact-lock.properties" \
   "${IMAGE_DIR}/artifacts/wheelhouse/resolved-artifacts.sha256"; do
   if [[ ! -f "${required}" ]]; then
     log ERROR missing_artifact "path=${required} hint=run-airflow-image-resolve-artifacts"
@@ -21,6 +22,13 @@ for required in \
   fi
 done
 
-log INFO build_started "image=${IMAGE_TAG} context=${IMAGE_DIR}"
+(
+  cd "${IMAGE_DIR}/artifacts/wheelhouse"
+  sha256sum --check resolved-artifacts.sha256
+)
+WHEELHOUSE_BYTES="$(du -sb "${IMAGE_DIR}/artifacts/wheelhouse" | awk '{print $1}')"
+log INFO build_started "image=${IMAGE_TAG} context=${IMAGE_DIR} wheelhouse_bytes=${WHEELHOUSE_BYTES}"
 docker build --pull=false --tag "${IMAGE_TAG}" "${IMAGE_DIR}"
-log INFO build_completed "image=${IMAGE_TAG} duration_ms=$(( ($(date +%s%N) - START_NS) / 1000000 ))"
+IMAGE_ID="$(docker image inspect "${IMAGE_TAG}" --format '{{.Id}}')"
+printf '%s' "${IMAGE_ID}" > "${IMAGE_DIR}/artifacts/development-image-id.txt"
+log INFO build_completed "image=${IMAGE_TAG} image_id=${IMAGE_ID} duration_ms=$(( ($(date +%s%N) - START_NS) / 1000000 ))"

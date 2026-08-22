@@ -26,12 +26,11 @@ MSYS_NO_PATHCONV=1 docker run --rm --entrypoint /bin/bash "${IMAGE_TAG}" -euo pi
   assert_equal "3.14" "${python_version}" python_version
   python - <<'\''PY'\''
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
-
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 import boto3
 import pyspark
+import zstandard
 
 expected = {
     "apache-airflow": "3.3.1",
@@ -39,17 +38,22 @@ expected = {
     "apache-airflow-providers-apache-spark": "6.3.1",
     "aiohttp": "3.14.3",
     "boto3": "1.43.56",
-    "pyspark": "4.1.3",
-    "py4j": "0.10.9.9",
+    "pyspark-client": "4.1.3",
+    "zstandard": "0.25.0",
 }
 actual = {distribution: version(distribution) for distribution in expected}
 assert actual == expected, f"version mismatch: expected={expected}, actual={actual}"
 assert boto3.__version__ == "1.43.56", boto3.__version__
 assert pyspark.__version__ == "4.1.3", pyspark.__version__
+assert zstandard.__version__ == "0.25.0", zstandard.__version__
 assert SparkSubmitOperator.__name__ == "SparkSubmitOperator"
 assert S3KeySensor.__name__ == "S3KeySensor"
-pyspark_package = Path(pyspark.__file__).resolve().parent
-assert not (pyspark_package / "jars").exists(), pyspark_package
+try:
+    version("pyspark")
+except PackageNotFoundError:
+    pass
+else:
+    raise AssertionError("full PySpark distribution is installed")
 try:
     version("litellm")
 except PackageNotFoundError:
@@ -62,8 +66,15 @@ except PackageNotFoundError:
     pass
 else:
     raise AssertionError("unused Ray distribution is installed")
-print(f"provider_imports=ok versions={actual} litellm=absent ray=absent pyspark_jars=canonical")
+try:
+    version("apache-airflow-providers-google")
+except PackageNotFoundError:
+    pass
+else:
+    raise AssertionError("unused Google provider distribution is installed")
+print(f"provider_imports=ok versions={actual} litellm=absent ray=absent google_provider=absent pyspark_distribution=absent")
 PY
+  python -m pip check
   java -version
   spark-submit --version
   test ! -e /opt/spark/jars/derby-10.16.1.1.jar

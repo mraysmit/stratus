@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
  * <p>The assertions prove that the required files and source-level controls are present. They do
  * not prove image availability, PostgreSQL compatibility, successful migrations, Airflow health,
  * DAG scheduling, or idempotent lifecycle behavior. Those claims require the two-cycle live
- * developer test and the separately approved immutable image digest.
+ * developer test using the already-built local development image.
  *
  * <h2>Maintenance and promotion</h2>
  *
@@ -39,17 +39,16 @@ import org.junit.jupiter.api.Test;
  * complete repository guardrail module before repeating the live lifecycle test. Do not remove a
  * marker merely because a new upstream image changes its defaults.
  *
- * <p>This Compose topology is developer evidence only. UAT must deploy the developer-approved
- * registry digest with UAT-managed configuration and prove migrations, scheduling, Spark
- * submission, secrets, logging, alerting, and recovery. Production must promote the exact
- * UAT-approved digest without rebuilding and satisfy the production database, identity, backup,
- * observability, rollback, security-review, and change-approval gates.
+ * <p>This Compose topology is development evidence. Complete functional development acceptance
+ * before activating the separate production-hardening stage. That later stage reproduces the
+ * accepted build through the approved pipeline, publishes its immutable digest, and adds managed
+ * database, identity, backup, observability, rollback, security-review and change-approval controls.
  *
  * <p>This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-18
- * @version 1.1.0
+ * @version 1.2.0
  */
 @Tag("unit")
 final class AirflowDeveloperDeploymentTest {
@@ -73,6 +72,16 @@ final class AirflowDeveloperDeploymentTest {
             "scripts", "tests", "airflow-compose-verify-health.sh");
     private static final Path LIFECYCLE_TEST_PATH = Path.of(
             "scripts", "tests", "airflow-compose-lifecycle-test.sh");
+    private static final Path SPARK_OVERLAY_PATH = Path.of("compose.spark.yaml");
+    private static final Path SPARK_COMMON_SCRIPT_PATH = Path.of(
+            "scripts", "lib", "airflow-spark-common.sh");
+    private static final Path SPARK_SUBMISSION_TEST_PATH = Path.of(
+            "scripts", "tests", "airflow-spark-submission-test.sh");
+    private static final Path SPARK_SUBMISSION_DAG_PATH = Path.of(
+            "dags", "stratus_spark_submission_probe.py");
+    private static final Path SPARK_PROBE_SOURCE_PATH = Repo.root().resolve(Path.of(
+            "jobs", "spark", "src", "main", "java", "dev", "stratus", "jobs", "spark",
+            "SparkSubmissionProbeJob.java"));
 
     private static final String POSTGRES_VERSION = "17.10";
     private static final String EXPECTED_AIRFLOW_IMAGE = "stratus/airflow:dev";
@@ -90,7 +99,11 @@ final class AirflowDeveloperDeploymentTest {
             SHUTDOWN_SCRIPT_PATH,
             RESET_SCRIPT_PATH,
             HEALTH_TEST_PATH,
-            LIFECYCLE_TEST_PATH);
+            LIFECYCLE_TEST_PATH,
+            SPARK_OVERLAY_PATH,
+            SPARK_COMMON_SCRIPT_PATH,
+            SPARK_SUBMISSION_TEST_PATH,
+            SPARK_SUBMISSION_DAG_PATH);
 
     private static final List<String> REQUIRED_COMPOSE_MARKERS = List.of(
             "name: stratus-airflow-local",
@@ -114,11 +127,42 @@ final class AirflowDeveloperDeploymentTest {
     private static final List<String> REQUIRED_HEALTH_MARKERS = List.of(
             EXPECTED_HEALTH_ENDPOINT,
             "airflow jobs check --job-type SchedulerJob",
-            "airflow db check");
+            "airflow db check",
+            "tail -n 1");
     private static final List<String> REQUIRED_SECRET_GENERATION_MARKERS = List.of(
             "rand_hex",
             "rand_fernet_key",
             "chmod 600");
+    private static final List<String> REQUIRED_SPARK_OVERLAY_MARKERS = List.of(
+            "CEPH_HARNESS_NETWORK",
+            "spark-defaults.conf:ro",
+            "stratus-truststore.jks:ro",
+            "stratus-spark-jobs.jar:ro",
+            "stratus-iceberg-aws-runtime.jar:ro",
+            "airflow-scheduler.stratus.local",
+            "AIRFLOW_SPARK_RGW_SECRET_KEY");
+    private static final List<String> REQUIRED_SPARK_DAG_MARKERS = List.of(
+            "SparkSubmitOperator",
+            "conn_id=SPARK_CONNECTION_ID",
+            "application=SPARK_JOBS_JAR",
+            "java_class=SPARK_PROBE_CLASS",
+            "spark.driver.host",
+            "spark.driver.extraClassPath",
+            "spark.eventLog.dir");
+    private static final List<String> REQUIRED_SPARK_PROBE_SOURCE_MARKERS = List.of(
+            "SHOW NAMESPACES IN stratus",
+            "CREATE TABLE stratus.platform.",
+            "catalog_trust",
+            "object_store_trust");
+    private static final List<String> REQUIRED_SPARK_TEST_MARKERS = List.of(
+            "airflow dags test",
+            "airflow connections add",
+            "sha256sum",
+            "mkdir -p /opt/airflow/logs/spark-events",
+            "suiteRunId",
+            "elapsedMs",
+            "assert_not_logged",
+            "Spark RGW secret key");
 
     @Test
     void deploymentArtifactsHaveStableLocations() {
@@ -165,6 +209,29 @@ final class AirflowDeveloperDeploymentTest {
                 () -> assertTrue(template.contains("AIRFLOW_API_SECRET_KEY=")),
                 () -> assertContainsAll(
                         startup, REQUIRED_SECRET_GENERATION_MARKERS, "secret generation"));
+    }
+
+    @Test
+    void sparkSubmissionUsesTrackedDagProtectedConnectionAndMountedTrust() {
+        String overlay = read(SPARK_OVERLAY_PATH);
+        String common = read(SPARK_COMMON_SCRIPT_PATH);
+        String dag = read(SPARK_SUBMISSION_DAG_PATH);
+        String test = read(SPARK_SUBMISSION_TEST_PATH);
+        String probe = Repo.read(SPARK_PROBE_SOURCE_PATH);
+
+        assertAll(
+                () -> assertContainsAll(overlay, REQUIRED_SPARK_OVERLAY_MARKERS,
+                        "Spark submission Compose overlay"),
+                () -> assertTrue(common.contains("compose.spark.yaml")),
+                () -> assertTrue(common.contains("require_spark_cluster")),
+                () -> assertContainsAll(dag, REQUIRED_SPARK_DAG_MARKERS,
+                        "Spark submission DAG"),
+                () -> assertFalse(dag.contains("spark://spark-master.stratus.local"),
+                        "The DAG must resolve the Spark master through an Airflow connection"),
+                () -> assertContainsAll(test, REQUIRED_SPARK_TEST_MARKERS,
+                        "Spark submission live test"),
+                () -> assertContainsAll(probe, REQUIRED_SPARK_PROBE_SOURCE_MARKERS,
+                        "packaged Spark submission probe"));
     }
 
     private static void assertContainsAll(String content, List<String> markers, String contract) {

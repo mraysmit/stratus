@@ -20,7 +20,10 @@ HEALTH_JSON="$health" python -c 'import json, os; data=json.loads(os.environ["HE
 
 compose exec -T airflow-api-server airflow db check
 compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob --local
-executor="$(compose exec -T airflow-scheduler airflow config get-value core executor | tr -d '\r')"
+# Airflow emits CLI deprecation warnings to stdout before the requested value.
+# Select the final line so observability output cannot corrupt the value assertion.
+executor="$(compose exec -T airflow-scheduler airflow config get-value core executor \
+  | tail -n 1 | tr -d '\r')"
 [[ "$executor" == LocalExecutor ]] || fail "Expected LocalExecutor, observed '$executor'"
 postgres_version="$(compose exec -T postgres psql -U airflow -d airflow -Atc 'SHOW server_version;' | tr -d '\r')"
 [[ "$postgres_version" == 17.10* ]] || fail "Expected PostgreSQL 17.10, observed '$postgres_version'"

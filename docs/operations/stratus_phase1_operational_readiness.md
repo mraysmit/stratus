@@ -1,12 +1,19 @@
 # Stratus Phase 1 Operational Acceptance and Production Readiness
 
+> **Status: deferred acceptance instrument.** This checklist is intentionally inactive until the
+> complete Phase 1 development system and its end-to-end verification have been accepted.
+
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 ## 1. Purpose
 
 This document defines the operational acceptance gate for Stratus Phase 1.
 
 It is not Increment 8. It does not introduce another platform component. It verifies that the capabilities delivered by Increments 1 through 7 are complete, integrated, supportable, recoverable, observable, and secure enough to operate as a production-ready foundation.
 
-Phase 1 is accepted only when the platform can prove three things:
+Phase 1 production readiness is accepted only when the platform can prove three things:
 
 1. The end-to-end batch lakehouse path works after identity and security hardening.
 2. Operators can observe, recover, and support the platform using documented runbooks.
@@ -14,30 +21,31 @@ Phase 1 is accepted only when the platform can prove three things:
 
 This is exclusively the **production-profile gate**. Developer-profile evidence is useful regression input, but Docker Desktop/Podman convenience topology, reduced replicas, disposable or local-only state, local CA certificates, plaintext endpoints, bootstrap identities, and embedded production dependencies cannot satisfy this document. The evidence bundle must include a promotion manifest mapping every developer shortcut to the production setting that replaced it.
 
-Current implementation status (2026-08-18): the shared Airflow 3.3.1 image
-baseline `P1-4.1-S1` is accepted for developer use under
-`WAIVER-P1-4.1-S1-20260817` through 2026-09-16. Production promotion is
-prohibited. The 35 unique residual Spark/Hadoop JAR High findings require
-permanent disposition. Its host-side Spark/PySpark assembly path has been
-superseded by `P1-4.1-S2` after performance profiling; it is retained only as
-historical waiver evidence. The `P1-4.1-D1` developer harness and offline
-guardrails are implemented, but live acceptance is paused until `S2` publishes a
-registry-layer image consumed by immutable digest. No Increment 4 developer gate,
-Increment 4 production gate, or Phase 1 production-readiness acceptance is
-claimed by that waiver or the offline harness evidence.
+Current implementation status (2026-08-22): the shared Airflow 3.3.1 image
+task `P1-4.1-S2`, the `P1-4.1-D1` two-cycle LocalExecutor/PostgreSQL deployment,
+and the `P1-4.2-D1` live Spark/Polaris/Ceph submission were accepted for
+development. The current S2 scan has zero Critical and 61 High occurrences
+across 38 unique package/CVE pairs; they remain tracked in the development
+vulnerability review. The older S1 image and waiver are historical only.
+`P1-4.3-V1` and the Increment 4 developer gate remain open. Registry publication,
+immutable promotion, every Increment 4 production task, and this operational-
+readiness checklist remain deferred. None of the accepted development evidence
+claims production readiness.
 
 Reference:
 - [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
 - [stratus_implementation_plan_phase1.md](../implementation/stratus_implementation_plan_phase1.md)
 - [airflow_orchestration.md](../implementation/airflow_orchestration.md)
 - [Airflow/Spark runtime reassessment](../implementation/airflow_spark_runtime_reassessment_20260818.md)
-- [Airflow vulnerability waiver](../../platform/airflow/image/vulnerability-waiver.md)
+- [Airflow development acceptance](../../platform/airflow/development-acceptance-20260822.md)
+- [Current Airflow development vulnerability review](../../platform/airflow/image/development-vulnerability-review-s2.md)
+- [Production deployment hardening plan](../implementation/stratus_production_deployment_hardening.md)
 
 ---
 
 ## 2. Assumptions and Prerequisites
 
-Before this readiness review begins:
+Before this later-stage readiness review begins:
 
 - Increment 1 through Increment 7 completion gates have passed.
 - All verification suites from Increments 1 through 7 have current passing results.
@@ -49,6 +57,10 @@ Before this readiness review begins:
 - Ceph RGW, Polaris, Spark, Airflow, Trino, Atlas, Ranger, FreeIPA, and Keycloak are reachable over approved encrypted protocols.
 - The permanent Phase 1 verification dataset exists and can be safely recreated.
 - Runbooks and operational ownership are assigned before signoff.
+
+None of these prerequisites blocks current development implementation. They activate only after the
+development-system acceptance record is complete, as defined by the
+[production deployment hardening plan](../implementation/stratus_production_deployment_hardening.md).
 
 ### Reference documentation audit
 

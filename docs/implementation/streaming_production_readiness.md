@@ -1,5 +1,16 @@
 # Stratus Increment 13 - Streaming Operations and Production Readiness
 
+> **Status: deferred later-stage work.** This document is not active while streaming functionality
+> is still being implemented and accepted in development.
+
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Increment 13 starts only after the applicable development system is accepted and the separate
+[production deployment hardening plan](stratus_production_deployment_hardening.md) activates
+production tasks. Its checks do not block development implementation or developer gates.
+
 ## 1. Purpose
 
 This document is the operational acceptance and production readiness plan for Stratus Phase 2.

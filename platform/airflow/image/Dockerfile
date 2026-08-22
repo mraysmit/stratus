@@ -1,24 +1,21 @@
 # syntax=docker/dockerfile:1
-# Stratus Airflow client runtime. All remote inputs are resolved and verified by
-# scripts/build/airflow-image-resolve-artifacts.sh before this build starts.
-ARG TEMURIN_21_IMAGE=eclipse-temurin:21-jre@sha256:371da296b8cb74c7e53fbe7083d5374befc0011b493231d97d45fa789915e434
+# Stratus Airflow client runtime. Spark and Java come from a pinned official OCI
+# source stage; small Python inputs are resolved and verified before this build.
+ARG SPARK_SOURCE_IMAGE=apache/spark:4.1.3-scala2.13-java21-python3-ubuntu@sha256:bf9d035a7c32a8ca46aa58d6348182ffd7d2dff6409206ecfbb3915ff1fef211
 ARG AIRFLOW_BASE_IMAGE=apache/airflow:3.3.1-python3.14@sha256:d4ed2a3cf0103b52b69f5ee57cfaefd4274dca56b546c4396b83ccaf93057539
 
-FROM ${TEMURIN_21_IMAGE} AS temurin
+FROM ${SPARK_SOURCE_IMAGE} AS spark
 FROM ${AIRFLOW_BASE_IMAGE}
 
 USER root
 
-COPY --from=temurin /opt/java/openjdk /opt/java/openjdk
-COPY artifacts/spark-4.1.3-bin-hadoop3.tgz /tmp/spark-4.1.3-bin-hadoop3.tgz
+COPY --from=spark /opt/java/openjdk /opt/java/openjdk
+COPY --from=spark /opt/spark /opt/spark
 
-RUN tar -xzf /tmp/spark-4.1.3-bin-hadoop3.tgz -C /opt \
-    && mv /opt/spark-4.1.3-bin-hadoop3 /opt/spark \
-    && rm /opt/spark/jars/derby-10.16.1.1.jar \
+RUN rm /opt/spark/jars/derby-10.16.1.1.jar \
     && rm -f /usr/bin/docker \
        /home/airflow/.local/bin/uv \
        /home/airflow/.local/bin/uvx \
-    && rm /tmp/spark-4.1.3-bin-hadoop3.tgz \
     && mkdir -p /opt/stratus/wheelhouse \
     && chown -R airflow:0 /opt/spark /opt/stratus
 
@@ -33,8 +30,8 @@ ENV JAVA_HOME=/opt/java/openjdk \
 USER airflow
 
 # No index, dependency traversal, or build isolation is permitted here. The
-# hashes identify the PyPI inputs; the pinned Airflow base supplies transitive
-# dependencies and the build tools needed to install PySpark's source archive.
+# hashes identify the PyPI inputs; the pinned Airflow base supplies the declared
+# transitive dependencies except the explicitly locked zstandard wheel.
 RUN python -m pip install \
       --no-cache-dir \
       --no-index \
@@ -43,7 +40,5 @@ RUN python -m pip install \
       --no-build-isolation \
       --require-hashes \
       --requirement /opt/stratus/requirements.lock \
-    && python -m pip uninstall --yes litellm ray \
-    && PYSPARK_PACKAGE="$(python -c 'import pathlib, pyspark; print(pathlib.Path(pyspark.__file__).parent)')" \
-    && rm -rf "${PYSPARK_PACKAGE}/jars" \
+    && python -m pip uninstall --yes litellm ray apache-airflow-providers-google \
     && rm -rf /opt/stratus/wheelhouse

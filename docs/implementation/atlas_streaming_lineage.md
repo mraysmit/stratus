@@ -1,5 +1,16 @@
 # Stratus Increment 12 - Atlas Event Bus and Lineage Automation
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 12 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
@@ -392,7 +403,9 @@ Increment 12 is accepted when:
 - [ ] **P12** - Atlas no longer depends on an embedded notifier or an Atlas-dedicated Kafka service unless a documented production exception retains that service
 - [ ] **P13** - notification replay, Atlas restart, broker failure, lineage republish, and Ranger policy refresh drills have current evidence
 
-The developer gate completes engineering integration. Only the production gate allows Increment 13 to begin production-readiness signoff.
+The developer gate marks Increment 12 functionally accepted and completes the Phase 2 development
+integration. Increment 13 and the production gate remain inactive until the later production
+deployment hardening stage.
 
 ---
 

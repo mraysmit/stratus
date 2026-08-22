@@ -46,20 +46,31 @@ compose_runtime() {
 }
 
 compose() {
-  local runtime project_dir env_file compose_file
+  local runtime project_dir env_file compose_file overlay_file
+  local -a compose_files
   runtime="$(compose_runtime)"
   project_dir="$HARNESS_DIR"
   env_file="$HARNESS_DIR/.env"
   compose_file="$HARNESS_DIR/compose.yaml"
+  compose_files=(-f "$compose_file")
+  if [[ -n "${AIRFLOW_COMPOSE_OVERLAY:-}" ]]; then
+    overlay_file="$AIRFLOW_COMPOSE_OVERLAY"
+    compose_files+=(-f "$overlay_file")
+  fi
   if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
     project_dir="$(cygpath -w "$project_dir")"
     env_file="$(cygpath -w "$env_file")"
     compose_file="$(cygpath -w "$compose_file")"
+    compose_files=(-f "$compose_file")
+    if [[ -n "${AIRFLOW_COMPOSE_OVERLAY:-}" ]]; then
+      overlay_file="$(cygpath -w "$AIRFLOW_COMPOSE_OVERLAY")"
+      compose_files+=(-f "$overlay_file")
+    fi
     MSYS_NO_PATHCONV=1 "$runtime" compose --project-directory "$project_dir" \
-      --env-file "$env_file" -f "$compose_file" "$@"
+      --env-file "$env_file" "${compose_files[@]}" "$@"
   else
     "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" \
-      -f "$compose_file" "$@"
+      "${compose_files[@]}" "$@"
   fi
 }
 

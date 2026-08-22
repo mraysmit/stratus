@@ -1,5 +1,16 @@
 # Stratus Increment 8 - Kafka Event Backbone
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 8 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
@@ -891,7 +902,9 @@ Increment 8 is accepted when:
 - [ ] **P20** - Grafana dashboard shows broker, quorum, partition, request, auth, and lag signals
 - [ ] **P21** - Kafka runbook covers startup, shutdown, broker failure, topic creation, ACL change, retention change, and credential rotation
 
-The developer gate may unblock Increment 9 engineering. Only the production gate marks Increment 8 accepted in the Phase 2 tracker.
+The developer gate marks Increment 8 functionally accepted for the development stage and unblocks
+Increment 9 engineering. The production gate remains inactive until the later production deployment
+hardening stage.
 
 ---
 

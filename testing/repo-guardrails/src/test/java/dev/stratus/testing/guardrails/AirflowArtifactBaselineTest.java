@@ -68,9 +68,11 @@ import org.junit.jupiter.api.Test;
  *       {@code artifact-lock.properties}, immutable image digests, archive hashes, Dockerfile,
  *       resolver, smoke test, and scan test as one coherent version set. Resolve artifacts only in
  *       the approved preparation step; runtime hosts and image assembly remain offline.</li>
- *   <li>Build the image from a clean context, run the complete runtime smoke test, generate an SBOM,
- *       run the pinned vulnerability scan, and record timings and the resulting registry image
- *       digest. A local Docker image ID is not a promotable registry digest.</li>
+ *   <li>For development, build the image from a clean context, run the complete runtime smoke and
+ *       pinned vulnerability tests, and record timings and the local image identity.</li>
+ *   <li>In the later production-hardening stage, repeat the accepted build on the approved worker,
+ *       generate the SBOM and provenance, publish and sign the image, and record the immutable
+ *       registry digest. A local image ID is development evidence, not a promotable digest.</li>
  *   <li>Replace the vulnerability review for the new digest. Close, supersede, or reapprove every
  *       waiver explicitly; a waiver never transfers automatically to another image or version.</li>
  *   <li>Update the Airflow increment plan, Phase 1 tracker, readiness document, verification index,
@@ -78,36 +80,26 @@ import org.junit.jupiter.api.Test;
  *       and the full offline reactor before requesting environment acceptance.</li>
  * </ol>
  *
- * <h2>Developer, UAT, and production promotion</h2>
+ * <h2>Development first, production hardening later</h2>
  *
- * <p><strong>Developer:</strong> publish the rebuilt image to the approved registry and deploy it by
- * immutable registry digest. Prove repeatable startup and shutdown, PostgreSQL migration and
- * health, provider imports, DAG discovery, Spark submission compatibility, secret redaction, and
- * cleanup. A developer-only waiver may unblock engineering only when its scope, compensating
- * controls, owner, evidence, invalidation conditions, and expiry are recorded. It cannot satisfy a
- * UAT or production gate unless those environments are explicitly included and separately
- * approved.
+ * <p><strong>Development:</strong> build from pinned inputs, verify the local development image, and
+ * prove repeatable startup and shutdown, PostgreSQL migration and health, provider imports, DAG
+ * discovery, Spark submission compatibility, secret redaction, and cleanup. A development-only
+ * waiver may unblock engineering only when its scope, controls, owner, evidence, invalidation
+ * conditions, and expiry are recorded.
  *
- * <p><strong>UAT:</strong> promote the exact developer-approved registry digest without rebuilding.
- * Apply UAT configuration and managed secrets outside the image, then execute the live
- * orchestration verifier and representative DAGs against UAT PostgreSQL, Spark, Polaris, Ceph,
- * identity, logging, metrics, and alerting. Capture migration, retry, failure, recovery, security,
- * performance, and rollback evidence. Any finding or configuration variance must be resolved or
- * accepted by the named UAT authorities before promotion.
- *
- * <p><strong>Production:</strong> promote the exact UAT-approved digest; never rebuild a release
- * between environments. Verify signature/provenance, SBOM, scan policy, production-compatible
- * waiver decisions, database backup and restore readiness, secrets and certificate ownership,
- * remote-log durability, monitoring and alert routes, capacity, change approval, and a tested
- * rollback digest. Production acceptance belongs to the Phase 1 production gate and its named
- * owners, not to this unit test. Update these constants only for a newly reviewed release baseline,
- * never to describe an environment-specific mutable state.
+ * <p><strong>Later production-hardening stage:</strong> reproduce the accepted build contract on the
+ * approved worker, publish it by immutable digest, and add signature/provenance, SBOM, production
+ * scan policy, managed configuration and secrets, backup/restore, durable logs, monitoring,
+ * capacity, change approval and rollback evidence. Any UAT environment is part of this later
+ * promotion process. Production acceptance belongs to the separate hardening/readiness plan and
+ * its named owners, not to this unit test.
  *
  * <p>This class is part of the Stratus on-premises data fabric platform.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-08-16
- * @version 1.1.0
+ * @version 1.2.0
  */
 @Tag("unit")
 final class AirflowArtifactBaselineTest {
@@ -120,12 +112,17 @@ final class AirflowArtifactBaselineTest {
     private static final Path VULNERABILITY_REVIEW_PATH = Path.of("vulnerability-review.md");
     private static final Path VULNERABILITY_WAIVER_PATH = Path.of("vulnerability-waiver.md");
     private static final Path IMAGE_GITIGNORE_PATH = Path.of(".gitignore");
+    private static final Path IMAGE_DOCKERIGNORE_PATH = Path.of(".dockerignore");
     private static final Path ARTIFACT_RESOLVER_PATH = Path.of(
             "scripts", "build", "airflow-image-resolve-artifacts.sh");
+    private static final Path IMAGE_BUILD_PATH = Path.of(
+            "scripts", "build", "airflow-image-build.sh");
     private static final Path IMAGE_SMOKE_TEST_PATH = Path.of(
             "scripts", "tests", "airflow-image-smoke-test.sh");
     private static final Path VULNERABILITY_SCAN_TEST_PATH = Path.of(
             "scripts", "tests", "airflow-image-vulnerability-scan-test.sh");
+    private static final Path IMAGE_ACCEPTANCE_TEST_PATH = Path.of(
+            "scripts", "tests", "airflow-image-acceptance-test.sh");
 
     private static final Path PHASE_PLAN_PATH = Path.of(
             "docs", "implementation", "stratus_implementation_plan_phase1.md");
@@ -142,7 +139,6 @@ final class AirflowArtifactBaselineTest {
     private static final String AIRFLOW_VERSION = "3.3.1";
     private static final String SUPERSEDED_AIRFLOW_VERSION = "3.3.0";
     private static final String SPARK_PROVIDER = "apache-airflow-providers-apache-spark";
-    private static final String SPARK_PROVIDER_REQUIREMENT = SPARK_PROVIDER + "[pyspark]";
     private static final String SPARK_PROVIDER_VERSION = "6.3.1";
     private static final String AMAZON_PROVIDER = "apache-airflow-providers-amazon";
     private static final String AMAZON_PROVIDER_VERSION = "9.34.0";
@@ -151,9 +147,14 @@ final class AirflowArtifactBaselineTest {
     private static final String AIOHTTP = "aiohttp";
     private static final String AIOHTTP_VERSION = "3.14.3";
     private static final String PYSPARK = "pyspark";
+    private static final String PYSPARK_CLIENT = "pyspark-client";
+    private static final String ZSTANDARD = "zstandard";
+    private static final String ZSTANDARD_VERSION = "0.25.0";
     private static final String SPARK_VERSION = "4.1.3";
-    private static final String PY4J = "py4j";
-    private static final String PY4J_VERSION = "0.10.9.9";
+    private static final String SPARK_IMAGE_REPOSITORY = "apache/spark";
+    private static final String SPARK_IMAGE_VARIANT = "scala2.13-java21-python3-ubuntu";
+    private static final String SPARK_IMAGE_DIGEST =
+            "sha256:bf9d035a7c32a8ca46aa58d6348182ffd7d2dff6409206ecfbb3915ff1fef211";
     private static final String PYTHON_VERSION = "3.14";
     private static final String JAVA_VERSION = "21";
     private static final String TRIVY_VERSION = "0.74.0";
@@ -165,7 +166,16 @@ final class AirflowArtifactBaselineTest {
             "sha256:89db37a79b60dd9224874afca3a4b57afadbeab0a205f8835958fecea259bc97";
     private static final int EXPECTED_HIGH_OCCURRENCES = 84;
     private static final int EXPECTED_UNIQUE_PACKAGE_CVE_PAIRS = 35;
-    private static final String FOLLOW_UP_TASK_ID = "P1-4.1-S2";
+    private static final String CURRENT_IMAGE_TASK_ID = "P1-4.1-S2";
+    private static final String CURRENT_SUBMISSION_TASK_ID = "P1-4.2-D1";
+    private static final String NEXT_DEVELOPMENT_TASK_ID = "P1-4.3-V1";
+    private static final String DEVELOPMENT_ACCEPTANCE_DATE = "2026-08-22";
+    private static final String CURRENT_STAGE_MARKER =
+            "Current stage:** Development implementation and functional acceptance";
+    private static final String LATER_STAGE_MARKER =
+            "Later stage:** Production deployment hardening and readiness";
+    private static final String PRODUCTION_ACCEPTED_CLAIM = "production readiness accepted";
+    private static final String SHELL_CONJUNCTION = Character.toString('&') + '&';
 
     @Test
     void imageInputsAndVerificationScriptsHaveStableLocations() {
@@ -177,9 +187,12 @@ final class AirflowArtifactBaselineTest {
                 () -> assertFile(VULNERABILITY_REVIEW_PATH),
                 () -> assertFile(VULNERABILITY_WAIVER_PATH),
                 () -> assertFile(IMAGE_GITIGNORE_PATH),
+                () -> assertFile(IMAGE_DOCKERIGNORE_PATH),
                 () -> assertFile(ARTIFACT_RESOLVER_PATH),
+                () -> assertFile(IMAGE_BUILD_PATH),
                 () -> assertFile(IMAGE_SMOKE_TEST_PATH),
-                () -> assertFile(VULNERABILITY_SCAN_TEST_PATH));
+                () -> assertFile(VULNERABILITY_SCAN_TEST_PATH),
+                () -> assertFile(IMAGE_ACCEPTANCE_TEST_PATH));
     }
 
     @Test
@@ -189,13 +202,16 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(requirements.contains(
                         requirement(AIRFLOW_DISTRIBUTION, AIRFLOW_VERSION))),
                 () -> assertTrue(requirements.contains(
-                        requirement(SPARK_PROVIDER_REQUIREMENT, SPARK_PROVIDER_VERSION))),
+                        requirement(SPARK_PROVIDER, SPARK_PROVIDER_VERSION))),
                 () -> assertTrue(requirements.contains(
                         requirement(AMAZON_PROVIDER, AMAZON_PROVIDER_VERSION))),
                 () -> assertTrue(requirements.contains(requirement(BOTO3, BOTO3_VERSION))),
                 () -> assertTrue(requirements.contains(requirement(AIOHTTP, AIOHTTP_VERSION))),
-                () -> assertTrue(requirements.contains(requirement(PYSPARK, SPARK_VERSION))),
-                () -> assertTrue(requirements.contains(requirement(PY4J, PY4J_VERSION))),
+                () -> assertTrue(requirements.contains(requirement(PYSPARK_CLIENT, SPARK_VERSION))),
+                () -> assertTrue(requirements.contains(requirement(ZSTANDARD, ZSTANDARD_VERSION))),
+                () -> assertFalse(requirements.lines()
+                        .anyMatch(line -> line.startsWith(PYSPARK + "==")),
+                        "SparkSubmitOperator mode must not download the full PySpark distribution"),
                 () -> assertTrue(requirements.lines()
                                 .noneMatch(line -> line.trim().equals(
                                         requirement(AIRFLOW_DISTRIBUTION,
@@ -212,8 +228,10 @@ final class AirflowArtifactBaselineTest {
                 () -> assertLocked(lock, AMAZON_PROVIDER, AMAZON_PROVIDER_VERSION),
                 () -> assertLocked(lock, BOTO3, BOTO3_VERSION),
                 () -> assertLocked(lock, AIOHTTP, AIOHTTP_VERSION),
-                () -> assertLocked(lock, PYSPARK, SPARK_VERSION),
-                () -> assertLocked(lock, PY4J, PY4J_VERSION));
+                () -> assertLocked(lock, PYSPARK_CLIENT, SPARK_VERSION),
+                () -> assertLocked(lock, ZSTANDARD, ZSTANDARD_VERSION),
+                () -> assertFalse(lock.lines().anyMatch(line -> line.startsWith(PYSPARK + "==")),
+                        "The 455 MB PySpark source distribution must not enter the wheelhouse"));
     }
 
     @Test
@@ -226,15 +244,18 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(lock.contains(property("java.version", JAVA_VERSION))),
                 () -> assertTrue(lock.contains("constraints.url=https://raw.githubusercontent.com/")),
                 () -> assertTrue(lock.matches("(?s).*constraints.sha256=[0-9a-f]{64}.*")),
-                () -> assertTrue(lock.contains("spark.archive.url=https://archive.apache.org/")),
-                () -> assertTrue(lock.matches("(?s).*spark.archive.sha512=[0-9a-f]{128}.*")),
+                () -> assertTrue(lock.contains(property("spark.image",
+                        SPARK_IMAGE_REPOSITORY + ":" + SPARK_VERSION + "-" + SPARK_IMAGE_VARIANT))),
+                () -> assertTrue(lock.contains(property("spark.image.digest", SPARK_IMAGE_DIGEST))),
+                () -> assertFalse(lock.contains("spark.archive."),
+                        "S2 obtains Spark from OCI layers, not a host-side archive"),
                 () -> assertTrue(lock.contains("constraints-" + AIRFLOW_VERSION
                         + "/constraints-" + PYTHON_VERSION + ".txt")),
                 () -> assertTrue(lock.contains(property("airflow.image",
                         AIRFLOW_IMAGE_REPOSITORY + ":" + AIRFLOW_VERSION
                                 + "-python" + PYTHON_VERSION))),
-                () -> assertTrue(lock.contains(property(
-                        "java.image", "eclipse-temurin:" + JAVA_VERSION + "-jre"))));
+                () -> assertFalse(lock.contains("java.image="),
+                        "The pinned Spark OCI stage supplies its matched Java runtime"));
     }
 
     @Test
@@ -242,10 +263,16 @@ final class AirflowArtifactBaselineTest {
         String dockerfile = read(DOCKERFILE_PATH);
         assertAll(
                 () -> assertTrue(dockerfile.contains("ARG AIRFLOW_BASE_IMAGE=")),
-                () -> assertTrue(dockerfile.contains("ARG TEMURIN_21_IMAGE=")),
-                () -> assertTrue(dockerfile.contains("artifacts/wheelhouse/")),
+                () -> assertTrue(dockerfile.contains("ARG SPARK_SOURCE_IMAGE="
+                        + SPARK_IMAGE_REPOSITORY + ":" + SPARK_VERSION + "-"
+                        + SPARK_IMAGE_VARIANT + "@" + SPARK_IMAGE_DIGEST)),
+                () -> assertTrue(dockerfile.contains("FROM ${SPARK_SOURCE_IMAGE} AS spark")),
+                () -> assertTrue(dockerfile.contains("COPY --from=spark /opt/spark /opt/spark")),
                 () -> assertTrue(dockerfile.contains(
-                        "COPY artifacts/spark-" + SPARK_VERSION + "-bin-hadoop3.tgz")),
+                        "COPY --from=spark /opt/java/openjdk /opt/java/openjdk")),
+                () -> assertTrue(dockerfile.contains("artifacts/wheelhouse/")),
+                () -> assertFalse(dockerfile.contains("COPY artifacts/spark-"),
+                        "The Spark archive must not enter the host build context"),
                 () -> assertTrue(dockerfile.contains("--no-index")),
                 () -> assertTrue(dockerfile.contains("--no-deps")),
                 () -> assertTrue(dockerfile.contains("--require-hashes")),
@@ -258,12 +285,19 @@ final class AirflowArtifactBaselineTest {
     @Test
     void resolverAndSmokeTestCoverIntegrityAndRuntimeCompatibility() {
         String resolver = read(ARTIFACT_RESOLVER_PATH);
+        String build = read(IMAGE_BUILD_PATH);
         String smoke = read(IMAGE_SMOKE_TEST_PATH);
         String scan = read(VULNERABILITY_SCAN_TEST_PATH);
+        String acceptance = read(IMAGE_ACCEPTANCE_TEST_PATH);
+        String dockerignore = read(IMAGE_DOCKERIGNORE_PATH);
         assertAll(
                 () -> assertTrue(read(IMAGE_GITIGNORE_PATH).contains("artifacts/")),
                 () -> assertTrue(read(IMAGE_GITIGNORE_PATH).contains("!scripts/build/"),
                         "The root build/ ignore rule must not hide Airflow's build scripts"),
+                () -> assertTrue(dockerignore.contains("**")),
+                () -> assertTrue(dockerignore.contains("!artifacts/wheelhouse/**")),
+                () -> assertFalse(dockerignore.contains("spark-4.1.3-bin-hadoop3.tgz"),
+                        "The S2 build context must never include the Spark archive"),
                 () -> assertTrue(resolver.contains(REQUIREMENTS_LOCK_PATH.toString())),
                 () -> assertTrue(resolver.contains(ARTIFACT_LOCK_PATH.toString())),
                 () -> assertTrue(resolver.contains("sub(/\\r$/"),
@@ -274,11 +308,16 @@ final class AirflowArtifactBaselineTest {
                                 "find \"${WHEELHOUSE_DIR}\" -maxdepth 1 -type f -delete"),
                         "Resolution must remove superseded artifacts before populating the wheelhouse"),
                 () -> assertTrue(resolver.contains("sha256sum --check")),
-                () -> assertTrue(resolver.contains("sha512sum --check")),
+                () -> assertFalse(resolver.contains("sha512sum"),
+                        "The resolver must not download or hash a Spark archive"),
                 () -> assertTrue(smoke.contains("airflow version")),
                 () -> assertTrue(smoke.contains("SparkSubmitOperator")),
                 () -> assertTrue(smoke.contains("S3KeySensor")),
                 () -> assertTrue(smoke.contains("pyspark.__version__")),
+                () -> assertTrue(smoke.contains("python -m pip check")),
+                () -> assertTrue(smoke.contains("pyspark-client")),
+                () -> assertTrue(smoke.contains("version(\"pyspark\")"),
+                        "The smoke test must prove the full PySpark distribution is absent"),
                 () -> assertTrue(smoke.contains(
                                 "\"" + AIOHTTP + "\": \"" + AIOHTTP_VERSION + "\""),
                         "The runtime smoke must prove that the vulnerable upstream aiohttp was replaced"),
@@ -287,8 +326,25 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(scan.contains("aquasec/trivy:" + TRIVY_VERSION + "@sha256:")),
                 () -> assertTrue(scan.contains("docker save")),
                 () -> assertTrue(scan.contains("--input")),
+                () -> assertTrue(scan.contains("tar -xOf \"${ARCHIVE}\" manifest.json")),
+                () -> assertTrue(scan.contains("]] " + SHELL_CONJUNCTION
+                        + " archive_matches_image; then")),
+                () -> assertTrue(scan.contains("cd \"${ARTIFACT_DIR}\"")),
+                () -> assertTrue(scan.contains(
+                        "docker save --output \"${ARCHIVE_NAME}\" \"${IMAGE_TAG}\"")),
+                () -> assertTrue(build.contains("development-image-id.txt")),
+                () -> assertTrue(scan.contains("scan-archive-image-id.txt")),
+                () -> assertTrue(scan.contains("trap cleanup EXIT")),
+                () -> assertTrue(scan.contains("trap 'exit 130' INT")),
+                () -> assertTrue(scan.contains("docker rm --force")),
                 () -> assertFalse(scan.contains("/var/run/docker.sock"),
-                        "The scanner must not receive control of the host Docker daemon"));
+                        "The scanner must not receive control of the host Docker daemon"),
+                () -> assertTrue(acceptance.contains(ARTIFACT_RESOLVER_PATH.getFileName().toString())),
+                () -> assertTrue(acceptance.contains("airflow-image-build.sh")),
+                () -> assertTrue(acceptance.contains(IMAGE_SMOKE_TEST_PATH.getFileName().toString())),
+                () -> assertTrue(acceptance.contains(VULNERABILITY_SCAN_TEST_PATH.getFileName().toString())),
+                () -> assertTrue(acceptance.contains("phase_completed")),
+                () -> assertTrue(acceptance.contains("duration_ms")));
     }
 
     @Test
@@ -297,10 +353,11 @@ final class AirflowArtifactBaselineTest {
         String smoke = read(IMAGE_SMOKE_TEST_PATH);
         String scan = read(VULNERABILITY_SCAN_TEST_PATH);
         assertAll(
-                () -> assertTrue(dockerfile.contains("pip uninstall --yes litellm ray"),
-                        "LiteLLM and Ray are inherited from the Airflow base but are not Stratus runtime dependencies"),
-                () -> assertTrue(dockerfile.contains("rm -rf \"${PYSPARK_PACKAGE}/jars\""),
-                        "The PySpark wheel JAR tree must not duplicate the canonical Spark archive"),
+                () -> assertTrue(dockerfile.contains(
+                                "pip uninstall --yes litellm ray apache-airflow-providers-google"),
+                        "The unused Google/AI bundle inherited from Airflow must be removed as one unit"),
+                () -> assertFalse(dockerfile.contains("PYSPARK_PACKAGE"),
+                        "S2 must not install and then delete a duplicate PySpark runtime"),
                 () -> assertTrue(dockerfile.contains("rm /opt/spark/jars/derby-10.16.1.1.jar"),
                         "The unused vulnerable Derby server JAR must not be shipped"),
                 () -> assertTrue(dockerfile.contains("rm -f /usr/bin/docker"),
@@ -311,7 +368,8 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(smoke.contains("litellm")),
                 () -> assertTrue(smoke.contains("version(\"ray\")"),
                         "The runtime smoke must prove that the unused Ray distribution is absent"),
-                () -> assertTrue(smoke.contains("pyspark_package / \"jars\"")),
+                () -> assertTrue(smoke.contains("version(\"apache-airflow-providers-google\")"),
+                        "The runtime smoke must prove the unused Google provider is absent"),
                 () -> assertTrue(smoke.contains("/opt/spark/jars/derby-10.16.1.1.jar")),
                 () -> assertTrue(smoke.contains("test ! -e /usr/bin/docker")),
                 () -> assertTrue(smoke.contains("test ! -e /home/airflow/.local/bin/uv")),
@@ -343,7 +401,7 @@ final class AirflowArtifactBaselineTest {
     }
 
     @Test
-    void implementationStatusDocumentsPreserveThePausedAcceptanceBoundary() {
+    void implementationStatusDocumentsPreserveTheDevelopmentFirstBoundary() {
         String phasePlan = readRepo(PHASE_PLAN_PATH);
         String incrementPlan = readRepo(INCREMENT_PLAN_PATH);
         String taskAudit = readRepo(TASK_AUDIT_PATH);
@@ -356,19 +414,11 @@ final class AirflowArtifactBaselineTest {
                 () -> assertCurrentDeveloperBoundary(taskAudit),
                 () -> assertCurrentDeveloperBoundary(readiness),
                 () -> assertCurrentDeveloperBoundary(verifierIndex),
-                () -> assertTrue(phasePlan.contains(markdownCode(FOLLOW_UP_TASK_ID))
-                        && phasePlan.contains("live acceptance is paused")),
-                () -> assertTrue(incrementPlan.contains(markdownCode(FOLLOW_UP_TASK_ID))
-                        && incrementPlan.contains("registry layers")
-                        && incrementPlan.contains("live acceptance paused")),
-                () -> assertTrue(taskAudit.contains(markdownCode(FOLLOW_UP_TASK_ID))
-                        && taskAudit.contains("live lifecycle")
-                        && taskAudit.contains("acceptance is paused")),
-                () -> assertTrue(readiness.contains(markdownCode(FOLLOW_UP_TASK_ID))
-                        && readiness.contains("live acceptance is paused")),
-                () -> assertTrue(verifierIndex.contains("live lifecycle")
-                        && verifierIndex.contains("acceptance is")
-                        && verifierIndex.contains("paused pending a published registry-layer image digest")));
+                () -> assertCurrentAirflowStatus(phasePlan),
+                () -> assertCurrentAirflowStatus(incrementPlan),
+                () -> assertCurrentAirflowStatus(taskAudit),
+                () -> assertCurrentAirflowStatus(readiness),
+                () -> assertCurrentAirflowStatus(verifierIndex));
     }
 
     private static void assertLocked(String lock, String distribution, String version) {
@@ -397,10 +447,20 @@ final class AirflowArtifactBaselineTest {
 
     private static void assertCurrentDeveloperBoundary(String document) {
         assertAll(
-                () -> assertTrue(document.contains(WAIVER_ID)),
-                () -> assertTrue(document.contains(WAIVER_EXPIRY_DATE)),
-                () -> assertTrue(document.contains("production")
-                        && document.contains("prohibited")));
+                () -> assertTrue(document.contains(CURRENT_STAGE_MARKER),
+                        "The document must identify development as the current stage"),
+                () -> assertTrue(document.contains(LATER_STAGE_MARKER),
+                        "The document must identify production hardening as the later stage"),
+                () -> assertFalse(document.toLowerCase().contains(PRODUCTION_ACCEPTED_CLAIM),
+                        "Current implementation status must not claim production acceptance"));
+    }
+
+    private static void assertCurrentAirflowStatus(String document) {
+        assertAll(
+                () -> assertTrue(document.contains(markdownCode(CURRENT_IMAGE_TASK_ID))),
+                () -> assertTrue(document.contains(markdownCode(CURRENT_SUBMISSION_TASK_ID))),
+                () -> assertTrue(document.contains(markdownCode(NEXT_DEVELOPMENT_TASK_ID))),
+                () -> assertTrue(document.contains(DEVELOPMENT_ACCEPTANCE_DATE)));
     }
 
     private static String requirement(String distribution, String version) {

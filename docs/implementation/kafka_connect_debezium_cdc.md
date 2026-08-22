@@ -1,5 +1,16 @@
 # Stratus Increment 9 - Kafka Connect and Debezium CDC
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 9 of the Stratus platform as defined in [stratus_implementation_plan_phase2.md](stratus_implementation_plan_phase2.md).
@@ -632,7 +643,9 @@ Increment 9 is accepted when:
 - [ ] **P16** - Java verification suite passes
 - [ ] **P17** - no one-worker topology, plaintext control API, generated source credential, or disposable internal-topic setting remains in production
 
-The developer gate may unblock Increment 10 engineering. Only the production gate marks Increment 9 accepted in the Phase 2 tracker.
+The developer gate marks Increment 9 functionally accepted for the development stage and unblocks
+Increment 10 engineering. The production gate remains inactive until the later production deployment
+hardening stage.
 
 ---
 

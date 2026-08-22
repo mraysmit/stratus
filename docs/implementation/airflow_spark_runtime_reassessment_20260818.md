@@ -1,23 +1,32 @@
 # Airflow and Spark Runtime Assembly Reassessment - 2026-08-18
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
 ## 1. Status and decision
 
-Status: **accepted direction; implementation and live acceptance pending**.
+Status: **implemented and accepted for development on 2026-08-22**.
 
 The original `P1-4.1-S1` Airflow image remains historical developer evidence under
 `WAIVER-P1-4.1-S1-20260817`. Its local assembly path is not the target for new
-builds. `P1-4.1-D1` live acceptance is paused until `P1-4.1-S2` replaces that path.
+builds. `P1-4.1-S2`, the `P1-4.1-D1` two-cycle lifecycle, and the
+`P1-4.2-D1` live Spark submission proof have now passed. Exact image identity,
+phase timings, runtime versions, vulnerability results, lifecycle observations,
+and cross-component submission evidence are recorded in
+[`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
 
 The replacement design separates these concerns:
 
 1. the Airflow control-plane and Python provider layer;
 2. the Spark submission runtime and Java 21 layer;
-3. image publication and security assessment; and
+3. development image assessment and later production publication; and
 4. deployment and workflow validation.
 
-An ordinary developer deployment or live test must consume an already-published,
-digest-qualified image. It must not resolve dependencies, assemble the image, or
-run a vulnerability scan as part of startup.
+An ordinary developer deployment or live test must consume an already-built local development
+image. It must not resolve dependencies, assemble the image, or run a vulnerability scan as part of
+startup. Registry publication, final SBOM/provenance/signing and digest-qualified promotion are
+added later by the production deployment hardening stage.
 
 ## 2. Evidence that triggered the reassessment
 
@@ -57,8 +66,11 @@ evidence and may be removed later through an explicit cleanup operation.
   artifacts. The resolver must not recreate a second complete Spark runtime.
 - Preserve one canonical Spark/Hadoop JAR tree and the existing hardening and
   scan controls.
-- Publish the completed image once, record its digest and provenance, and make
-  developer and production manifests consume that digest without rebuilding.
+- Record the local development image identity, smoke and scan evidence, and make
+  the developer lifecycle consume it without rebuilding.
+- After development-system acceptance, publish the same accepted build contract once through
+  `P1-0.1`, record its digest, SBOM and provenance, and make production manifests consume that
+  digest without rebuilding.
 - Do not expose a container-engine control socket to Airflow tasks or scanners.
 
 The multi-stage boundary is an assembly mechanism, not permission to use floating
@@ -72,9 +84,8 @@ was removed from the default provider installation because it is larger than
 400 MB, while non-Spark-Connect modes are directed to install the extra.
 `SparkSubmitOperator`, however, delegates execution to the `spark-submit` binary.
 
-The refactor must not assume that the 455.5 MB PySpark source package is either
-required or safely removable. Before locking `requirements.lock`, run a focused
-compatibility proof that covers:
+The implementation did not assume that the 455.5 MB PySpark source package was
+either required or safely removable. Its focused compatibility proof covered:
 
 1. provider and `SparkSubmitOperator` imports;
 2. provider dependency validation;
@@ -83,10 +94,16 @@ compatibility proof that covers:
 5. success, non-zero exit, status, logging, and secret-redaction behavior; and
 6. any Python task or hook path that Stratus actually intends to support.
 
-If the supported contract truly requires the PySpark Python distribution, it
-must be supplied as a separately cached, immutable layer without copying another
-Spark JAR tree through the host context. An unsupported dependency suppression or
-an untested `PYTHONPATH` workaround is not acceptable.
+The accepted Stratus contract uses `SparkSubmitOperator` and the packaged Java
+job through the OCI-sourced `spark-submit` client. Provider dependencies are
+satisfied by the lightweight `pyspark-client` 4.1.3 package; the full PySpark
+distribution and its duplicate JAR tree are absent. A live Spark 4.1.3 client to
+Spark 4.1.2 cluster submission successfully performed distributed work, Polaris
+catalog discovery, and an Iceberg create/write/read/drop cycle on Ceph. If a
+future DAG introduces an in-process Python Spark API, its release must first add
+a focused failing contract test and reassess whether a separately cached,
+immutable PySpark layer is required. Unsupported dependency suppression and
+untested `PYTHONPATH` workarounds remain prohibited.
 
 ## 5. Validation tiers and time budgets
 
@@ -96,7 +113,7 @@ Build, deployment, integration, and release evidence are separate gates:
 |---|---|---|---|
 | Repository guardrails | locks, digests, Compose structure, scripts, Java policy | ordinary offline `mvn verify`; no containers | under 60 seconds when dependencies are warm |
 | Image smoke | imports, versions, Java, `spark-submit`, removed surfaces | once per candidate image | under 2 minutes after required image layers are cached |
-| Developer lifecycle | PostgreSQL migration, Airflow health, two start/stop cycles | consume a prebuilt digest; never build | under 3 minutes on the reference developer host |
+| Developer lifecycle | PostgreSQL migration, Airflow health, two start/stop cycles | consume the already-built local development image; never build | under 3 minutes on the reference developer host |
 | Spark submission integration | one shared live stack, one real packaged JAR, positive and negative outcomes | no repeated cluster recreation per assertion | under 5 minutes with the data plane already ready |
 | Security and provenance | SBOM, archive scan, waiver/reachability review, publication | release/image pipeline, not ordinary developer startup | measured separately; no developer-loop budget |
 
@@ -113,11 +130,20 @@ every trivial assertion.
 
 - `P1-4.1-S1`: retains its dated evidence and developer-only waiver; superseded
   as the build approach for new images.
-- `P1-4.1-S2`: new shared remediation task for the registry-layer Spark client,
-  PySpark compatibility decision, publication, scan, smoke test, and timings.
-- `P1-4.1-D1`: harness implementation and offline guardrails are complete; live
-  two-cycle acceptance is paused until a `P1-4.1-S2` digest is available.
-- `P1-4.2-D1`: remains pending and supplies the real Spark submission proof.
+- `P1-4.1-S2`: accepted 2026-08-22. The OCI-stage Spark client, lightweight
+  Python dependency contract, small build context, smoke test, zero-Critical
+  scan gate, and phase timings passed.
+- `P1-4.1-D1`: accepted 2026-08-22. Both LocalExecutor/PostgreSQL lifecycle
+  cycles, migrations, health checks, and clean shutdowns passed.
+- `P1-0.1` and `P1-4.1-P1`: later production-hardening tasks for approved build-service execution,
+  publication, immutable digest, SBOM, provenance and hardened deployment.
+- `P1-4.2-D1`: accepted 2026-08-22. The immutable Airflow DAG submitted the
+  packaged Java probe to the existing Spark developer cluster and proved
+  distributed execution, Polaris/Ceph trust, protected connection metadata,
+  secret-redacted output, cleanup, and detailed phase timing.
+- `P1-4.3-V1`: is in progress. Its first landing-to-bronze source contract and
+  Airflow parse/registry proof pass; live execution, the remaining DAG behavior,
+  and the executable orchestration verifier remain.
 
 The Java policy remains Java 21 for Stratus-owned builds and Spark/Airflow
 runtimes. Component-mandated exceptions, including the selected Trino release's

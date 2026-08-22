@@ -1,5 +1,16 @@
 # Stratus Increment 2 — Iceberg Tables and Polaris Catalog
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 2 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -528,7 +539,7 @@ podman run --rm --env-file /etc/stratus/verifiers/iceberg-polaris.env \
   ${STRATUS_ICEBERG_POLARIS_VERIFIER_IMAGE}
 ```
 
-Image publication is deferred under `P1-0.1` by owner direction, so the developer track currently runs the suite from the workstation build. That exception is recorded in the Phase 1 plan and does not extend to production acceptance.
+The development stage runs the suite from the pinned, locally built verifier image and records that image's identity with the evidence. Immutable registry publication, scanning, SBOM, provenance, and signing are separate requirements in the later production deployment-hardening stage under `P1-0.1`; they are not exceptions to development acceptance.
 
 All fifteen live checks must pass before Increment 2 is considered complete.
 
@@ -604,8 +615,8 @@ These child tasks are the execution source of truth for Phase 1 parents `P1-2.1`
 
 | ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, image, and client artifacts; done when CI publishes immutable artifacts and compatibility evidence. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; SBOM | Build, scan, provenance, digest, startup smoke | D1, P1-P2 | Platform owner | Upstream compatibility change | Not started |
-| `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. **TLS closed 2026-08-08:** an nginx proxy terminates TLS for `polaris.stratus.local` on a certificate signed by this harness's own disposable CA, Polaris publishes no host port, and the plain-HTTP switch was removed rather than defaulted off. Verified live — the certificate carries `polaris.stratus.local`, `localhost` and `127.0.0.1`, plain HTTP on the published port is refused, and the catalog conformance suite passes 24/24 over HTTPS. Digest pin belongs to `P1-2.2-S1` | Accepted |
+| `P1-2.2-S1` | `P1-2.2` | Shared | Lock Polaris, Iceberg, database, local image, and client artifacts; done for development when pinned versions and the locally built verifier identity are recorded and startup and compatibility checks pass. | Build owner | P1-1 developer gate | `platform/polaris/image/`; dependency lock; development image identity | Local build, pinned-input inspection, startup smoke, catalog compatibility suite | D1 | Platform owner | Immutable publication, scan, SBOM, provenance, and signing remain later production deployment-hardening work under `P1-0.1` | Accepted |
+| `P1-2.2-D1` | `P1-2.2` | Developer | Implement idempotent developer deployment and reset; done after two start/verify/stop cycles. | Platform owner | `P1-2.2-S1` | `platform/polaris/compose-service/`; scripts | Repeated lifecycle transcripts and health report | D1 | Platform owner | Two start/verify/stop cycles recorded 2026-08-03 against live `apache/polaris:1.5.0` (transcripts in `platform/polaris/compose-service/logs/`): fail-fast provider check per ADR-P1-003, verified `polaris.bootstrap.credentials` consumption without stdout echo, OAuth token issuance (HTTP 200), unauthenticated 401, idempotent shutdown and reset. **TLS closed 2026-08-08:** an nginx proxy terminates TLS for `polaris.stratus.local` on a certificate signed by this harness's own disposable CA, Polaris publishes no host port, and the plain-HTTP switch was removed rather than defaulted off. Verified live — the certificate carries `polaris.stratus.local`, `localhost` and `127.0.0.1`, plain HTTP on the published port is refused, and the catalog conformance suite passes 24/24 over HTTPS. The development tag/digest record belongs to `P1-2.2-S1`; immutable digest enforcement belongs to `P1-0.1` and `P1-2.2-P1` | Accepted |
 | `P1-2.3-D1` | `P1-2.3` | Developer | Bootstrap catalog, namespaces, Ceph locations, and scoped lab credentials; done when positive/negative access matches the documented policy. | Data-platform owner | `P1-2.2-D1`, P1-1 developer gate | `platform/polaris/compose-service/scripts/verify/polaris-compose-bootstrap-catalog.sh`; Ceph harness svc-polaris identity and bucket policies; `environments/developer/polaris/` | Namespace/location inventory and access tests | D1 | Security owner | Verified 2026-08-04: scoped `svc-polaris` RGW identity created by the Ceph harness with bucket policies on the five Stratus buckets only (positive write/list/delete probe passed; denied-bucket listing failed closed); `stratus` catalog and four zone namespaces bootstrapped idempotently over the live API with a forged-token 401 negative. Transcripts in both harness `logs/` directories. Engine principals (svc-spark, svc-trino) belong to their increments; Polaris-to-RGW TLS trust for table IO is wired under `P1-2.4` | Accepted |
 | `P1-2.4-V1` | `P1-2.4` | Developer | Create verification tables and run Java catalog/storage tests; done when create/read/write/evolution and quality-table checks pass. | QA owner | `P1-2.3-D1` | verifier tests and reports | JUnit, object inventory, metadata inspection | D1-D2 | Data-engineering owner | Verified 2026-08-06: `platform.quality_check_results` provisioned idempotently by the catalog bootstrap (14 columns, identity(zone)+day(checked_at) partitioning, append-only marker); live catalog conformance 9/9 including schema evolution and the quality-table schema/partition/write/read-back checks, proven red (4 failures with the table absent) then green after bootstrap; object inventory confirmed Parquet under `data/zone=platform/checked_at_day=.../` with Iceberg metadata in `stratus-platform`. Transcripts in `platform/polaris/compose-service/logs/`. **Addendum 2026-08-07:** a fifteenth check (`rejectsARowThatLeavesARequiredColumnNull`) was added to close the schema-enforcement row in the Phase 1 plan §5 verification table, which no existing check covered. **Closed 2026-08-08:** the fifteenth check ran live against the Ceph and Polaris harnesses and passed in a 15/15 suite, logging `Negative check confirmed check=required-column-null`; transcript `platform/polaris/compose-service/logs/catalog-conformance-tests-20260808T062350Z.log`. The check was also hardened the same day: its record was built inside the `assertThrows` lambda, so a failure before the write was attempted satisfied the assertion and the snapshot and row-count assertions then held vacuously — demonstrated by injecting an unrelated construction fault, which the original form reported as a PASS with a `Negative check confirmed` evidence line. The record is now built outside the lambda, which also establishes that the record API accepts a null in a required column and enforcement comes from the write path | Accepted |
 | `P1-2.1-P1` | `P1-2.1` | Production | Provision supported external PostgreSQL with TLS, backup, HA/RTO/RPO, and managed credentials. | Database owner | `P1-2.2-S1`, P1-1 production preparation | `platform/polaris/database/`; `environments/production/polaris/`; runbook | TLS connection, failover, backup/restore evidence | P1-P3 | Operations owner | Database capacity/support | Not started |
@@ -630,8 +641,8 @@ This table is the promotion manifest that gate **D2** requires. Every developer-
 | `svc-polaris` storage credentials pulled from dev-mode OpenBao, whose secrets are discarded on shutdown | `P1-2.3-P1` against the approved secret store (ADR-P1-004) with rotation | restore the prior approved credential reference if a policy regression appears; never copy a credential by hand into `.env` |
 | Local lab CA material trusted by the verifier and the catalog for the Ceph RGW chain | `P1-7.4` | never fall back to an insecure client or a disabled trust check to make a run pass |
 | Catalog and namespaces re-bootstrapped by script after every restart, because the metastore is not persistent | `P1-2.1-P1` supplies a persistent metastore; `P1-2.6-R1` supplies the restore path | a production catalog is never re-bootstrapped to recover state — that is a restore, and re-bootstrapping instead of restoring is a stop condition |
-| Polaris pinned by tag `apache/polaris:1.5.0` with the observed digest recorded but not enforced | `P1-2.2-S1` publishes the immutable digest with scan, SBOM, and provenance | production runs by digest only; this clause shares the `P1-0.1` publication deferral and cannot be closed from a tag pin |
-| Catalog verifier executed from the workstation build rather than a published image | `P1-2.2-S1` under `P1-0.1` | production acceptance requires the digest-qualified verifier image; workstation runs support developer evidence only |
+| Polaris pinned by tag `apache/polaris:1.5.0` with the observed digest recorded but not enforced | `P1-0.1` and `P1-2.2-P1` publish and deploy the immutable digest with scan, SBOM, and provenance | production runs by digest only; this later-stage condition cannot be closed from a tag pin |
+| Catalog verifier executed from the pinned workstation build rather than a published image | `P1-0.1` and the production qualification workflow | production acceptance requires the digest-qualified verifier image; workstation runs are the intended development evidence |
 | Engine principals `svc-spark` and `svc-trino` not yet created in Polaris | `P1-2.3-P1`, with each engine's own increment creating its principal | production gate P7 stays open until both exist with least-privilege catalog roles; no engine shares the root principal |
 
 ### Gate traceability rule
@@ -647,7 +658,7 @@ The gate identifiers below are normative. A gate checkbox may be marked complete
 
 The Polaris 1.5.0 release line has no embedded H2 backend; its test-only metastore is `in-memory` and its persistent backend is `relational-jdbc`. D1 and D2 name that mode directly — an H2 reading of either gate is not satisfiable against this release.
 
-**Readiness.** Both gates have their producing evidence, and every producing task is `Verified`. This is the gate matrix and evidence index `P1-2.G-D` requires as its artifact.
+**Development acceptance.** Both gates have their producing evidence, and every producing task is `Accepted`. This is the gate matrix and evidence index `P1-2.G-D` requires as its artifact.
 
 | Gate | Producing task | Evidence | Verified |
 |---|---|---|---|
@@ -694,7 +705,9 @@ Increment 2 is accepted when all of the following are true:
 - [ ] **P12** - Catalog audit logging and catalog/metadata-store alerts are configured
 - [ ] **P13** - Polaris logs show no errors during the verification test run
 
-The developer gate may unblock Increment 3 engineering. Only the production gate marks Increment 2 accepted in the Phase 1 tracker.
+The developer gate marks Increment 2 functionally accepted for the current development stage and
+unblocks Increment 3 engineering. The production gate remains inactive until the later production
+deployment hardening stage.
 
 ---
 

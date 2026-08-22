@@ -1,5 +1,16 @@
 # Stratus Increment 5 — Trino Interactive Query
 
+**Current stage:** Development implementation and functional acceptance.
+
+**Later stage:** Production deployment hardening and readiness.
+
+Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
+implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
+retained as later-stage backlog and do not block development unless they expose a fundamental
+functional or architectural incompatibility. The development environment proves the intended
+versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
+stage changes deployment hardening and operational qualities around that proven system.
+
 ## 1. Purpose
 
 This document is the technical implementation plan for Increment 5 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
@@ -812,7 +823,9 @@ Increment 5 is accepted when all of the following are true:
 - [ ] **P17** - Trino does not expose an unmanaged catalog path that bypasses Polaris
 - [ ] **P18** - Ranger enforcement, managed Ceph RGW credentials, durable logs, capacity evidence, and node/coordinator recovery evidence are complete
 
-The developer gate may unblock Increment 6 engineering. Only the production gate marks Increment 5 accepted in the Phase 1 tracker.
+The developer gate marks Increment 5 functionally accepted for the current development stage and
+unblocks Increment 6 engineering. The production gate remains inactive until the later production
+deployment hardening stage.
 
 ---
 
