@@ -160,6 +160,17 @@ final class SparkVerificationLoggingTest {
         assertTrue(LoggerFactory.getILoggerFactory().getClass().getName().toLowerCase().contains("log4j"));
     }
 
+    @Test
+    void awsBundleCompatibilityBridgeRoutesThroughLog4j2() {
+        String loggerName = SparkVerificationLogging.LOGGER_NAME;
+        software.amazon.awssdk.thirdparty.org.slf4j.LoggerFactory.getLogger(loggerName)
+                .info("AWS SDK BUNDLE LOGGING PROBE");
+
+        assertTrue(capture.messages(Level.INFO).stream()
+                        .anyMatch(message -> message.contains("AWS SDK BUNDLE LOGGING PROBE")),
+                "the pinned AWS bundle must not silently fall back to its NOP logger");
+    }
+
     private String messageAt(Level level) {
         List<String> messages = capture.messages(level);
         assertFalse(messages.isEmpty(), "no record at " + level);

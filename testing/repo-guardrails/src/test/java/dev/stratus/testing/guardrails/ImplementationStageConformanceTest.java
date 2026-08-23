@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
  * @version 1.0.0
  */
 @Tag("unit")
-final class ImplementationStageContractTest {
+final class ImplementationStageConformanceTest {
 
     private static final String CURRENT_STAGE_MARKER =
             "**Current stage:** Development implementation and functional acceptance.";

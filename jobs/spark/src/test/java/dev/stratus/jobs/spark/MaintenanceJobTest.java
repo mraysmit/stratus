@@ -69,4 +69,18 @@ final class MaintenanceJobTest {
         assertTrue(MaintenanceJob.ARGUMENTS.contains("olderThan"));
         assertTrue(MaintenanceJob.ARGUMENTS.contains("retainLast"));
     }
+
+    @Test
+    void policySelectedRewriteCarriesItsTriggerAndTargetIntoIcebergOptions() {
+        assertEquals(
+                "CALL stratus.system.rewrite_data_files(table => "
+                        + "'stratus.bronze.airflow_maintenance_probe_contract', "
+                        + "options => map('min-input-files', '2', "
+                        + "'target-file-size-bytes', '536870912'))",
+                MaintenanceJob.rewriteDataFilesCall(
+                        "stratus",
+                        "stratus.bronze.airflow_maintenance_probe_contract",
+                        2,
+                        512L * 1024L * 1024L));
+    }
 }

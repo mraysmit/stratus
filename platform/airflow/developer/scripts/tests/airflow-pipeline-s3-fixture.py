@@ -9,10 +9,10 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-CUSTOMER_CSV = """customer_id,customer_name,email,country
-1001,Ada Lovelace,ada@example.test,GB
-1002,Grace Hopper,grace@example.test,US
-1003,Edsger Dijkstra,edsger@example.test,NL
+CUSTOMER_CSV = """customer_id,customer_name,email,country,updated_at
+1001,Ada Lovelace,ada@example.test,GB,2026-08-22T12:00:00Z
+1002,Grace Hopper,grace@example.test,US,2026-08-22T12:01:00Z
+1003,Edsger Dijkstra,edsger@example.test,NL,2026-08-22T12:02:00Z
 """
 
 

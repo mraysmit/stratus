@@ -42,12 +42,14 @@ assert_not_logged() {
 }
 
 run_verifier() {
+  compose exec -T airflow-scheduler mkdir -p /opt/airflow/logs/spark-events
   compose exec -T airflow-scheduler spark-submit \
     --master spark://spark-master.stratus.local:7077 \
     --class "$VERIFIER_CLASS" \
     --conf spark.driver.host=airflow-scheduler.stratus.local \
     --conf spark.driver.bindAddress=0.0.0.0 \
-    --conf spark.driver.extraClassPath=/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar \
+    --conf spark.driver.extraClassPath=/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar:/opt/stratus/runtime/hadoop-aws.jar:/opt/stratus/runtime/aws-sdk-bundle.jar:/opt/stratus/runtime/analyticsaccelerator-s3.jar:/opt/stratus/runtime/log4j-slf4j-impl.jar \
+    --conf spark.eventLog.dir=file:///opt/airflow/logs/spark-events \
     --conf spark.cores.max=2 \
     --conf spark.executor.cores=1 \
     /opt/stratus/jobs/stratus-spark-jobs.jar \
@@ -87,13 +89,13 @@ phase_complete "airflow_startup" "$phase_started_ms"
 phase_started_ms="$(date +%s%3N)"
 compose exec -T airflow-scheduler airflow connections delete spark_default >/dev/null 2>&1 || true
 compose exec -T airflow-scheduler airflow connections add spark_default \
-  --conn-type spark --conn-host spark://spark-master.stratus.local --conn-port 7077
+  --conn-type spark --conn-host spark://spark-master.stratus.local --conn-port 7077 >/dev/null
 compose exec -T airflow-scheduler airflow connections delete "$LANDING_CONNECTION_ID" >/dev/null 2>&1 || true
 compose exec -T airflow-scheduler bash -c \
   'airflow connections add stratus_landing --conn-type aws \
     --conn-login "$AIRFLOW_LANDING_RGW_ACCESS_KEY" \
     --conn-password "$AIRFLOW_LANDING_RGW_SECRET_KEY" \
-    --conn-extra "{\"endpoint_url\":\"$CEPH_RGW_ENDPOINT\",\"verify\":\"/opt/stratus/certs/stratus-ca.crt\",\"config_kwargs\":{\"s3\":{\"addressing_style\":\"path\"}}}"'
+    --conn-extra "{\"endpoint_url\":\"$CEPH_RGW_ENDPOINT\",\"verify\":\"/opt/stratus/certs/stratus-ca.crt\",\"config_kwargs\":{\"s3\":{\"addressing_style\":\"path\"}}}"' >/dev/null
 compose exec -T airflow-scheduler airflow variables set "$LANDING_BUCKET_VARIABLE" "$LANDING_BUCKET"
 compose exec -T airflow-scheduler airflow connections get "$LANDING_CONNECTION_ID" >/dev/null
 phase_complete "protected_connections" "$phase_started_ms"
@@ -129,7 +131,9 @@ assert_not_logged "$AIRFLOW_DB_PASSWORD" "Airflow database password"
 assert_not_logged "$AIRFLOW_FERNET_KEY" "Airflow Fernet key"
 assert_not_logged "$AIRFLOW_JWT_SECRET" "Airflow JWT secret"
 assert_not_logged "$AIRFLOW_API_SECRET_KEY" "Airflow API secret"
+assert_not_logged "$AIRFLOW_SPARK_RGW_ACCESS_KEY" "Spark RGW access key"
 assert_not_logged "$AIRFLOW_SPARK_RGW_SECRET_KEY" "Spark RGW secret key"
+assert_not_logged "$AIRFLOW_LANDING_RGW_ACCESS_KEY" "Airflow landing RGW access key"
 assert_not_logged "$AIRFLOW_LANDING_RGW_SECRET_KEY" "Airflow landing RGW secret key"
 
 log "event=airflow_pipeline_suite_completed suiteRunId=$suite_run_id status=SUCCESS elapsedMs=$(( $(date +%s%3N) - started_ms )) evidence=$evidence_file"

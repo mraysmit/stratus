@@ -99,11 +99,23 @@ development risk. The historical S1 waiver does not apply to S2.
 the packaged Java probe from the Spark 4.1.3 client to the Spark 4.1.2 developer
 cluster and proved distributed execution, Polaris/Ceph Iceberg operations,
 protected connection handling, immutable input hashes, secret-redacted output,
-cleanup and phase timings. `P1-4.3-V1` is now in progress: its first
-landing-to-bronze source contract and Airflow parse/registry proof passed, while
-the live and remaining DAG/verifier scenarios remain. The Increment 4 developer
-gate follows. Immutable publication and every Increment 4
-production task remain deferred to the later production-hardening stage. This
+cleanup and phase timings. `P1-4.3-V1` is now in progress: its source contract
+and Airflow parse/registry proof passed on 2026-08-22, and its live
+landing-to-bronze ingestion, bronze-quality, independent verification,
+access/secret-key redaction, timing and cleanup slice passed on 2026-08-23 in
+187.300 seconds. The subsequent 356.572-second bronze-to-silver suite proved
+both accepted and deliberately blocked promotion, deterministic three-row
+silver output, two passing silver checks, independent no-write verification,
+redaction, timings and exact cleanup. The subsequent 716.033-second
+silver-to-gold suite proved governed three-group aggregation, two passing gold
+checks, independent accepted verification, deliberate silver-quality blocking,
+no gold write, redaction, timings and exact cleanup. The 326.099-second
+table-maintenance suite then proved explicit policy skip, policy-triggered
+compaction from three files to one with all three rows preserved, independent
+row/file/snapshot verification, metadata metrics, redaction, timings and exact
+purge cleanup. All four DAGs parse and register. Retry, alert and remaining
+API-verifier scenarios remain. The
+Increment 4 developer gate follows. This
 checkpoint updates delivery state only; the detailed gap lists below remain the
 dated 2026-07-11 audit history. See
 [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).

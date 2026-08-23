@@ -26,7 +26,7 @@ ready.
 |---|---|---|
 | [`compose-cluster/`](compose-cluster/README.md) | Disposable developer harness: one master and two workers attached to the Ceph harness network per [ADR-P1-003](../../docs/decisions/ADR-P1-003-composed-harness-internal-dns.md) | Live-validated |
 | `aws-runtime/` | Iceberg Spark/AWS runtime with Iceberg's AWS SDK isolated from Hadoop S3A | Offline-validated |
-| `image/` | Runtime image: one Hadoop 3.4.3 line plus the isolated Iceberg runtime, with a checksum lock | Image-inspected; live revalidation pending |
+| `image/` | Runtime image: one Hadoop 3.4.3 line plus the isolated Iceberg runtime and AWS-bundle logging bridge, with a checksum lock | Rebuilt and live Airflow/S3A-validated 2026-08-23; full conformance rerun pending |
 | `tests/` | Live cluster, binding, worker-distribution, latency, and pipeline suites, plus offline guardrails | Offline-validated; live revalidation pending |
 
 The batch jobs themselves are not here. Stratus-authored workload code lives

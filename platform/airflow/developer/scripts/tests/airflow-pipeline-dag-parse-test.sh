@@ -6,7 +6,12 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/airflow-compose-common.sh"
 
 SUITE_RUN_ID="airflow-pipeline-parse-$(date -u +%Y%m%dT%H%M%SZ)"
-EXPECTED_DAG_ID="stratus_landing_to_bronze"
+EXPECTED_DAG_IDS=(
+  "stratus_landing_to_bronze"
+  "stratus_bronze_to_silver"
+  "stratus_silver_to_gold"
+  "stratus_table_maintenance"
+)
 SUITE_STARTED_MS="$(date +%s%3N)"
 
 mkdir -p "$HARNESS_DIR/evidence"
@@ -42,9 +47,11 @@ printf '%s\n' "$import_errors_json"
 
 dag_list="$(compose exec -T airflow-scheduler airflow dags list --output json)"
 printf '%s\n' "$dag_list"
-grep -Fq "\"dag_id\": \"$EXPECTED_DAG_ID\"" <<<"$dag_list" \
-  || grep -Fq "\"dag_id\":\"$EXPECTED_DAG_ID\"" <<<"$dag_list" \
-  || fail "Airflow did not register $EXPECTED_DAG_ID"
-log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=parse status=SUCCESS dagId=$EXPECTED_DAG_ID elapsedMs=$(elapsed_ms "$phase_started_ms")"
+for expected_dag_id in "${EXPECTED_DAG_IDS[@]}"; do
+  grep -Fq "\"dag_id\": \"$expected_dag_id\"" <<<"$dag_list" \
+    || grep -Fq "\"dag_id\":\"$expected_dag_id\"" <<<"$dag_list" \
+    || fail "Airflow did not register $expected_dag_id"
+done
+log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=parse status=SUCCESS dagIds=${EXPECTED_DAG_IDS[*]} elapsedMs=$(elapsed_ms "$phase_started_ms")"
 
 log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID status=SUCCESS elapsedMs=$(elapsed_ms "$SUITE_STARTED_MS") evidence=$evidence_file"
