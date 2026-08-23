@@ -49,10 +49,21 @@ compose exec -T airflow-scheduler test -r /opt/stratus/spark-conf/spark-defaults
 compose exec -T airflow-scheduler test -r /opt/stratus/certs/stratus-truststore.jks
 compose exec -T airflow-scheduler test -r /opt/stratus/jobs/stratus-spark-jobs.jar
 compose exec -T airflow-scheduler test -r /opt/stratus/runtime/stratus-iceberg-aws-runtime.jar
+compose exec -T airflow-scheduler test -r /opt/stratus/runtime/hadoop-aws.jar
+compose exec -T airflow-scheduler test -r /opt/stratus/runtime/aws-sdk-bundle.jar
+compose exec -T airflow-scheduler test -r /opt/stratus/runtime/analyticsaccelerator-s3.jar
+compose exec -T airflow-scheduler test -r /opt/stratus/runtime/log4j-slf4j-impl.jar
 runtime_hash="$(sha256sum "${iceberg_runtime_candidates[0]}" | awk '{print $1}')"
 grep -Fq "$runtime_hash  $(basename "${iceberg_runtime_candidates[0]}")" \
   "$REPO_DIR/platform/spark/image/artifact-lock.txt" \
   || fail "Mounted Iceberg/AWS runtime does not match artifact-lock.txt"
+for locked_runtime in "${hadoop_aws_candidates[0]}" "${aws_sdk_bundle_candidates[0]}" \
+    "${s3_accelerator_candidates[0]}" "${aws_bundle_logging_bridge_candidates[0]}"; do
+  locked_runtime_hash="$(sha256sum "$locked_runtime" | awk '{print $1}')"
+  grep -Fq "$locked_runtime_hash  $(basename "$locked_runtime")" \
+    "$REPO_DIR/platform/spark/image/artifact-lock.txt" \
+    || fail "Mounted $(basename "$locked_runtime") does not match artifact-lock.txt"
+done
 compose exec -T airflow-scheduler mkdir -p /opt/airflow/logs/spark-events
 compose exec -T airflow-scheduler test -w /opt/airflow/logs/spark-events
 phase_complete "immutable_inputs" "$phase_started_ms"

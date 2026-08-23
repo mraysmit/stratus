@@ -41,6 +41,8 @@ final class SparkRuntimeCompatibilityTest {
             "dev/stratus/thirdparty/iceberg/amazon/awssdk/services/s3/S3Client.class";
     private static final String PUBLIC_ACCELERATOR_RESOURCE =
             "software/amazon/s3/analyticsaccelerator/request/Constants.class";
+    private static final String LEGACY_SLF4J_BINDER_RESOURCE =
+            "org/slf4j/impl/StaticLoggerBinder.class";
 
     @Test
     void icebergAndItsRelocatedAmazonLibrariesComeFromTheIsolatedRuntime() throws Exception {
@@ -63,5 +65,18 @@ final class SparkRuntimeCompatibilityTest {
                         SparkRuntimeBaseline.analyticsAcceleratorJar()),
                 "Hadoop " + SparkRuntimeBaseline.HADOOP_VERSION
                         + "'s exact accelerator must own Constants: " + publicAccelerator);
+    }
+
+    @Test
+    void awsBundleLegacySlf4jContractHasOneLog4jCompatibilityBinder() throws Exception {
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        var binders = Collections.list(loader.getResources(LEGACY_SLF4J_BINDER_RESOURCE));
+
+        assertEquals(1, binders.size(),
+                "the AWS bundle compatibility contract requires exactly one legacy binder: "
+                        + binders);
+        assertTrue(binders.get(0).toString().contains(
+                        SparkRuntimeBaseline.awsBundleLoggingBridgeJar()),
+                "the binder must be the version-aligned Log4j2 bridge: " + binders);
     }
 }

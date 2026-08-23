@@ -117,10 +117,28 @@ bash platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh
 
 ## Remaining development work
 
-`P1-4.3-V1` is now in progress. Its landing-to-bronze source contract and
-Airflow-native parse/registry proof have passed; see
+`P1-4.3-V1` remains in progress. Its landing-to-bronze, bronze-to-silver and
+silver-to-gold source contracts, metadata-policy maintenance contract,
+Airflow-native four-DAG parse/registry proof, and
+complete live accepted/blocked slices passed on 2026-08-23; see
 [`pipeline-development-progress-20260822.md`](pipeline-development-progress-20260822.md).
-Live ingestion, transformation, quality-halt, maintenance, retry and alert DAG
-behavior plus the executable orchestration verifier remain. Increment 4's
-overall developer gate remains open until those workflow behaviors pass.
-Production tasks remain deferred.
+The live runs proved protected landing detection, three-row ingestion, bronze
+quality, quality-gated transformation and materialisation, deterministic silver
+output, governed gold aggregation, silver/gold quality, deliberate promotion
+blocking with no target write, independent verification, timed exact cleanup,
+access/secret-key redaction, AWS SDK logging through Log4j2, and maintenance
+run/skip behavior. Maintenance run
+`airflow-table-maintenance-20260823T113447Z` explicitly skipped below threshold,
+then compacted three files to one above threshold while preserving three rows;
+its independent verification, purge cleanup, redaction and timing checks passed
+in 326,099 ms. The
+bronze-to-silver suite `airflow-bronze-to-silver-20260823T084502Z` completed in
+356,572 ms; the full silver-to-gold accepted/blocked suite
+`airflow-silver-to-gold-20260823T093453Z` completed in 716,033 ms. Transient
+retry, permanent-failure alert and the remaining full-pipeline
+API-verifier scenarios remain. Increment 4's overall developer gate remains
+open until those behaviors pass. The post-maintenance offline reactor passed all
+11 modules and 272 tests in 1 minute 22 seconds with zero failures, errors, or
+skips. `git diff --check` was clean. Airflow, Spark, Polaris, OpenBao and Ceph
+were stopped through checked-in lifecycle scripts, and the final Docker query
+found no running Stratus containers.

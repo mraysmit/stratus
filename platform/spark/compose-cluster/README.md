@@ -150,6 +150,13 @@ Spark's Log4j2 provider. The level and suite run ID are propagated into the
 host test JVM, Compose services, submitted drivers, and Spark executors so
 records from every execution path use the same controls and correlation root.
 
+The locked image also carries `log4j-slf4j-impl` solely for the shaded AWS SDK
+bundle's legacy `StaticLoggerBinder` discovery. It does not replace or add a
+second SLF4J 2 provider: Spark application code continues through
+`log4j-slf4j2-impl`, and the offline logging test proves both paths reach the
+same Log4j2 core. This prevents Hadoop S3A/AWS diagnostics from silently falling
+back to NOP logging.
+
 Every record can carry three distinct correlation fields: `suiteRunId` for the
 complete test invocation, `jobRunId` for one packaged platform job, and
 `operationId` for a timed SQL, command, catalog, or job-phase operation. Nested

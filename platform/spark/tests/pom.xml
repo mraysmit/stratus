@@ -38,6 +38,14 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- AWS SDK v2's shaded bundle bridge still discovers the SLF4J
+                 1.x binder contract. This coexists with the SLF4J 2 provider
+                 above and routes both APIs into the same Log4j2 core. -->
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j-impl</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
             <scope>test</scope>

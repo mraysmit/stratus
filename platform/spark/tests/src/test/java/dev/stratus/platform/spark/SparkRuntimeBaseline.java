@@ -39,6 +39,7 @@ final class SparkRuntimeBaseline {
     static final List<String> SUPERSEDED_HADOOP_VERSIONS = List.of(BASE_HADOOP_VERSION, "3.4.1");
     static final String AWS_SDK_BUNDLE_VERSION = "2.35.4";
     static final String ANALYTICS_ACCELERATOR_VERSION = "1.3.1";
+    static final String LOG4J_VERSION = "2.24.3";
     static final String ISOLATED_ICEBERG_RUNTIME_ARTIFACT = "stratus-iceberg-aws-runtime";
     static final String HADOOP_AWS_ARTIFACT = "hadoop-aws";
 
@@ -59,6 +60,10 @@ final class SparkRuntimeBaseline {
 
     static String analyticsAcceleratorJar() {
         return "analyticsaccelerator-s3-" + ANALYTICS_ACCELERATOR_VERSION;
+    }
+
+    static String awsBundleLoggingBridgeJar() {
+        return jar("log4j-slf4j-impl", LOG4J_VERSION);
     }
 
     private static String jar(String artifact, String version) {

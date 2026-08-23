@@ -14,13 +14,26 @@ from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOpe
 SPARK_CONNECTION_ID = "spark_default"
 SPARK_JOBS_JAR = "/opt/stratus/jobs/stratus-spark-jobs.jar"
 SPARK_RUNTIME_JAR = "/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar"
+HADOOP_AWS_JAR = "/opt/stratus/runtime/hadoop-aws.jar"
+AWS_SDK_BUNDLE_JAR = "/opt/stratus/runtime/aws-sdk-bundle.jar"
+S3_ACCELERATOR_JAR = "/opt/stratus/runtime/analyticsaccelerator-s3.jar"
+AWS_BUNDLE_LOGGING_BRIDGE_JAR = "/opt/stratus/runtime/log4j-slf4j-impl.jar"
+SPARK_DRIVER_EXTRA_CLASSPATH = ":".join(
+    [
+        SPARK_RUNTIME_JAR,
+        HADOOP_AWS_JAR,
+        AWS_SDK_BUNDLE_JAR,
+        S3_ACCELERATOR_JAR,
+        AWS_BUNDLE_LOGGING_BRIDGE_JAR,
+    ]
+)
 SPARK_EVENT_LOG_DIRECTORY = "file:///opt/airflow/logs/spark-events"
 SPARK_DRIVER_HOST = "airflow-scheduler.stratus.local"
 
 SPARK_SUBMISSION_CONF = {
     "spark.driver.host": SPARK_DRIVER_HOST,
     "spark.driver.bindAddress": "0.0.0.0",
-    "spark.driver.extraClassPath": SPARK_RUNTIME_JAR,
+    "spark.driver.extraClassPath": SPARK_DRIVER_EXTRA_CLASSPATH,
     "spark.eventLog.dir": SPARK_EVENT_LOG_DIRECTORY,
     "spark.local.dir": "/tmp/stratus-spark-local",
     "spark.cores.max": "2",

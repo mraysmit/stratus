@@ -26,6 +26,7 @@
         <!-- Increment 3 approved matrix; see spark_compute.md section 5. -->
         <iceberg.version>1.11.0</iceberg.version>
         <hadoop.aws.version>3.4.3</hadoop.aws.version>
+        <log4j.version>2.24.3</log4j.version>
     </properties>
 
     <dependencies>
@@ -54,6 +55,21 @@
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client-runtime</artifactId>
             <version>${hadoop.aws.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <!-- AWS SDK v2 bundle-logging-bridge discovers the legacy
+                 StaticLoggerBinder even when the host uses SLF4J 2. Only the
+                 compatibility binder is copied: Spark supplies the exact
+                 SLF4J 2 API and Log4j2 implementation. -->
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j-impl</artifactId>
+            <version>${log4j.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>*</groupId>

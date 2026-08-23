@@ -123,6 +123,7 @@ The artifact lock for this image contains:
 | `hadoop-client-api` / `hadoop-client-runtime` | 3.4.3 | One matched Hadoop client line, replacing the base image's 3.4.2 pair |
 | `hadoop-aws` | 3.4.3 | S3A filesystem used for `s3a://` landing files and Spark event logs |
 | Hadoop S3A runtime dependencies | resolved from the 3.4.3 POM | SDK 2.35.4 and connector-specific dependencies, locked with checksums |
+| `log4j-slf4j-impl` | 2.24.3 | Legacy binder discovery adapter required by the shaded AWS SDK v2 bundle; delegates its records into Spark's Log4j2 core |
 
 The selected Spark image carries Hadoop 3.4.2. The Dockerfile removes its API
 and runtime pair before copying the complete 3.4.3 pair and `hadoop-aws` 3.4.3.
@@ -366,6 +367,17 @@ transcript, emits automatic JUnit/class/suite timing distributions, and records
 SQL, catalog, client-lifecycle, platform-job and subprocess durations. Provider
 tests fail if more than one SLF4J implementation is present, preventing the
 duplicate-provider and JUL bridge loops previously observed in this module.
+
+Hadoop's pinned AWS SDK v2 `bundle` includes a shaded logging bridge that still
+looks up the SLF4J 1.x `StaticLoggerBinder` contract. With only Spark's correct
+SLF4J 2 provider it emits a warning and silently selects a NOP logger. The image
+therefore includes the version-aligned `log4j-slf4j-impl` compatibility binder
+without its transitive SLF4J API; the normal `log4j-slf4j2-impl` service provider
+remains the only SLF4J 2 provider. `SparkVerificationLoggingTest` proves an AWS
+bundle record reaches the same Log4j2 capture and separately proves that exactly
+one SLF4J 2 provider is active. Airflow run
+`airflow-pipeline-20260823T071231Z` live-revalidated this classpath without the
+AWS NOP fallback while reading a real Ceph landing object.
 
 ### Telemetry delivery and remaining work
 

@@ -55,7 +55,7 @@ public final class MaintenanceJob {
             try {
                 List<String> metrics = run(spark, targetTable, operations,
                         arguments.optional("olderThan").orElse(null),
-                        arguments.optional("retainLast").orElse(null), runId);
+                        arguments.optional("retainLast").orElse(null), runId, null, null);
                 metrics.forEach(LOGGER::info);
                 LOGGER.info("MAINTENANCE COMPLETE table={} operations={}",
                         targetTable, String.join(",", operations));
@@ -67,11 +67,14 @@ public final class MaintenanceJob {
 
     public static List<String> run(SparkSession spark, String targetTable, String[] operations,
                             String olderThan, String retainLast) {
-        return run(spark, targetTable, operations, olderThan, retainLast, "maintenance");
+        return run(spark, targetTable, operations, olderThan, retainLast,
+                "maintenance", null, null);
     }
 
     private static List<String> run(SparkSession spark, String targetTable, String[] operations,
-                                    String olderThan, String retainLast, String runId) {
+                                    String olderThan, String retainLast, String runId,
+                                    Integer rewriteMinInputFiles,
+                                    Long rewriteTargetFileSizeBytes) {
         String catalog = QualityCheckJob.splitIdentifier(targetTable)[0];
         var metrics = new ArrayList<String>();
         LOGGER.debug("MAINTENANCE planned table={} operations={} olderThan={} retainLast={}",
@@ -83,7 +86,8 @@ public final class MaintenanceJob {
                     () -> switch (operation) {
                 case EXPIRE_SNAPSHOTS -> expireSnapshots(spark, catalog, targetTable,
                         olderThan, retainLast);
-                case REWRITE_DATA_FILES -> rewriteDataFiles(spark, catalog, targetTable);
+                case REWRITE_DATA_FILES -> rewriteDataFiles(spark, catalog, targetTable,
+                        rewriteMinInputFiles, rewriteTargetFileSizeBytes);
                 case DELETE_ORPHAN_FILES -> deleteOrphanFiles(spark, catalog, targetTable, olderThan);
                 default -> throw new IllegalArgumentException(
                         "Unsupported maintenance operation: " + operation);
@@ -91,6 +95,21 @@ public final class MaintenanceJob {
             metrics.add(metric);
         }
         return metrics;
+    }
+
+    static List<String> runPolicySelected(SparkSession spark, String targetTable,
+                                          String[] operations, String olderThan,
+                                          String retainLast, String runId,
+                                          int rewriteMinInputFiles,
+                                          long rewriteTargetFileSizeBytes) {
+        if (rewriteMinInputFiles < 1 || rewriteTargetFileSizeBytes < 1) {
+            throw new IllegalArgumentException(
+                    "Rewrite policy values must be positive: minInputFiles="
+                            + rewriteMinInputFiles + " targetFileSizeBytes="
+                            + rewriteTargetFileSizeBytes);
+        }
+        return run(spark, targetTable, operations, olderThan, retainLast, runId,
+                rewriteMinInputFiles, rewriteTargetFileSizeBytes);
     }
 
     private static String expireSnapshots(SparkSession spark, String catalog, String targetTable,
@@ -108,14 +127,27 @@ public final class MaintenanceJob {
                 + " manifestFilesDeleted=" + result.get(2);
     }
 
-    private static String rewriteDataFiles(SparkSession spark, String catalog, String targetTable) {
-        String call = String.format("CALL %s.system.rewrite_data_files(table => '%s')",
-                catalog, targetTable);
+    private static String rewriteDataFiles(SparkSession spark, String catalog, String targetTable,
+                                           Integer minInputFiles,
+                                           Long targetFileSizeBytes) {
+        String call = minInputFiles == null
+                ? String.format("CALL %s.system.rewrite_data_files(table => '%s')",
+                        catalog, targetTable)
+                : rewriteDataFilesCall(catalog, targetTable, minInputFiles,
+                        targetFileSizeBytes);
         LOGGER.debug("MAINTENANCE call {}", call);
         Row result = spark.sql(call).first();
         return "MAINTENANCE rewrite_data_files table=" + targetTable
                 + " rewrittenDataFiles=" + result.get(0)
                 + " addedDataFiles=" + result.get(1);
+    }
+
+    static String rewriteDataFilesCall(String catalog, String targetTable,
+                                       int minInputFiles, long targetFileSizeBytes) {
+        return String.format("CALL %s.system.rewrite_data_files(table => '%s', "
+                        + "options => map('min-input-files', '%d', "
+                        + "'target-file-size-bytes', '%d'))",
+                catalog, targetTable, minInputFiles, targetFileSizeBytes);
     }
 
     private static String deleteOrphanFiles(SparkSession spark, String catalog, String targetTable,

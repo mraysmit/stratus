@@ -33,9 +33,34 @@ AIRFLOW_TEST_SCRIPTS_DIR="$HARNESS_DIR/scripts/tests"
 iceberg_runtime_candidates=(
   "$REPO_DIR"/platform/spark/image/jars/stratus-iceberg-aws-runtime-*-runtime.jar
 )
+hadoop_aws_candidates=(
+  "$REPO_DIR"/platform/spark/image/jars/hadoop-aws-*.jar
+)
+aws_sdk_bundle_candidates=(
+  "$REPO_DIR"/platform/spark/image/jars/bundle-*.jar
+)
+s3_accelerator_candidates=(
+  "$REPO_DIR"/platform/spark/image/jars/analyticsaccelerator-s3-*.jar
+)
+aws_bundle_logging_bridge_candidates=(
+  "$REPO_DIR"/platform/spark/image/jars/log4j-slf4j-impl-*.jar
+)
 [[ ${#iceberg_runtime_candidates[@]} -eq 1 && -f "${iceberg_runtime_candidates[0]}" ]] \
   || fail "Expected exactly one resolved Stratus Iceberg/AWS runtime JAR"
+[[ ${#hadoop_aws_candidates[@]} -eq 1 && -f "${hadoop_aws_candidates[0]}" ]] \
+  || fail "Expected exactly one resolved Hadoop AWS runtime JAR"
+[[ ${#aws_sdk_bundle_candidates[@]} -eq 1 && -f "${aws_sdk_bundle_candidates[0]}" ]] \
+  || fail "Expected exactly one resolved AWS SDK bundle JAR"
+[[ ${#s3_accelerator_candidates[@]} -eq 1 && -f "${s3_accelerator_candidates[0]}" ]] \
+  || fail "Expected exactly one resolved S3 analytics accelerator JAR"
+[[ ${#aws_bundle_logging_bridge_candidates[@]} -eq 1 \
+    && -f "${aws_bundle_logging_bridge_candidates[0]}" ]] \
+  || fail "Expected exactly one resolved AWS bundle Log4j compatibility bridge"
 AIRFLOW_ICEBERG_RUNTIME_JAR="${iceberg_runtime_candidates[0]}"
+AIRFLOW_HADOOP_AWS_JAR="${hadoop_aws_candidates[0]}"
+AIRFLOW_AWS_SDK_BUNDLE_JAR="${aws_sdk_bundle_candidates[0]}"
+AIRFLOW_S3_ACCELERATOR_JAR="${s3_accelerator_candidates[0]}"
+AIRFLOW_AWS_BUNDLE_LOGGING_BRIDGE_JAR="${aws_bundle_logging_bridge_candidates[0]}"
 
 windows_mount_path() {
   local path="$1"
@@ -53,10 +78,17 @@ AIRFLOW_CEPH_CA_CERT="$(windows_mount_path "$AIRFLOW_CEPH_CA_CERT")"
 AIRFLOW_SPARK_JOBS_JAR="$(windows_mount_path "$AIRFLOW_SPARK_JOBS_JAR")"
 AIRFLOW_TEST_SCRIPTS_DIR="$(windows_mount_path "$AIRFLOW_TEST_SCRIPTS_DIR")"
 AIRFLOW_ICEBERG_RUNTIME_JAR="$(windows_mount_path "$AIRFLOW_ICEBERG_RUNTIME_JAR")"
+AIRFLOW_HADOOP_AWS_JAR="$(windows_mount_path "$AIRFLOW_HADOOP_AWS_JAR")"
+AIRFLOW_AWS_SDK_BUNDLE_JAR="$(windows_mount_path "$AIRFLOW_AWS_SDK_BUNDLE_JAR")"
+AIRFLOW_S3_ACCELERATOR_JAR="$(windows_mount_path "$AIRFLOW_S3_ACCELERATOR_JAR")"
+AIRFLOW_AWS_BUNDLE_LOGGING_BRIDGE_JAR="$(windows_mount_path \
+  "$AIRFLOW_AWS_BUNDLE_LOGGING_BRIDGE_JAR")"
 export AIRFLOW_COMPOSE_OVERLAY AIRFLOW_SPARK_DEFAULTS_FILE AIRFLOW_SPARK_LOG4J_FILE
 export AIRFLOW_SPARK_TRUSTSTORE_FILE AIRFLOW_SPARK_JOBS_JAR CEPH_HARNESS_NETWORK
 export AIRFLOW_ICEBERG_RUNTIME_JAR AIRFLOW_CEPH_CA_CERT CEPH_RGW_ENDPOINT
-export AIRFLOW_TEST_SCRIPTS_DIR
+export AIRFLOW_HADOOP_AWS_JAR AIRFLOW_AWS_SDK_BUNDLE_JAR AIRFLOW_TEST_SCRIPTS_DIR
+export AIRFLOW_S3_ACCELERATOR_JAR
+export AIRFLOW_AWS_BUNDLE_LOGGING_BRIDGE_JAR
 
 fetch_spark_storage_identity() {
   [[ -f "$OPENBAO_HARNESS_DIR/connection.env" ]] \
@@ -117,6 +149,10 @@ require_spark_cluster() {
       "$SPARK_HARNESS_DIR/config/log4j2.properties" \
       "$SPARK_HARNESS_DIR/certs/stratus-truststore.jks" \
       "${iceberg_runtime_candidates[0]}" \
+      "${hadoop_aws_candidates[0]}" \
+      "${aws_sdk_bundle_candidates[0]}" \
+      "${s3_accelerator_candidates[0]}" \
+      "${aws_bundle_logging_bridge_candidates[0]}" \
       "$REPO_DIR/jobs/spark/target/stratus-spark-jobs-1.0-SNAPSHOT.jar"; do
     [[ -r "$required_file" ]] || fail "Required Spark submission input is absent: $required_file"
   done
