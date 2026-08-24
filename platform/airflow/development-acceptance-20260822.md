@@ -115,9 +115,9 @@ lifecycle scripts:
 bash platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh
 ```
 
-## Remaining development work
+## Completed orchestration development work
 
-`P1-4.3-V1` remains in progress. Its landing-to-bronze, bronze-to-silver and
+`P1-4.3-V1` is development-verified. Its landing-to-bronze, bronze-to-silver and
 silver-to-gold source contracts, metadata-policy maintenance contract,
 Airflow-native four-DAG parse/registry proof, and
 complete live accepted/blocked slices passed on 2026-08-23; see
@@ -141,9 +141,41 @@ alert after retry exhaustion. Both retry callbacks and the terminal callback
 carried numeric elapsed time and safe exception-class metadata; exception detail
 was excluded from the alert, generated Airflow secrets were absent from the
 transcript, and the isolated 72,759 ms suite cleaned up its Airflow stack.
-Deadline Alert and the remaining full-pipeline API-verifier scenarios remain.
-Increment 4's overall developer gate remains open until those behaviors pass.
-The post-retry/alert offline reactor passed all 11 modules and 275 tests in 1
-minute 13 seconds with zero failures, errors, or skips. `git diff --check` was
-clean. The live harness stopped Airflow; Spark, Polaris, OpenBao and Ceph were
-already stopped, and the final Docker query found no running Stratus containers.
+Deadline run `airflow-deadline-alert-20260824T051734Z` then proved a one-second
+run completed without an alert and an 18-second run exceeded its 12-second
+expectation, emitted exactly one asynchronous triggerer callback, and still
+completed successfully. The callback recorded 13,278 ms observed elapsed time
+and a 1,278 ms breach with safe identity/timestamp fields. This proof also found
+and corrected the shared LocalExecutor execution-API route from container
+loopback to `airflow-api-server:8080`; both scheduled runs then passed. The
+final API/orchestration run `airflow-api-orchestration-20260824T073836Z` then
+passed on 2026-08-24. It
+authenticated through Airflow's public REST API, passed scheduler/metadata
+health, required all four Stratus DAGs from a five-DAG registry, and supplied
+caller-owned run IDs. Maintenance succeeded on attempt one in 34,657 ms of
+Airflow time. The deliberately blocked bronze-to-silver run failed in 18,056 ms:
+the transform failed on attempt one and its downstream quality task was
+`upstream_failed` without an attempt. Independent Spark verification proved the
+maintenance table retained three rows after compaction from three files to one
+and proved the blocked silver target was absent. The 420,772 ms suite removed
+its exact Iceberg/quality/S3 fixtures, passed protected-secret checks, and stopped
+all Stratus stacks with `remainingStratusContainers=0`.
+
+Strict TDD captured four live compatibility defects before acceptance: Airflow
+3.3.1 requires nullable `logical_date`; Java h2c upgrade requests are rejected by
+the pinned Uvicorn listener, so the client uses HTTP/1.1; expected-failure retry
+overrides must reach both the DAG processor and scheduler; and Ceph compose
+commands must bind their project name explicitly so an inherited Airflow
+`COMPOSE_PROJECT_NAME` cannot redirect shutdown. Each correction has an offline
+regression. `P1-4.G-D` is now the next implementation-plan item; the Increment 4
+developer gate remains open for its D1-D2 evidence matrix and development-state
+manifest.
+
+The post-Deadline offline reactor passed all 11 modules and 278 tests in 51.896
+seconds with zero failures, errors, or skips. `git diff --check` was clean. The
+live harness stopped Airflow; Spark, Polaris, OpenBao and Ceph were already
+stopped, and the final Docker query found no running Stratus containers.
+
+The final post-API offline reactor expanded to 12 modules and passed 290 tests in
+1 minute 2 seconds with zero failures, errors, or skips. The live-only API test
+is intentionally excluded from the ordinary offline count.

@@ -109,6 +109,7 @@ final class AirflowDeveloperDeploymentTest {
             "name: stratus-airflow-local",
             "image: ${POSTGRES_IMAGE:",
             "AIRFLOW__CORE__EXECUTOR: LocalExecutor",
+            "AIRFLOW__API__BASE_URL: http://airflow-api-server:8080",
             "airflow-api-server:",
             "airflow-dag-processor:",
             "airflow-scheduler:",
@@ -232,6 +233,38 @@ final class AirflowDeveloperDeploymentTest {
                         "Spark submission live test"),
                 () -> assertContainsAll(probe, REQUIRED_SPARK_PROBE_SOURCE_MARKERS,
                         "packaged Spark submission probe"));
+    }
+
+    @Test
+    void expectedFailureRetryOverridesReachDagProcessorAndScheduler() {
+        String overlay = read(SPARK_OVERLAY_PATH);
+        String retryMarker = "STRATUS_BRONZE_TO_SILVER_RETRIES: "
+                + "${STRATUS_BRONZE_TO_SILVER_RETRIES:-2}";
+
+        assertAll(
+                () -> assertTrue(serviceBlock(overlay, "airflow-dag-processor")
+                                .contains(retryMarker),
+                        "Airflow 3 serializes DAG retry defaults in the DAG processor"),
+                () -> assertTrue(serviceBlock(overlay, "airflow-scheduler")
+                                .contains(retryMarker),
+                        "The scheduler must receive the same expected-failure retry override"));
+    }
+
+    private static String serviceBlock(String compose, String service) {
+        String marker = "  " + service + ":";
+        StringBuilder block = new StringBuilder();
+        boolean inside = false;
+        for (String line : compose.split("\\R")) {
+            if (line.equals(marker)) {
+                inside = true;
+            } else if (inside && line.matches("^  \\S.*:$")) {
+                break;
+            }
+            if (inside) {
+                block.append(line).append('\n');
+            }
+        }
+        return block.toString();
     }
 
     private static void assertContainsAll(String content, List<String> markers, String contract) {

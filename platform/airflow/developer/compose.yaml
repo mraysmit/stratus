@@ -18,7 +18,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?AIRFLOW_FERNET_KEY is required}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?AIRFLOW_JWT_SECRET is required}
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?AIRFLOW_API_SECRET_KEY is required}
-    AIRFLOW__API__BASE_URL: http://localhost:8080
+    # LocalExecutor workers run inside the scheduler container and must reach the
+    # execution API through Compose DNS, not the scheduler container's loopback.
+    AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "True"
     AIRFLOW__LOGGING__COLORED_CONSOLE_LOG: "False"
   volumes:

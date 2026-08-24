@@ -60,9 +60,9 @@ compose() {
     project_dir="$(cygpath -w "$project_dir")"
     env_file="$(cygpath -w "$env_file")"
     compose_file="$(cygpath -w "$compose_file")"
-    MSYS_NO_PATHCONV=1 "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
+    MSYS_NO_PATHCONV=1 "$runtime" compose --project-name "$CEPH_COMPOSE_PROJECT" --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
   else
-    "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
+    "$runtime" compose --project-name "$CEPH_COMPOSE_PROJECT" --project-directory "$project_dir" --env-file "$env_file" -f "$compose_file" "$@"
   fi
 }
 

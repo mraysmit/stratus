@@ -69,6 +69,9 @@ final class AirflowPipelineDagTest {
     private static final Path TABLE_MAINTENANCE_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests",
             "airflow-table-maintenance-live-test.sh"));
+    private static final Path API_ORCHESTRATION_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "airflow-api-orchestration-live-test.sh"));
     private static final Path RETRY_ALERT_PROBE_DAG_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests", "dags",
             "stratus_retry_alert_probe.py"));
@@ -78,6 +81,15 @@ final class AirflowPipelineDagTest {
     private static final Path RETRY_ALERT_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests",
             "airflow-retry-alert-live-test.sh"));
+    private static final Path DEADLINE_ALERT_PROBE_DAG_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests", "dags",
+            "deadline-alert", "stratus_deadline_alert_probe.py"));
+    private static final Path DEADLINE_ALERT_OVERLAY_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "compose.deadline-alert.yaml"));
+    private static final Path DEADLINE_ALERT_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "airflow-deadline-alert-live-test.sh"));
     private static final Path AIRFLOW_SPARK_COMMON_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "lib",
             "airflow-spark-common.sh"));
@@ -86,6 +98,7 @@ final class AirflowPipelineDagTest {
 
     private static final String SPARK_CONNECTION_ID = "spark_default";
     private static final String RETRY_ALERT_PROBE_DAG_ID = "stratus_retry_alert_probe";
+    private static final String DEADLINE_ALERT_PROBE_DAG_ID = "stratus_deadline_alert_probe";
     private static final String HADOOP_AWS_JAR = "/opt/stratus/runtime/hadoop-aws.jar";
     private static final String AWS_SDK_BUNDLE_JAR = "/opt/stratus/runtime/aws-sdk-bundle.jar";
     private static final String S3_ACCELERATOR_JAR =
@@ -377,6 +390,85 @@ final class AirflowPipelineDagTest {
     }
 
     @Test
+    void deadlineAlertProofHasStableTestOnlyLocations() {
+        assertAll(
+                () -> assertTrue(Files.isRegularFile(DEADLINE_ALERT_PROBE_DAG_PATH),
+                        "The controlled Deadline Alert DAG must live below scripts/tests/dags"),
+                () -> assertTrue(Files.isRegularFile(DEADLINE_ALERT_OVERLAY_PATH),
+                        "The Deadline Alert DAG must be mounted only by a checked-in test overlay"),
+                () -> assertTrue(Files.isRegularFile(DEADLINE_ALERT_LIVE_TEST_PATH),
+                        "The Deadline Alert proof must be a checked-in test script"),
+                () -> assertFalse(Files.isRegularFile(
+                        DAG_ROOT.resolve(DEADLINE_ALERT_PROBE_DAG_PATH.getFileName())),
+                        "The development-only Deadline Alert probe must not become a platform DAG"));
+    }
+
+    @Test
+    void deadlineAlertProbeUsesTheAirflowDeadlineModelAndAsyncCallback() {
+        String probe = Repo.read(DEADLINE_ALERT_PROBE_DAG_PATH);
+        String overlay = Repo.read(DEADLINE_ALERT_OVERLAY_PATH);
+        String alerts = read(ALERTS_DAG_PATH);
+        assertAll(
+                () -> assertTrue(probe.contains("DAG_ID = \""
+                        + DEADLINE_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(probe.contains("dag_id=DAG_ID")),
+                () -> assertTrue(probe.contains("DeadlineAlert(")),
+                () -> assertTrue(probe.contains(
+                        "reference=DeadlineReference.DAGRUN_QUEUED_AT")),
+                () -> assertTrue(probe.contains("interval=DEADLINE_INTERVAL")),
+                () -> assertTrue(probe.contains("timedelta(seconds=12)")),
+                () -> assertTrue(probe.contains("AsyncCallback(")),
+                () -> assertTrue(probe.contains(
+                        "\"stratus_alerts.stratus_deadline_alert\"")),
+                () -> assertTrue(probe.contains("expected_interval_ms")),
+                () -> assertTrue(probe.contains("deadline_name")),
+                () -> assertTrue(probe.contains("time.sleep")),
+                () -> assertTrue(probe.contains("dag_run.conf.get")),
+                () -> assertTrue(alerts.contains("async def stratus_deadline_alert")),
+                () -> assertTrue(alerts.contains("event=airflow_deadline_missed")),
+                () -> assertTrue(alerts.contains("correlation_id")),
+                () -> assertTrue(alerts.contains("deadline_time")),
+                () -> assertTrue(alerts.contains("expected_interval_ms")),
+                () -> assertTrue(alerts.contains("observed_elapsed_ms")),
+                () -> assertTrue(alerts.contains("breach_ms")),
+                () -> assertTrue(overlay.contains(
+                        "./scripts/tests/dags/deadline-alert:/opt/airflow/dags:ro")),
+                () -> assertTrue(overlay.contains(
+                        "./dags:/opt/airflow/platform-dags:ro")),
+                () -> assertTrue(overlay.contains(
+                        "PYTHONPATH: /opt/airflow/platform-dags")));
+    }
+
+    @Test
+    void liveDeadlineAlertTestProvesOnTimeAndMissedOutcomes() {
+        String script = Repo.read(DEADLINE_ALERT_LIVE_TEST_PATH);
+        assertAll(
+                () -> assertTrue(script.contains("compose.deadline-alert.yaml")),
+                () -> assertTrue(script.contains("airflow-compose-startup.sh")),
+                () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
+                () -> assertTrue(script.contains("readonly DAG_ID=\""
+                        + DEADLINE_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(script.contains("airflow dags trigger \"$DAG_ID\"")),
+                () -> assertTrue(script.contains(
+                        "trigger_probe \"$on_time_run_id\" \"$on_time_correlation\" on-time 1")),
+                () -> assertTrue(script.contains(
+                        "trigger_probe \"$missed_run_id\" \"$missed_correlation\" missed 18")),
+                () -> assertTrue(script.contains("wait_for_run_state")),
+                () -> assertTrue(script.contains("compose logs --no-color airflow-triggerer")),
+                () -> assertTrue(script.contains("event=airflow_deadline_missed")),
+                () -> assertTrue(script.contains("deadline_alert_count")),
+                () -> assertTrue(script.contains("expected_interval_ms=12000")),
+                () -> assertTrue(script.contains("observed_elapsed_ms=[0-9]")),
+                () -> assertTrue(script.contains("breach_ms=[0-9]")),
+                () -> assertTrue(script.contains("assert_not_logged")),
+                () -> assertTrue(script.contains("event=airflow_deadline_alert_phase_completed")),
+                () -> assertTrue(script.contains("elapsedMs=")),
+                () -> assertTrue(script.contains("capture_failure_diagnostics"),
+                        "live failures must retain scheduler, triggerer, and task diagnostics"),
+                () -> assertTrue(script.contains("cleanup")));
+    }
+
+    @Test
     void checkedInParseTestUsesTheLifecycleAndRecordsTiming() {
         String script = Repo.read(DAG_PARSE_TEST_PATH);
         assertAll(
@@ -516,6 +608,25 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("elapsedMs=")),
                 () -> assertTrue(script.contains("assert_not_logged")),
                 () -> assertTrue(script.contains("cleanup")));
+    }
+
+    @Test
+    void apiOrchestrationLiveTestRetriesShutdownAndReportsTheObservedContainerCount() {
+        String script = Repo.read(API_ORCHESTRATION_LIVE_TEST_PATH);
+        assertAll(
+                () -> assertTrue(script.contains("shutdown_harness"),
+                        "provider teardown must retry a transient lifecycle-script failure"),
+                () -> assertTrue(script.contains("shutdown_harness airflow")),
+                () -> assertTrue(script.contains("shutdown_harness spark")),
+                () -> assertTrue(script.contains("shutdown_harness polaris")),
+                () -> assertTrue(script.contains("shutdown_harness openbao")),
+                () -> assertTrue(script.contains("shutdown_harness ceph")),
+                () -> assertTrue(script.contains("remaining_count=")),
+                () -> assertTrue(script.contains(
+                        "remainingStratusContainers=$remaining_count")),
+                () -> assertFalse(script.contains(
+                        "remainingStratusContainers=0\""),
+                        "cleanup evidence must report the observed count, not a constant"));
     }
 
     private static void assertFile(Path relative) {

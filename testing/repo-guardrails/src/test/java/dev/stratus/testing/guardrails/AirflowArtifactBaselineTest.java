@@ -166,10 +166,9 @@ final class AirflowArtifactBaselineTest {
             "sha256:89db37a79b60dd9224874afca3a4b57afadbeab0a205f8835958fecea259bc97";
     private static final int EXPECTED_HIGH_OCCURRENCES = 84;
     private static final int EXPECTED_UNIQUE_PACKAGE_CVE_PAIRS = 35;
-    private static final String CURRENT_IMAGE_TASK_ID = "P1-4.1-S2";
-    private static final String CURRENT_SUBMISSION_TASK_ID = "P1-4.2-D1";
-    private static final String NEXT_DEVELOPMENT_TASK_ID = "P1-4.3-V1";
-    private static final String DEVELOPMENT_ACCEPTANCE_DATE = "2026-08-22";
+    private static final String COMPLETED_ORCHESTRATION_TASK_ID = "P1-4.3-V1";
+    private static final String NEXT_DEVELOPMENT_TASK_ID = "P1-4.G-D";
+    private static final String ORCHESTRATION_VERIFICATION_DATE = "2026-08-24";
     private static final String CURRENT_STAGE_MARKER =
             "Current stage:** Development implementation and functional acceptance";
     private static final String LATER_STAGE_MARKER =
@@ -457,10 +456,9 @@ final class AirflowArtifactBaselineTest {
 
     private static void assertCurrentAirflowStatus(String document) {
         assertAll(
-                () -> assertTrue(document.contains(markdownCode(CURRENT_IMAGE_TASK_ID))),
-                () -> assertTrue(document.contains(markdownCode(CURRENT_SUBMISSION_TASK_ID))),
+                () -> assertTrue(document.contains(markdownCode(COMPLETED_ORCHESTRATION_TASK_ID))),
                 () -> assertTrue(document.contains(markdownCode(NEXT_DEVELOPMENT_TASK_ID))),
-                () -> assertTrue(document.contains(DEVELOPMENT_ACCEPTANCE_DATE)));
+                () -> assertTrue(document.contains(ORCHESTRATION_VERIFICATION_DATE)));
     }
 
     private static String requirement(String distribution, String version) {

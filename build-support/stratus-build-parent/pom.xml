@@ -57,6 +57,7 @@
                             <catalog.integration.required>${catalog.integration.required}</catalog.integration.required>
                             <secrets.integration.required>${secrets.integration.required}</secrets.integration.required>
                             <spark.integration.required>${spark.integration.required}</spark.integration.required>
+                            <orchestration.integration.required>${orchestration.integration.required}</orchestration.integration.required>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>

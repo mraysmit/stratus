@@ -297,6 +297,16 @@ final class ComposeClusterScriptTest {
     }
 
     @Test
+    void composeCommandsCannotBeRedirectedByAnInheritedProjectName() {
+        String common = Repo.read(COMMON_SCRIPT_PATH);
+        assertTrue(common.contains(
+                "compose --project-name \"$CEPH_COMPOSE_PROJECT\" --project-directory"),
+                "every Ceph compose command must bind the fixed Ceph project name explicitly; "
+                        + "otherwise a caller's exported COMPOSE_PROJECT_NAME can redirect shutdown "
+                        + "to another Stratus harness while reporting success");
+    }
+
+    @Test
     void airflowIdentityIsLandingReadOnlyAndItsDeniedWriteIsProbed() {
         String identities = Repo.read(SERVICE_IDENTITIES_PATH);
         String provisioner = Repo.read(SERVICE_IDENTITY_PROVISIONER_PATH);
