@@ -91,3 +91,9 @@ The full Java orchestration verifier and its DAG execution scenarios remain the
 scope of `P1-4.3-V1`. The image smoke test is the provider/import evidence for
 the shared `P1-4.1-S2` artifact baseline, and the submission probe is its
 cross-component compatibility evidence; neither substitutes for that verifier.
+
+The completed orchestration role can be shown through the one-command customer
+pipeline, fail-closed quality and API-driven maintenance demonstrations in
+[`developer/demos/README.md`](developer/demos/README.md). Those demonstrations
+compose accepted live harnesses and default to checked cleanup; the canonical
+development suite remains the authoritative complete regression.

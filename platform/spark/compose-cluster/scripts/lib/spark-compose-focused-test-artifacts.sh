@@ -76,6 +76,14 @@ focused_test_require_file() {
   [[ -f "$path" ]] || fail "$description is missing: $path. Prepare focused tests again: bash platform/spark/compose-cluster/scripts/tests/spark-compose-prepare-focused-tests.sh"
 }
 
+# Hash absolute artifacts through standard input. Git for Windows does not share
+# Bash's /tmp mount translation, so passing an MSYS absolute path directly to
+# git hash-object can report a missing file even after Bash proved it exists.
+focused_test_file_hash() {
+  local path="$1"
+  git hash-object --stdin < "$path"
+}
+
 focused_test_state_value() {
   local key="$1"
   sed -n "s/^${key}=//p" "$FOCUSED_TEST_STATE_FILE" | tail -n 1
@@ -94,9 +102,9 @@ focused_test_record_artifacts() {
   focused_test_require_file "installed Spark jobs artifact" "$FOCUSED_JOBS_JAR"
   focused_test_require_file "installed Spark jobs POM" "$FOCUSED_JOBS_POM"
 
-  [[ "$(git hash-object "$FOCUSED_AWS_TARGET")" == "$(git hash-object "$FOCUSED_AWS_JAR")" ]] \
+  [[ "$(focused_test_file_hash "$FOCUSED_AWS_TARGET")" == "$(focused_test_file_hash "$FOCUSED_AWS_JAR")" ]] \
     || fail "The installed AWS runtime does not match the current target output"
-  [[ "$(git hash-object "$FOCUSED_JOBS_TARGET")" == "$(git hash-object "$FOCUSED_JOBS_JAR")" ]] \
+  [[ "$(focused_test_file_hash "$FOCUSED_JOBS_TARGET")" == "$(focused_test_file_hash "$FOCUSED_JOBS_JAR")" ]] \
     || fail "The installed Spark jobs artifact does not match the current target output"
 
   input_fingerprint="$(focused_test_input_fingerprint)"
@@ -108,13 +116,13 @@ focused_test_record_artifacts() {
     printf 'INPUT_FINGERPRINT=%s\n' "$input_fingerprint"
     printf 'MAVEN_REPOSITORY=%s\n' "$FOCUSED_MAVEN_REPOSITORY"
     printf 'MAVEN_REPOSITORY_FINGERPRINT=%s\n' "$FOCUSED_MAVEN_REPOSITORY_FINGERPRINT"
-    printf 'REACTOR_POM=%s\n' "$(git hash-object "$FOCUSED_REACTOR_POM")"
-    printf 'BOM_POM=%s\n' "$(git hash-object "$FOCUSED_BOM_POM")"
-    printf 'PARENT_POM=%s\n' "$(git hash-object "$FOCUSED_PARENT_POM")"
-    printf 'AWS_RUNTIME=%s\n' "$(git hash-object "$FOCUSED_AWS_JAR")"
-    printf 'AWS_POM=%s\n' "$(git hash-object "$FOCUSED_AWS_POM")"
-    printf 'SPARK_JOBS=%s\n' "$(git hash-object "$FOCUSED_JOBS_JAR")"
-    printf 'SPARK_JOBS_POM=%s\n' "$(git hash-object "$FOCUSED_JOBS_POM")"
+    printf 'REACTOR_POM=%s\n' "$(focused_test_file_hash "$FOCUSED_REACTOR_POM")"
+    printf 'BOM_POM=%s\n' "$(focused_test_file_hash "$FOCUSED_BOM_POM")"
+    printf 'PARENT_POM=%s\n' "$(focused_test_file_hash "$FOCUSED_PARENT_POM")"
+    printf 'AWS_RUNTIME=%s\n' "$(focused_test_file_hash "$FOCUSED_AWS_JAR")"
+    printf 'AWS_POM=%s\n' "$(focused_test_file_hash "$FOCUSED_AWS_POM")"
+    printf 'SPARK_JOBS=%s\n' "$(focused_test_file_hash "$FOCUSED_JOBS_JAR")"
+    printf 'SPARK_JOBS_POM=%s\n' "$(focused_test_file_hash "$FOCUSED_JOBS_POM")"
     printf 'PREPARED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'GIT_REVISION=%s\n' "$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
   } > "$temporary_state"
@@ -125,7 +133,7 @@ focused_test_assert_hash() {
   local state_key="$1" description="$2" path="$3" expected actual
   focused_test_require_file "$description" "$path"
   expected="$(focused_test_state_value "$state_key")"
-  actual="$(git hash-object "$path")"
+  actual="$(focused_test_file_hash "$path")"
   [[ -n "$expected" && "$actual" == "$expected" ]] \
     || fail "$description changed after preparation. Prepare focused tests again: bash platform/spark/compose-cluster/scripts/tests/spark-compose-prepare-focused-tests.sh"
 }

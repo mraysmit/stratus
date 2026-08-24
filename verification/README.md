@@ -31,11 +31,17 @@ quality-gate failure that prevents the downstream write, verifies both outcomes
 independently in Iceberg, scans the transcript for secrets, removes exact fixtures,
 and shuts down all Stratus providers. See
 [`platform/airflow/development-acceptance-20260822.md`](../platform/airflow/development-acceptance-20260822.md).
-The accepted full-stack run was
+The focused public-API run was
 `airflow-api-orchestration-20260824T073836Z` (420,772 ms), followed by exact
 fixture cleanup and zero remaining Stratus containers.
-The next implementation-plan item is `P1-4.G-D`, the Increment 4 D1-D2
-gate/evidence matrix and development-state manifest.
+Canonical suite `airflow-development-acceptance-20260824T103411Z` then passed
+every Airflow development phase in 2,975.509 seconds, ran 294 offline tests both
+before and after live verification, and again left zero Stratus containers.
+The `P1-4.G-D` D1 evidence matrix and D2 development-state manifest are accepted
+in
+[`platform/airflow/developer-gate-20260824.md`](../platform/airflow/developer-gate-20260824.md).
+Increment 4 development is complete; Increment 5 development engineering is the
+next portfolio work package.
 
 ## Quality Gate
 

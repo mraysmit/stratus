@@ -167,15 +167,25 @@ the pinned Uvicorn listener, so the client uses HTTP/1.1; expected-failure retry
 overrides must reach both the DAG processor and scheduler; and Ceph compose
 commands must bind their project name explicitly so an inherited Airflow
 `COMPOSE_PROJECT_NAME` cannot redirect shutdown. Each correction has an offline
-regression. `P1-4.G-D` is now the next implementation-plan item; the Increment 4
-developer gate remains open for its D1-D2 evidence matrix and development-state
-manifest.
+regression. The `P1-4.G-D` D1-D2 evidence matrix and development-state manifest
+are now complete in [`developer-gate-20260824.md`](developer-gate-20260824.md).
+The repository maintainer explicitly directed completion of every Airflow task;
+the Increment 4 developer gate is accepted against the canonical evidence below.
+
+Canonical run `airflow-development-acceptance-20260824T103411Z` passed every
+offline, image, lifecycle, registry, retry, Deadline Alert, provider, Spark,
+pipeline, maintenance and public-API phase in 2,975.509 seconds. The Deadline
+probe used a unique test-owned DAG ID and removed its metadata after the run,
+preventing Airflow 3.3.1 serialized DAG versions from retaining a deadline
+reference to a prior test execution. Reverse shutdown and final cleanup reported
+`remainingStratusContainers=0`.
 
 The post-Deadline offline reactor passed all 11 modules and 278 tests in 51.896
 seconds with zero failures, errors, or skips. `git diff --check` was clean. The
 live harness stopped Airflow; Spark, Polaris, OpenBao and Ceph were already
 stopped, and the final Docker query found no running Stratus containers.
 
-The final post-API offline reactor expanded to 12 modules and passed 290 tests in
-1 minute 2 seconds with zero failures, errors, or skips. The live-only API test
-is intentionally excluded from the ordinary offline count.
+The canonical pre-live and post-live reactors each span 12 modules and passed
+294 tests with zero failures, errors, or skips in 56.501 and 65.475 seconds
+respectively. The live-only API test is intentionally excluded from the ordinary
+offline count.

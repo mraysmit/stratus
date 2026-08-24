@@ -453,6 +453,34 @@ Run ID: `airflow-api-orchestration-20260824T073836Z`.
 The ignored raw transcript is
 `developer/evidence/airflow-api-orchestration-20260824T073836Z.log`.
 
+## Audience demonstration layer
+
+The accepted Airflow behavior is now available as three shorter, one-command
+demonstrations under [`developer/demos/README.md`](developer/demos/README.md).
+They reuse the accepted live harnesses and their independent Spark verifiers;
+the wrapper layer supplies an audience talk track, readable fixture, expected
+outcome, stable evidence markers, elapsed time and checked cleanup. It does not
+fork or reimplement the DAG and Spark business logic.
+
+Strict TDD began with five demo-contract tests. The red run reported two
+failures and three errors because the demo assets and entry-point links did not
+exist. After implementation, all five focused contracts passed. Live execution
+then established these measured results:
+
+| Demonstration | Wrapper run ID | Result | Demo elapsed time |
+|---|---|---|---:|
+| Customer landing-to-gold | `airflow-demo-customer-pipeline-20260824T121540Z` | Accepted gold path and deliberate blocked path independently verified | 836,968 ms |
+| Fail-closed quality gate | `airflow-demo-quality-gate-20260824T120456Z` | Accepted silver promotion and blocked downstream write independently verified | 616,644 ms |
+| REST API-driven maintenance | `airflow-demo-api-maintenance-20260824T123014Z` | Maintenance success plus blocked DAG/task states and side effects independently verified | 556,589 ms |
+
+Each wrapper found the accepted harness transcript, required every documented
+success marker, and reported `remainingStratusContainers=0` after reverse-order
+cleanup. The API demonstration additionally observed the successful maintenance
+run and deliberately failed quality run through Airflow's public API before the
+independent table checks. A post-demo `mvn -o verify` passed all 12 modules and
+299 tests with zero failures, errors or skips; all Airflow shell scripts passed
+`bash -n`.
+
 ## Repository verification and shutdown
 
 After the Deadline Alert evidence and status updates, `mvn -o verify` completed
@@ -466,15 +494,22 @@ The Deadline Alert harness stopped its Airflow stack. Spark, Polaris, OpenBao, a
 Ceph were already stopped, and the final filtered Docker query returned no
 running Stratus containers.
 
-After the API verifier, Ceph project-isolation regression, and status-document
-updates, the final `mvn -o verify` completed the expanded 12-module reactor in
-1 minute 2 seconds. It ran 290 offline tests with zero failures, errors, or skips;
-the separate live-only orchestration test is excluded from that count. Shell
-syntax checks passed for both new live harnesses and the Ceph common helper.
+Canonical suite `airflow-development-acceptance-20260824T103411Z` completed all
+offline and live Airflow development phases in 2,975.509 seconds. Its pre-live
+and post-live `mvn -o verify` passes each ran 294 offline tests with zero
+failures, errors, or skips; the separate live-only orchestration test is excluded
+from that count. Shell syntax checks passed for the Airflow test and lifecycle
+helpers, and final cleanup reported `remainingStratusContainers=0`.
 
-## Next implementation-plan item
+The Deadline slice in the canonical suite used a unique test-owned DAG ID and
+deleted its metadata. This isolates Airflow 3.3.1 serialized DAG versions so a
+new deadline cannot resolve through a stale version-specific alert row.
 
-`P1-4.3-V1` implementation and development verification are complete. Proceed
-to `P1-4.G-D`: assemble the D1-D2 gate/evidence matrix and record the local
-metadata/log state, bootstrap credentials, local CA, and reduced service
-availability in the development-state promotion manifest.
+## Developer-gate package
+
+`P1-4.3-V1` implementation and development verification are complete. The
+`P1-4.G-D` D1-D2 evidence matrix and development-state promotion manifest are
+now complete in [`developer-gate-20260824.md`](developer-gate-20260824.md) and
+guarded by `AirflowDeveloperGateTest`. The repository maintainer explicitly
+directed completion after the canonical suite passed, so `P1-4.3-V1` and
+`P1-4.G-D` are accepted and their D1-D2 checkboxes are closed.
