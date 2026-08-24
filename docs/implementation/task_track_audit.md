@@ -99,7 +99,7 @@ development risk. The historical S1 waiver does not apply to S2.
 the packaged Java probe from the Spark 4.1.3 client to the Spark 4.1.2 developer
 cluster and proved distributed execution, Polaris/Ceph Iceberg operations,
 protected connection handling, immutable input hashes, secret-redacted output,
-cleanup and phase timings. `P1-4.3-V1` is now in progress: its source contract
+cleanup and phase timings. `P1-4.3-V1` is now development-verified: its source contract
 and Airflow parse/registry proof passed on 2026-08-22, and its live
 landing-to-bronze ingestion, bronze-quality, independent verification,
 access/secret-key redaction, timing and cleanup slice passed on 2026-08-23 in
@@ -116,12 +116,24 @@ row/file/snapshot verification, metadata metrics, redaction, timings and exact
 purge cleanup. All four DAGs parse and register. The 72.759-second retry/alert
 suite then proved transient recovery on attempt two, permanent retry exhaustion,
 exactly one terminal failure alert, numeric callback durations, safe exception
-metadata, generated-secret checks and Airflow cleanup. Deadline Alert and the
-remaining API-verifier scenarios remain. The
-Increment 4 developer gate follows. This
+metadata, generated-secret checks and Airflow cleanup. That proof was followed
+by the 98.764-second native
+Deadline Alert proof: the on-time run emitted nothing, the deliberately overdue
+run emitted exactly one safe triggerer callback with numeric elapsed/breach
+timing, and both scheduled runs completed through the corrected LocalExecutor
+execution-API route. Final run `airflow-api-orchestration-20260824T073836Z`
+then passed on 2026-08-24 with Airflow public-API health/registry/trigger/poll behavior, successful
+maintenance, a deliberate quality-blocked transform on attempt one, independent
+three-to-one compaction and no-target-write verification, exact fixture cleanup,
+secret checks, and reverse-order shutdown with zero remaining Stratus containers
+in 420.772 seconds. `P1-4.G-D`, the Increment 4 D1-D2 evidence matrix and
+development-state manifest, follows. This
 checkpoint updates delivery state only; the detailed gap lists below remain the
 dated 2026-07-11 audit history. See
 [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
+
+The final expanded offline reactor passed 12 modules and 290 tests in 1 minute 2
+seconds with zero failures, errors, or skips.
 
 ---
 

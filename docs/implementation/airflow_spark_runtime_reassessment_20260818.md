@@ -141,9 +141,10 @@ every trivial assertion.
   packaged Java probe to the existing Spark developer cluster and proved
   distributed execution, Polaris/Ceph trust, protected connection metadata,
   secret-redacted output, cleanup, and detailed phase timing.
-- `P1-4.3-V1`: is in progress. Its first landing-to-bronze source contract and
-  Airflow parse/registry proof pass; live execution, the remaining DAG behavior,
-  and the executable orchestration verifier remain.
+- `P1-4.3-V1`: development-verified 2026-08-24. All live pipeline, maintenance,
+  retry/alert, Deadline Alert, and public-API positive/fail-closed scenarios pass;
+  the final 420.772-second full-stack run also passed independent side-effect,
+  exact cleanup, secret, and zero-remaining-container checks.
 
 The Java policy remains Java 21 for Stratus-owned builds and Spark/Airflow
 runtimes. Component-mandated exceptions, including the selected Trino release's

@@ -1,0 +1,28 @@
+# Test-only overlay: mount only the isolated Deadline Alert probe as the active DAG directory.
+# The real structured callback module is separately importable by scheduler and triggerer.
+x-deadline-alert-probe-volume: &deadline-alert-probe-volume ./scripts/tests/dags/deadline-alert:/opt/airflow/dags:ro
+x-platform-dags-volume: &platform-dags-volume ./dags:/opt/airflow/platform-dags:ro
+x-deadline-alert-environment: &deadline-alert-environment
+  PYTHONPATH: /opt/airflow/platform-dags
+
+services:
+  airflow-api-server:
+    environment: *deadline-alert-environment
+    volumes:
+      - *deadline-alert-probe-volume
+      - *platform-dags-volume
+  airflow-dag-processor:
+    environment: *deadline-alert-environment
+    volumes:
+      - *deadline-alert-probe-volume
+      - *platform-dags-volume
+  airflow-scheduler:
+    environment: *deadline-alert-environment
+    volumes:
+      - *deadline-alert-probe-volume
+      - *platform-dags-volume
+  airflow-triggerer:
+    environment: *deadline-alert-environment
+    volumes:
+      - *deadline-alert-probe-volume
+      - *platform-dags-volume

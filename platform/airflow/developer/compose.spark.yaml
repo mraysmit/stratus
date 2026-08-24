@@ -2,6 +2,14 @@
 # Ceph network so its Spark driver can reach the standalone master and executors.
 # Provider paths and the network name are supplied by airflow-spark-common.sh.
 services:
+  # Airflow 3 parses and serializes DAG default_args in this separate service. Expected-failure
+  # live proofs therefore have to place their bounded retry overrides here as well as on the
+  # scheduler that executes the resulting task instances.
+  airflow-dag-processor:
+    environment:
+      STRATUS_BRONZE_TO_SILVER_RETRIES: ${STRATUS_BRONZE_TO_SILVER_RETRIES:-2}
+      STRATUS_SILVER_TO_GOLD_RETRIES: ${STRATUS_SILVER_TO_GOLD_RETRIES:-2}
+
   airflow-scheduler:
     environment:
       SPARK_CONF_DIR: /opt/stratus/spark-conf

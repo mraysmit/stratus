@@ -21,13 +21,17 @@ Phase 1 production readiness is accepted only when the platform can prove three 
 
 This is exclusively the **production-profile gate**. Developer-profile evidence is useful regression input, but Docker Desktop/Podman convenience topology, reduced replicas, disposable or local-only state, local CA certificates, plaintext endpoints, bootstrap identities, and embedded production dependencies cannot satisfy this document. The evidence bundle must include a promotion manifest mapping every developer shortcut to the production setting that replaced it.
 
-Current implementation status (2026-08-22): the shared Airflow 3.3.1 image
+Current implementation status (2026-08-24): the shared Airflow 3.3.1 image
 task `P1-4.1-S2`, the `P1-4.1-D1` two-cycle LocalExecutor/PostgreSQL deployment,
 and the `P1-4.2-D1` live Spark/Polaris/Ceph submission were accepted for
 development. The current S2 scan has zero Critical and 61 High occurrences
 across 38 unique package/CVE pairs; they remain tracked in the development
 vulnerability review. The older S1 image and waiver are historical only.
-`P1-4.3-V1` and the Increment 4 developer gate remain open. Registry publication,
+`P1-4.3-V1` is development-verified: final full-stack public-API run
+`airflow-api-orchestration-20260824T073836Z` passed positive maintenance,
+deliberate fail-closed promotion, independent side-effect checks, exact cleanup,
+secret checks, and zero remaining Stratus containers. `P1-4.G-D`, the Increment
+4 D1-D2 evidence matrix and development-state manifest, is next. Registry publication,
 immutable promotion, every Increment 4 production task, and this operational-
 readiness checklist remain deferred. None of the accepted development evidence
 claims production readiness.

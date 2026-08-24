@@ -2,13 +2,14 @@
 
 ## Scope
 
-`P1-4.3-V1` is in progress. This record covers its accepted
+`P1-4.3-V1` is development-verified. This record covers its accepted
 landing-to-bronze-to-silver-to-gold vertical path: landing-object detection,
 live bronze ingestion and quality, promotion-gated transformation and
 materialisation, live silver and gold quality, deliberately blocked promotion,
 independent table/result verification, metadata-policy maintenance run/skip
-behavior, deterministic cleanup, and Airflow-native DAG parsing. It does not
-accept the full task or the Increment 4 developer gate.
+behavior, deterministic cleanup, Airflow-native DAG parsing, and final public-API
+positive/fail-closed verification. It does not accept the separate Increment 4
+developer gate.
 
 ## Strict-TDD evidence
 
@@ -61,6 +62,35 @@ import, start-time duration fallback, and numeric live duration. The final
 implementation passed all 18 focused DAG guardrails and the real Airflow proof.
 No mocking framework was used.
 
+The Deadline Alert slice started with three new contracts for a test-only DAG,
+isolated overlay, asynchronous triggerer callback, on-time outcome, breached
+outcome, exactly-once delivery, numeric timing, secret checks, diagnostics, and
+cleanup. The first red run failed for the missing artifacts and callback. After
+implementation, the first scheduled live run exposed a shared deployment defect:
+LocalExecutor workers inside the scheduler container attempted to reach the
+execution API through `localhost:8080` and were killed after connection refusal.
+A failing developer-topology regression first required the internal
+`airflow-api-server:8080` address, then the shared Compose configuration was
+corrected. A separate red/green regression retained scheduler, triggerer, API,
+DAG-processor, and task diagnostics on future live failures. The final live run
+passed both outcomes with all 21 DAG guardrails and five deployment guardrails
+green. No mocking framework was used.
+
+The final API/orchestration slice began with configuration and real HTTP fixture
+tests for authentication, health, DAG registration, caller-owned run IDs,
+terminal polling, task states, timing, redaction, and error handling. The first
+live trigger exposed Airflow 3.3.1's required nullable `logical_date`; the next
+exposed Java's clear-text HTTP/2 upgrade being rejected by Uvicorn before a POST
+reached Airflow. Failing protocol assertions were added before the trigger model
+and HTTP/1.1 client were corrected. The deliberately blocked run then exposed
+that its retry override reached the scheduler but not the DAG processor that
+serializes Airflow 3 DAG defaults. A failing deployment guardrail required both
+services before the overlay was corrected. Finally, a successful functional run
+left Ceph containers running because Airflow's exported compose project name
+redirected the Ceph shutdown command. A failing Ceph contract required every
+Ceph compose invocation to bind `stratus-ceph-local` explicitly. The final rerun
+passed functional proof and teardown. No mocking framework was used.
+
 Live execution continued in the same red-green sequence. Focused guardrails
 failed before each correction for the missing S3A runtime, AWS SDK bundle,
 analytics accelerator, verifier event-log directory, credential-identifier
@@ -74,9 +104,10 @@ framework was used.
 - `stratus_common.py` is the single `SparkSubmitOperator` factory. It uses the
   protected `spark_default` connection and accepted mounted jobs/runtime JARs;
   DAG source contains no Spark master, Polaris secret, or Ceph secret.
-- `stratus_alerts.py` emits structured retry and terminal-failure records with
-  DAG, task, run, logical-date, attempt, log URL, numeric elapsed milliseconds,
-  and exception-class context. It deliberately omits arbitrary exception
+- `stratus_alerts.py` emits structured retry, terminal-failure, and missed-
+  deadline records. Deadline records include DAG/run/correlation identity,
+  deadline name and time, queued time, expected interval, observed elapsed time,
+  and breach time. All callback paths deliberately omit arbitrary exception
   messages and credentials.
 - `stratus_landing_to_bronze.py` uses a rescheduling `S3KeySensor`, two retries
   with a five-minute delay, one active run, the real packaged `IngestionJob` and
@@ -362,20 +393,88 @@ Run ID: `airflow-retry-alert-20260824T040947Z`.
 The ignored raw transcript is
 `developer/evidence/airflow-retry-alert-20260824T040947Z.log`.
 
+## Live Deadline Alert evidence
+
+Run ID: `airflow-deadline-alert-20260824T051734Z`.
+
+- The isolated DAG used Airflow's public `DeadlineAlert`,
+  `DeadlineReference.DAGRUN_QUEUED_AT`, and asynchronous triggerer callback with
+  a 12-second expected interval.
+- The one-second probe completed successfully before its deadline and produced
+  no missed-deadline callback.
+- The 18-second probe remained active beyond its deadline, produced exactly one
+  `event=airflow_deadline_missed` callback, and then completed successfully. A
+  missed timing expectation is observable without incorrectly failing the DAG.
+- The callback recorded DAG/run/correlation identity, stable deadline name,
+  deadline and queued timestamps, `expected_interval_ms=12000`,
+  `observed_elapsed_ms=13278`, and `breach_ms=1278`.
+- The harness checked generated Airflow secrets against the complete transcript,
+  retained component and task diagnostics on failure, and stopped Airflow through
+  the checked-in lifecycle script. Ceph, OpenBao, Polaris, and Spark were not
+  required.
+- The proof also exercised the corrected LocalExecutor execution-API route at
+  `http://airflow-api-server:8080`; both normally scheduled task runs completed.
+
+| Event or phase | Duration/result |
+|---|---:|
+| Airflow startup and probe registration | 56,572 ms |
+| On-time DAG completion | 13,642 ms |
+| Missed-deadline DAG completion | 27,711 ms |
+| Callback observability checks | 544 ms |
+| Complete suite | 98,764 ms |
+
+The ignored raw transcript is
+`developer/evidence/airflow-deadline-alert-20260824T051734Z.log`.
+
+## Live Airflow API/orchestration evidence
+
+Run ID: `airflow-api-orchestration-20260824T073836Z`.
+
+- Authentication completed in 62 ms, health in 20 ms, and registry validation
+  in 56 ms. Five DAGs were visible and all four required Stratus DAGs were
+  present and unpaused.
+- `stratus_table_maintenance` completed successfully on attempt one. It was
+  observed for 36,347 ms and reported 34,657 ms of Airflow run time; its policy
+  task reported 33,453 ms.
+- `stratus_bronze_to_silver` consumed a persisted blocking quality result and
+  failed closed. It was observed for 20,194 ms and reported 18,056 ms of Airflow
+  time. `run_silver_transform` failed on attempt one after 16,325 ms and
+  `run_silver_quality` was `upstream_failed` with zero attempts.
+- The independent maintenance verifier proved three rows and one current data
+  file after the real DAG compacted three seeded files. The independent blocked
+  verifier proved `requires_four_rows` failed and no silver target existed.
+- The Java API verification completed in 57,137 ms; its Maven phase completed in
+  61,719 ms. The complete provider startup, fixture, API, side-effect, cleanup,
+  redaction, and shutdown suite completed successfully in 420,772 ms.
+- Exact table, quality-result, and landing-object cleanup passed. Airflow, Spark,
+  Polaris, OpenBao, and Ceph stopped through checked-in lifecycle scripts, and
+  the final marker reported `remainingStratusContainers=0`.
+
+The ignored raw transcript is
+`developer/evidence/airflow-api-orchestration-20260824T073836Z.log`.
+
 ## Repository verification and shutdown
 
-After the retry/alert evidence and status updates, `mvn -o verify` completed the
-full 11-module reactor successfully in 1 minute 13 seconds. The executed modules
-ran 275 tests with zero failures, errors, or skips; this includes all 18 Airflow
-DAG guardrails, all maintenance policy/verifier tests, the maintenance
+After the Deadline Alert evidence and status updates, `mvn -o verify` completed
+the full 11-module reactor successfully in 51.896 seconds. The executed modules
+ran 278 tests with zero failures, errors, or skips; this includes all 21 Airflow
+DAG guardrails, five deployment guardrails, all maintenance policy/verifier
+tests, the maintenance
 procedure-option regression, the SLF4J/Log4j2 logging and redaction tests, and
 the repository Java policy. `git diff --check` reported no whitespace errors.
-The retry/alert harness stopped its Airflow stack. Spark, Polaris, OpenBao, and
+The Deadline Alert harness stopped its Airflow stack. Spark, Polaris, OpenBao, and
 Ceph were already stopped, and the final filtered Docker query returned no
 running Stratus containers.
 
-## Remaining P1-4.3 work
+After the API verifier, Ceph project-isolation regression, and status-document
+updates, the final `mvn -o verify` completed the expanded 12-module reactor in
+1 minute 2 seconds. It ran 290 offline tests with zero failures, errors, or skips;
+the separate live-only orchestration test is excluded from that count. Shell
+syntax checks passed for both new live harnesses and the Ceph common helper.
 
-1. Prove Deadline Alert behavior for an exceeded timing expectation.
-2. Complete the Airflow API/orchestration verifier scenarios across the full
-   pipeline, including positive and deliberately blocked paths.
+## Next implementation-plan item
+
+`P1-4.3-V1` implementation and development verification are complete. Proceed
+to `P1-4.G-D`: assemble the D1-D2 gate/evidence matrix and record the local
+metadata/log state, bootstrap credentials, local CA, and reduced service
+availability in the development-state promotion manifest.

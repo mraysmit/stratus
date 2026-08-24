@@ -1233,9 +1233,9 @@ These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `platform/airflow/image/`; dependency locks | build, scan, import and provider smoke tests | Historical D1 input | Platform owner | Developer waiver expires 2026-09-16; 35 unique upstream Spark/Hadoop JAR High findings require permanent disposition | Accepted for developer use 2026-08-17 under `WAIVER-P1-4.1-S1-20260817`; retained as historical evidence and superseded for new builds by `P1-4.1-S2` |
 | `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned OCI source stages, decide the PySpark compatibility contract, and produce a timed, scanned local development image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan and phase timings | D1 | Platform owner | 61 High occurrences remain tracked in the accepted upstream runtime; zero Critical | Development accepted 2026-08-22; exact image, timings, runtime inventory and scan evidence recorded in [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
-| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using an already-built local development image | D1 | Platform owner | None for this task | Development accepted 2026-08-22; two complete Airflow 3.3.1 LocalExecutor/PostgreSQL 17.10 cycles passed with migrations, component health, timing and clean shutdown evidence |
+| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using an already-built local development image | D1 | Platform owner | None for this task | Development accepted 2026-08-22; two complete Airflow 3.3.1 LocalExecutor/PostgreSQL 17.10 cycles passed with migrations, component health, timing and clean shutdown. Native scheduled runs on 2026-08-24 found and corrected the worker execution-API route to internal Compose DNS |
 | `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/compose.spark.yaml`; `platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh` | Spark task, catalog/object-store operation, immutable-input and secret-redaction evidence | D1 | Security owner | None for this task | Development accepted 2026-08-22; Spark 4.1.3 client submitted to Spark 4.1.2, and distributed count plus Polaris/Ceph Iceberg create/write/read/drop passed |
-| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | In progress - all three live pipeline slices and metadata-policy maintenance passed on 2026-08-23. Retry/alert run `airflow-retry-alert-20260824T040947Z` proved transient recovery, permanent retry exhaustion, exactly one terminal alert, safe fields, numeric timings, secret checks and cleanup. Deadline Alert and remaining API-verifier scenarios remain |
+| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | Development verified 2026-08-24 - all three live pipeline slices, metadata-policy maintenance, retry recovery, terminal failure alerting, native Deadline Alert behavior, and public-API positive/fail-closed scenarios passed. Final run `airflow-api-orchestration-20260824T073836Z` completed in 420.772 seconds with independent side-effect proof, exact cleanup, secret checks, and zero remaining Stratus containers |
 | `P1-4.1-P1` | `P1-4.1` | Production | Publish the accepted S2 image through the approved artifact pipeline and provision external PostgreSQL TLS/backup/restore plus production Airflow service placement. | Database, build and operations owners | `P1-4.1-S2`, `P1-0.1`, development-system acceptance | `platform/airflow/`; `environments/production/airflow/`; DB runbook | immutable digest/SBOM/provenance, migration, failover/recovery and service restart | P1-P6 | Platform owner | Deferred production-hardening entry gate and DB HA decision | Not started |
 | `P1-4.2-P1` | `P1-4.2` | Production | Apply OIDC/HTTPS, managed secrets, immutable DAG promotion, Ceph remote logs, and restricted administration. | Security owner | `P1-4.1-P1`, Increment 7 controls | `platform/airflow/config/`; `environments/production/airflow/` | auth negative tests, log continuity, rotation | P5-P11 | Operations owner | OIDC integration | Not started |
 | `P1-4.5-R1` | `P1-4.5` | Production | Prove scheduler/service failure, DB restore, DAG rollback, retry safety, and alert routing. | Operations owner | `P1-4.2-P1` | `operations/runbooks/airflow/` | timed drills, restored run metadata, alert exercise | P12-P16 | Platform owner | Maintenance window | Not started |
@@ -1368,9 +1368,39 @@ The replacement path was accepted on 2026-08-22:
   and the checked-in harness stopped the isolated Airflow stack. Strict TDD also
   captured and corrected the test-DAG mount boundary, deprecated operator import,
   and missing runtime-duration fallback; all 18 focused DAG guardrails passed.
-- The post-retry/alert offline `mvn -o verify` run passed the complete 11-module
-  reactor in 1 minute 13 seconds: 275 tests, zero failures, zero errors and zero
-  skips. It includes 18 Airflow DAG guardrails, the maintenance policy/verifier
+- The native Deadline Alert slice passed as run
+  `airflow-deadline-alert-20260824T051734Z` in 98.764 seconds. A one-second task
+  completed before its 12-second queued-at deadline without an alert. An
+  18-second task produced exactly one asynchronous triggerer callback with
+  13,278 ms observed elapsed time and a 1,278 ms breach, then completed
+  successfully. The callback carried safe DAG/run/correlation identity,
+  deadline name/timestamps and numeric timing. Secret checks and cleanup passed.
+  The first scheduled attempt had exposed LocalExecutor workers calling the
+  execution API through scheduler-container loopback; a failing deployment
+  regression required and then proved the corrected internal
+  `airflow-api-server:8080` route. Failure diagnostics are now retained before
+  live cleanup. All 21 DAG and five deployment guardrails passed.
+- The final public-API slice passed as run
+  `airflow-api-orchestration-20260824T073836Z` in 420.772 seconds. Airflow health
+  and the five-DAG registry passed. The maintenance DAG succeeded on attempt one
+  in 34.657 seconds of Airflow time; the deliberately blocked bronze-to-silver
+  DAG failed in 18.056 seconds, with its transform failed on attempt one and its
+  downstream quality task `upstream_failed` without an attempt. Independent
+  Spark verifiers proved three rows remained after three-to-one compaction and
+  proved the blocked silver target absent. Exact Iceberg, quality-result and S3
+  cleanup passed, protected secrets were absent, and checked-in lifecycle scripts
+  stopped every provider with `remainingStratusContainers=0`. Strict-TDD
+  regressions retain the discovered Airflow trigger model, HTTP/1.1 transport,
+  DAG-processor retry override, and explicit Ceph compose-project contracts.
+- The final post-API `mvn -o verify` passed the expanded 12-module reactor in
+  1 minute 2 seconds: 290 offline tests, zero failures, zero errors and zero
+  skips. The live-only orchestration test remains excluded from the normal
+  offline count. Bash syntax checks passed for the API, Deadline Alert, and Ceph
+  lifecycle helpers.
+- The post-Deadline offline `mvn -o verify` run passed the complete 11-module
+  reactor in 51.896 seconds: 278 tests, zero failures, zero errors and zero
+  skips. It includes 21 Airflow DAG guardrails, five deployment guardrails, the
+  maintenance policy/verifier
   tests, the live-discovered Iceberg rewrite-option regression, and repository
   logging, redaction and Java-policy checks. `git diff --check` was clean; the
   live harness stopped Airflow, the other Stratus providers were already
@@ -1381,20 +1411,13 @@ The durable acceptance record is
 
 Remaining work, in dependency order:
 
-1. Continue `P1-4.3-V1` under strict TDD. The shared submission helper,
-   structured development failure callback, landing-to-bronze DAG, offline
-   contract, parse/registry proof, live landing-to-bronze verification, and live
-   bronze-to-silver and silver-to-gold accepted/blocked verification are
-   complete. Metadata-policy maintenance run/skip and transient/permanent
-   retry/failure-alert behavior are also complete. Deadline Alert and the
-   remaining full-pipeline Airflow API-verifier scenarios remain. See
-   [`platform/airflow/pipeline-development-progress-20260822.md`](../../platform/airflow/pipeline-development-progress-20260822.md).
-2. Close the Increment 4 developer gate after its full DAG behavior and D2
+1. Execute `P1-4.G-D`: close the Increment 4 developer gate after its D1
+   evidence matrix and D2
    development-state manifest evidence pass.
-3. Track the 61 current S2 High occurrences and reassess them when the pinned
+2. Track the 61 current S2 High occurrences and reassess them when the pinned
    Airflow or Spark upstream distributions change. They are visible development
    risk, not evidence of production readiness.
-4. After the complete development system is accepted, activate the separate production-hardening
+3. After the complete development system is accepted, activate the separate production-hardening
    stage. It publishes the accepted S2 build contract through `P1-0.1` and then executes production
    tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P`.
 

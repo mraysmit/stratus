@@ -64,7 +64,9 @@ transcript containing the actual generated Airflow or Spark storage secrets.
 The accepted run completed in 110.629 seconds. Its ignored raw transcript was
 `evidence/airflow-spark-20260822T090250Z.log`; durable results and limitations are
 preserved in the tracked acceptance record linked above. `P1-4.3-V1`, the full
-pipeline DAG and orchestration-verifier task, is now in progress.
+pipeline DAG and orchestration-verifier task, is implemented and verified in the
+development environment. The Increment 4 developer gate remains a separate
+evidence/acceptance task.
 
 The first P1-4.3 slice can be parsed and registered through Airflow without
 starting the data-plane providers:
@@ -158,3 +160,56 @@ including exception messages. It also validates generated-secret redaction and
 stops Airflow on every exit path. Run
 `airflow-retry-alert-20260824T040947Z` passed in 72,759 ms; its callback timings
 were 2,537 ms, 2,758 ms, and 42 ms.
+
+The DAG-level timing expectation is proven separately with Airflow's native
+Deadline Alert scheduler/triggerer path:
+
+```bash
+bash platform/airflow/developer/scripts/tests/airflow-deadline-alert-live-test.sh
+```
+
+The isolated test DAG completes a one-second run inside a 12-second deadline,
+then keeps a second run active for 18 seconds. The first run must emit no alert;
+the second must emit exactly one asynchronous callback with safe DAG, run,
+correlation, deadline and numeric breach-timing fields before completing
+successfully. The harness retains component/task diagnostics on failure, checks
+generated Airflow secrets, and shuts down Airflow on every exit path. Run
+`airflow-deadline-alert-20260824T051734Z` passed in 98,764 ms with 13,278 ms
+observed elapsed time and a 1,278 ms breach.
+
+The final control-plane and fail-closed behavior is exercised through Airflow's
+public REST API by the checked-in full-stack harness:
+
+```bash
+bash platform/airflow/developer/scripts/tests/airflow-api-orchestration-live-test.sh
+```
+
+The harness starts Ceph, OpenBao, Polaris, Spark, and Airflow with their checked-in
+lifecycle scripts. Its Java verifier authenticates to Airflow 3.3.1, validates
+scheduler and metadata health, requires all four Stratus DAGs to be registered
+and unpaused, supplies caller-owned run IDs, and records bounded poll, DAG, and
+task timings. It requires a metadata-policy maintenance run to succeed and a
+bronze-to-silver run with a persisted blocking quality result to fail on its
+first transform attempt, leaving the downstream quality task
+`upstream_failed`. Independent Spark verifiers prove three maintenance files
+were compacted to one without losing rows and that the blocked silver target was
+never created. Exact fixtures are purged, generated secrets are scanned, and all
+five provider stacks are stopped in reverse order on every exit path.
+
+Accepted run `airflow-api-orchestration-20260824T073836Z` completed in 420,772
+ms. The positive DAG used 34,657 ms of Airflow time; the deliberately blocked DAG
+used 18,056 ms, failed the transform on attempt one, and left the downstream
+quality task unexecuted. The Java verification completed in 57,137 ms, both
+independent side-effect checks passed, and cleanup reported
+`remainingStratusContainers=0`.
+
+Expected-failure retry overrides must reach both `airflow-dag-processor` and
+`airflow-scheduler`: Airflow 3 serializes DAG defaults in the DAG processor, while
+the scheduler executes the serialized result. The API client deliberately uses
+HTTP/1.1 because the pinned Uvicorn listener rejects Java's clear-text HTTP/2
+upgrade before the Airflow API receives a POST.
+
+Normally scheduled LocalExecutor tasks use
+`AIRFLOW__API__BASE_URL=http://airflow-api-server:8080` so worker subprocesses in
+the scheduler container reach the execution API over Compose DNS. The loopback
+address remains valid only for health checks running inside the API container.

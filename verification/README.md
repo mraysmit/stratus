@@ -16,23 +16,26 @@ Current modules:
 | `catalog` | Table catalog — Apache Iceberg + Apache Polaris | Active |
 | `secrets` | Secret distribution — OpenBao (ADR-P1-004) | Active |
 | `compute` | Batch compute — Apache Spark pipeline | Placeholder |
-| `orchestration` | Workflow orchestration — Apache Airflow | Placeholder |
+| `orchestration` | Workflow orchestration — Apache Airflow | Active |
 | `query` | Interactive query — Trino | Placeholder |
 | `governance` | Metadata and policy — Apache Atlas + Apache Ranger | Placeholder |
 | `identity` | Identity and security — FreeIPA + Keycloak | Placeholder |
 
-Orchestration status checkpoint (2026-08-22): `P1-4.1-S2` produced the accepted
-Airflow 3.3.1 development image, `P1-4.1-D1` passed two complete
-LocalExecutor/PostgreSQL lifecycle cycles, and `P1-4.2-D1` passed a real packaged
-Java submission to the Spark/Polaris/Ceph development stack. The S2 scan reported
-zero Critical and 61 High occurrences across 38 unique package/CVE pairs; those
-High findings remain tracked. The `orchestration` module correctly remains a
-placeholder because `P1-4.3-V1` is only partly implemented: the landing-to-bronze
-source contract parses and registers in Airflow, but the executable verifier and
-complete live ingestion, transform, quality-halt, maintenance, retry and alert
-scenarios remain. Registry publication and readiness controls remain deferred to the
-later production-hardening stage. See
+Orchestration status checkpoint (2026-08-24): `P1-4.3-V1` is implemented. The
+active Java verifier authenticates to Airflow 3.3.1, checks scheduler and metadata
+health, requires all four Stratus DAGs to be registered and unpaused, triggers
+caller-correlated runs through the public REST API, polls them with bounded
+timeouts, and records exact run/task states and timings. Its checked-in live
+harness also proves a successful metadata-policy maintenance run and a deliberate
+quality-gate failure that prevents the downstream write, verifies both outcomes
+independently in Iceberg, scans the transcript for secrets, removes exact fixtures,
+and shuts down all Stratus providers. See
 [`platform/airflow/development-acceptance-20260822.md`](../platform/airflow/development-acceptance-20260822.md).
+The accepted full-stack run was
+`airflow-api-orchestration-20260824T073836Z` (420,772 ms), followed by exact
+fixture cleanup and zero remaining Stratus containers.
+The next implementation-plan item is `P1-4.G-D`, the Increment 4 D1-D2
+gate/evidence matrix and development-state manifest.
 
 ## Quality Gate
 
