@@ -126,14 +126,22 @@ then passed on 2026-08-24 with Airflow public-API health/registry/trigger/poll b
 maintenance, a deliberate quality-blocked transform on attempt one, independent
 three-to-one compaction and no-target-write verification, exact fixture cleanup,
 secret checks, and reverse-order shutdown with zero remaining Stratus containers
-in 420.772 seconds. `P1-4.G-D`, the Increment 4 D1-D2 evidence matrix and
-development-state manifest, follows. This
+in 420.772 seconds. Canonical run
+`airflow-development-acceptance-20260824T103411Z` then repeated the entire
+development proof in one command: every phase passed in 2,975.509 seconds, both
+offline reactors ran 294 tests without failures, errors or skips, and final
+cleanup again reported zero Stratus containers. The `P1-4.G-D` D1-D2 evidence
+matrix and development-state manifest are accepted in
+[`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md)
+under the repository maintainer's explicit completion direction. Increment 4
+development is complete and Increment 5 development engineering is unblocked. This
 checkpoint updates delivery state only; the detailed gap lists below remain the
 dated 2026-07-11 audit history. See
 [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
 
-The final expanded offline reactor passed 12 modules and 290 tests in 1 minute 2
-seconds with zero failures, errors, or skips.
+The canonical pre-live and post-live reactors each passed 12 modules and 294
+tests, in 56.501 and 65.475 seconds respectively, with zero failures, errors, or
+skips.
 
 ---
 

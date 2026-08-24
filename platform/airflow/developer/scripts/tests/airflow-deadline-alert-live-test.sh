@@ -5,14 +5,17 @@ set -euo pipefail
 # Purpose: prove one on-time DAG run and one real Airflow Deadline Alert callback.
 source "$(dirname "$0")/../lib/airflow-compose-common.sh"
 
-readonly DAG_ID="stratus_deadline_alert_probe"
+readonly DAG_ID_PREFIX="stratus_deadline_alert_probe"
 readonly TASK_ID="exercise_deadline_contract"
 readonly DEADLINE_NAME="stratus-development-dag-deadline"
 readonly PROBE_OVERLAY="$HARNESS_DIR/scripts/tests/compose.deadline-alert.yaml"
 readonly RUN_STATE_DEADLINE_SECONDS=90
+readonly SCHEDULER_HEARTBEAT_SECONDS=2
 export AIRFLOW_COMPOSE_OVERLAY="$PROBE_OVERLAY"
 
 suite_run_id="airflow-deadline-alert-$(date -u +%Y%m%dT%H%M%SZ)"
+DAG_ID="${DAG_ID_PREFIX}_${suite_run_id#airflow-deadline-alert-}_$$"
+export STRATUS_DEADLINE_PROBE_DAG_ID="$DAG_ID"
 on_time_run_id="$suite_run_id-on-time"
 missed_run_id="$suite_run_id-missed"
 on_time_correlation="$on_time_run_id-correlation"
@@ -54,6 +57,10 @@ cleanup() {
     if [[ "$exit_code" -ne 0 ]]; then
       capture_failure_diagnostics
     fi
+    # The per-run DAG ID avoids Airflow 3.3.1 reusing a DeadlineAlert reference whose
+    # metadata row belongs to an older serialized DAG version. Delete only this test-owned
+    # identity so repeated proofs remain isolated without resetting the development database.
+    compose exec -T airflow-scheduler airflow dags delete "$DAG_ID" -y >/dev/null 2>&1 || true
     bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
   fi
   exit "$exit_code"
@@ -100,7 +107,7 @@ trigger_probe() {
   wait_for_run_state "$run_id"
 }
 
-log "event=airflow_deadline_alert_suite_started suiteRunId=$suite_run_id dagId=$DAG_ID taskId=$TASK_ID"
+log "event=airflow_deadline_alert_suite_started suiteRunId=$suite_run_id dagId=$DAG_ID taskId=$TASK_ID schedulerHeartbeatSeconds=$SCHEDULER_HEARTBEAT_SECONDS"
 
 phase_started_ms="$(date +%s%3N)"
 bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
@@ -113,7 +120,7 @@ trigger_probe "$on_time_run_id" "$on_time_correlation" on-time 1
 phase_complete "on_time_completion" "$phase_started_ms"
 
 phase_started_ms="$(date +%s%3N)"
-trigger_probe "$missed_run_id" "$missed_correlation" missed 18
+trigger_probe "$missed_run_id" "$missed_correlation" missed 35
 phase_complete "missed_deadline_completion" "$phase_started_ms"
 
 phase_started_ms="$(date +%s%3N)"

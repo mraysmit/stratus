@@ -4,6 +4,7 @@ x-deadline-alert-probe-volume: &deadline-alert-probe-volume ./scripts/tests/dags
 x-platform-dags-volume: &platform-dags-volume ./dags:/opt/airflow/platform-dags:ro
 x-deadline-alert-environment: &deadline-alert-environment
   PYTHONPATH: /opt/airflow/platform-dags
+  STRATUS_DEADLINE_PROBE_DAG_ID: ${STRATUS_DEADLINE_PROBE_DAG_ID:?STRATUS_DEADLINE_PROBE_DAG_ID is required}
 
 services:
   airflow-api-server:
@@ -17,7 +18,9 @@ services:
       - *deadline-alert-probe-volume
       - *platform-dags-volume
   airflow-scheduler:
-    environment: *deadline-alert-environment
+    environment:
+      <<: *deadline-alert-environment
+      AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 2
     volumes:
       - *deadline-alert-probe-volume
       - *platform-dags-volume

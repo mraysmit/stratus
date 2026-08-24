@@ -1235,12 +1235,12 @@ These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/
 | `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned OCI source stages, decide the PySpark compatibility contract, and produce a timed, scanned local development image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan and phase timings | D1 | Platform owner | 61 High occurrences remain tracked in the accepted upstream runtime; zero Critical | Development accepted 2026-08-22; exact image, timings, runtime inventory and scan evidence recorded in [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
 | `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using an already-built local development image | D1 | Platform owner | None for this task | Development accepted 2026-08-22; two complete Airflow 3.3.1 LocalExecutor/PostgreSQL 17.10 cycles passed with migrations, component health, timing and clean shutdown. Native scheduled runs on 2026-08-24 found and corrected the worker execution-API route to internal Compose DNS |
 | `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/compose.spark.yaml`; `platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh` | Spark task, catalog/object-store operation, immutable-input and secret-redaction evidence | D1 | Security owner | None for this task | Development accepted 2026-08-22; Spark 4.1.3 client submitted to Spark 4.1.2, and distributed count plus Polaris/Ceph Iceberg create/write/read/drop passed |
-| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | Development verified 2026-08-24 - all three live pipeline slices, metadata-policy maintenance, retry recovery, terminal failure alerting, native Deadline Alert behavior, and public-API positive/fail-closed scenarios passed. Final run `airflow-api-orchestration-20260824T073836Z` completed in 420.772 seconds with independent side-effect proof, exact cleanup, secret checks, and zero remaining Stratus containers |
+| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | Development accepted 2026-08-24 - canonical run `airflow-development-acceptance-20260824T103411Z` passed all pipeline, maintenance, retry, native Deadline Alert and public-API positive/fail-closed scenarios, with independent side-effect proof, exact cleanup, 294-test pre/post reactors, and zero remaining Stratus containers |
 | `P1-4.1-P1` | `P1-4.1` | Production | Publish the accepted S2 image through the approved artifact pipeline and provision external PostgreSQL TLS/backup/restore plus production Airflow service placement. | Database, build and operations owners | `P1-4.1-S2`, `P1-0.1`, development-system acceptance | `platform/airflow/`; `environments/production/airflow/`; DB runbook | immutable digest/SBOM/provenance, migration, failover/recovery and service restart | P1-P6 | Platform owner | Deferred production-hardening entry gate and DB HA decision | Not started |
 | `P1-4.2-P1` | `P1-4.2` | Production | Apply OIDC/HTTPS, managed secrets, immutable DAG promotion, Ceph remote logs, and restricted administration. | Security owner | `P1-4.1-P1`, Increment 7 controls | `platform/airflow/config/`; `environments/production/airflow/` | auth negative tests, log continuity, rotation | P5-P11 | Operations owner | OIDC integration | Not started |
 | `P1-4.5-R1` | `P1-4.5` | Production | Prove scheduler/service failure, DB restore, DAG rollback, retry safety, and alert routing. | Operations owner | `P1-4.2-P1` | `operations/runbooks/airflow/` | timed drills, restored run metadata, alert exercise | P12-P16 | Platform owner | Maintenance window | Not started |
 | `P1-4.4-V1` | `P1-4.4` | Production | Run production DAG and quality-gate regression with capacity and observability evidence. | QA owner | `P1-4.5-R1` | production test reports | run IDs, JUnit, metrics, failed promotion proof | P15-P18 | Data owner | Representative schedule load | Not started |
-| `P1-4.G-D` | `P1-4` | Developer | Accept D1-D2. | Platform owner | `P1-4.3-V1` | developer gate record | gate/evidence matrix | D1-D2 | Data owner | Open defect | Not started |
+| `P1-4.G-D` | `P1-4` | Developer | Accept D1-D2. | Platform owner | `P1-4.3-V1` | [`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md) | gate/evidence matrix and development-state promotion manifest | D1-D2 | Data owner | No open functional defect | Development accepted 2026-08-24 - the repository maintainer directed closure after canonical run `airflow-development-acceptance-20260824T103411Z` passed every phase in 2,975.509 seconds, repeated 294 offline tests, and left zero Stratus containers |
 | `P1-4.G-P` | `P1-4` | Production | Accept P1-P18 with promotion and readiness evidence. | Platform owner | `P1-4.4-V1` | production gate record | gate/evidence matrix | P1-P18 | Operations owner | Open production defect | Not started |
 
 ### 15.1 Current implementation evidence and remaining work
@@ -1392,11 +1392,39 @@ The replacement path was accepted on 2026-08-22:
   stopped every provider with `remainingStratusContainers=0`. Strict-TDD
   regressions retain the discovered Airflow trigger model, HTTP/1.1 transport,
   DAG-processor retry override, and explicit Ceph compose-project contracts.
-- The final post-API `mvn -o verify` passed the expanded 12-module reactor in
-  1 minute 2 seconds: 290 offline tests, zero failures, zero errors and zero
-  skips. The live-only orchestration test remains excluded from the normal
-  offline count. Bash syntax checks passed for the API, Deadline Alert, and Ceph
-  lifecycle helpers.
+- The canonical one-command development suite then passed as
+  `airflow-development-acceptance-20260824T103411Z` in 2,975.509 seconds. It
+  reran the offline reactor before live work, rebuilt and scanned the image,
+  proved two lifecycle cycles, parsed the DAG registry, exercised retry and
+  native Deadline Alert behavior, bootstrapped every provider, ran Spark
+  submission and every pipeline/maintenance slice, shut providers down in
+  reverse order, proved public-API positive and fail-closed behavior, reran the
+  offline reactor, and finished with `remainingStratusContainers=0`. The
+  Deadline probe now uses a unique test-owned DAG ID and deletes its metadata so
+  an Airflow 3.3.1 serialized DAG version cannot retain a deadline reference to
+  a prior test run.
+- The accepted behavior is also packaged as an audience-facing demonstration
+  layer in
+  [`platform/airflow/developer/demos/README.md`](../../platform/airflow/developer/demos/README.md).
+  Its three one-command entry points delegate to the accepted live harnesses
+  instead of duplicating DAG or Spark business logic. Live runs on 2026-08-24
+  proved the customer landing-to-gold journey as
+  `airflow-demo-customer-pipeline-20260824T121540Z` in 836.968 seconds, the
+  pass-and-block quality gate as
+  `airflow-demo-quality-gate-20260824T120456Z` in 616.644 seconds, and
+  REST-API-driven table maintenance plus fail-closed task-state inspection as
+  `airflow-demo-api-maintenance-20260824T123014Z` in 556.589 seconds. Every
+  wrapper verified the accepted harness markers and finished with
+  `remainingStratusContainers=0`. Five strict-TDD repository contracts protect
+  the demo structure, shared lifecycle ownership, expected-result guides,
+  audience fixture and entry-point links; the final 12-module offline reactor
+  passed 299 tests with zero failures, errors or skips.
+- The final developer-gate `mvn -o verify` passed the expanded 12-module reactor
+  twice in the canonical suite: 294 offline tests with zero failures, zero
+  errors and zero skips in 56.501 seconds before live testing and 65.475 seconds
+  afterwards. The live-only orchestration test remains excluded from the normal
+  offline count. Bash syntax checks passed for the Airflow test and lifecycle
+  helpers.
 - The post-Deadline offline `mvn -o verify` run passed the complete 11-module
   reactor in 51.896 seconds: 278 tests, zero failures, zero errors and zero
   skips. It includes 21 Airflow DAG guardrails, five deployment guardrails, the
@@ -1409,15 +1437,13 @@ The replacement path was accepted on 2026-08-22:
 The durable acceptance record is
 [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
 
-Remaining work, in dependency order:
+The `P1-4.G-D` developer gate is accepted. Remaining tracked work is outside the
+completed Airflow development implementation:
 
-1. Execute `P1-4.G-D`: close the Increment 4 developer gate after its D1
-   evidence matrix and D2
-   development-state manifest evidence pass.
-2. Track the 61 current S2 High occurrences and reassess them when the pinned
+1. Track the 61 current S2 High occurrences and reassess them when the pinned
    Airflow or Spark upstream distributions change. They are visible development
    risk, not evidence of production readiness.
-3. After the complete development system is accepted, activate the separate production-hardening
+2. After the complete development system is accepted, activate the separate production-hardening
    stage. It publishes the accepted S2 build contract through `P1-0.1` and then executes production
    tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P`.
 
@@ -1425,8 +1451,27 @@ Remaining work, in dependency order:
 
 ### Developer gate
 
-- [ ] **D1** - Single-host Airflow 3.3.1 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
-- [ ] **D2** - Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
+- [x] **D1** - Single-host Airflow 3.3.1 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
+- [x] **D2** - Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
+
+### Developer-to-production promotion controls
+
+The authoritative D2 development-state promotion manifest is in
+[`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md).
+It records local PostgreSQL and log/event state, disposable credentials, local
+CA material, reduced single-host availability, loopback HTTP/SimpleAuth,
+workstation-built artifacts, structured-log-only alert delivery, developer-sized
+workloads, and disposable dependency bootstrap. Every row maps the condition to
+its production replacement task and a rollback or stop condition. An unlisted
+developer shortcut blocks gate acceptance until it is assessed and added.
+
+### Gate traceability rule
+
+The D1 and D2 identifiers above are normative. Both are complete because every
+producing task is accepted, the linked evidence resolves, the repository
+maintainer explicitly directed completion, and the canonical suite passed in
+full. The gate task reviews evidence; it does not create missing evidence on
+behalf of its producers.
 
 ### Production gate
 

@@ -27,11 +27,16 @@ and the `P1-4.2-D1` live Spark/Polaris/Ceph submission were accepted for
 development. The current S2 scan has zero Critical and 61 High occurrences
 across 38 unique package/CVE pairs; they remain tracked in the development
 vulnerability review. The older S1 image and waiver are historical only.
-`P1-4.3-V1` is development-verified: final full-stack public-API run
+`P1-4.3-V1` is development-accepted: final full-stack public-API run
 `airflow-api-orchestration-20260824T073836Z` passed positive maintenance,
 deliberate fail-closed promotion, independent side-effect checks, exact cleanup,
-secret checks, and zero remaining Stratus containers. `P1-4.G-D`, the Increment
-4 D1-D2 evidence matrix and development-state manifest, is next. Registry publication,
+secret checks, and zero remaining Stratus containers. Canonical run
+`airflow-development-acceptance-20260824T103411Z` subsequently passed every
+Airflow development phase in 2,975.509 seconds, repeated 294 offline tests before
+and after the live work, and again left zero Stratus containers. The `P1-4.G-D`
+Increment 4 D1-D2 matrix and development-state manifest are accepted in
+[`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md);
+Increment 4 development is complete. Registry publication,
 immutable promotion, every Increment 4 production task, and this operational-
 readiness checklist remain deferred. None of the accepted development evidence
 claims production readiness.

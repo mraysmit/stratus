@@ -65,8 +65,8 @@ The accepted run completed in 110.629 seconds. Its ignored raw transcript was
 `evidence/airflow-spark-20260822T090250Z.log`; durable results and limitations are
 preserved in the tracked acceptance record linked above. `P1-4.3-V1`, the full
 pipeline DAG and orchestration-verifier task, is implemented and verified in the
-development environment. The Increment 4 developer gate remains a separate
-evidence/acceptance task.
+development environment. The Increment 4 developer gate was accepted on
+2026-08-24 against the canonical one-command development suite.
 
 The first P1-4.3 slice can be parsed and registered through Airflow without
 starting the data-plane providers:
@@ -79,7 +79,7 @@ This checked-in test starts Airflow, runs its health contract, requires an empty
 import-error list, requires all four pipeline DAGs in Airflow's registry, records
 phase timings, and shuts Airflow down through the lifecycle script. See
 [`pipeline-development-progress-20260822.md`](../pipeline-development-progress-20260822.md)
-for evidence and the remaining live pipeline work.
+for the accepted live pipeline evidence and maintenance guidance.
 
 The accepted live landing-to-bronze slice uses the same provider prerequisites
 and remains entirely in the clearly named `scripts/tests/` directory:
@@ -213,3 +213,22 @@ Normally scheduled LocalExecutor tasks use
 `AIRFLOW__API__BASE_URL=http://airflow-api-server:8080` so worker subprocesses in
 the scheduler container reach the execution API over Compose DNS. The loopback
 address remains valid only for health checks running inside the API container.
+
+## Audience-facing Airflow demonstrations
+
+The accepted behavior is packaged as three shorter, one-command demonstrations
+under [`demos/README.md`](demos/README.md): a customer landing-to-gold journey, a
+fail-closed quality gate, and REST API-driven Iceberg maintenance. These entry
+points reuse the live acceptance harnesses, print concise expected outcomes and
+default to checked cleanup. Pass `--keep-running` only when the Airflow UI should
+remain available for inspection, then use the documented demo shutdown command.
+
+The complete regression remains:
+
+```bash
+bash platform/airflow/developer/scripts/tests/airflow-development-acceptance-suite.sh
+```
+
+Canonical run `airflow-development-acceptance-20260824T103411Z` passed every
+Airflow development phase, repeated 294 offline tests before and after live work,
+and closed the Increment 4 developer gate with zero remaining Stratus containers.

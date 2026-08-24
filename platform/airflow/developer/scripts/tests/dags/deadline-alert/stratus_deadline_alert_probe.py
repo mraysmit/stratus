@@ -1,11 +1,14 @@
 """Development-only proof of Airflow's DAG-level Deadline Alert behavior.
 
 The test overlay mounts only this DAG. Its two accepted durations are deliberately bounded: one
-finishes comfortably inside the deadline, while the other remains active long enough for the
-scheduler and triggerer to exercise the real missed-deadline callback path.
+finishes comfortably inside the deadline, while the other remains active for more than ten of the
+test scheduler's two-second heartbeat intervals after the deadline. That margin keeps the live
+proof deterministic on a loaded development workstation while still exercising Airflow's real
+scheduler-to-triggerer missed-deadline callback path.
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -14,12 +17,16 @@ from airflow.sdk import AsyncCallback, DAG, DeadlineAlert, DeadlineReference
 from airflow.sdk.bases.operator import BaseOperator
 from airflow.sdk.exceptions import AirflowException
 
-DAG_ID = "stratus_deadline_alert_probe"
+# Airflow 3.3.1 can retain a DeadlineAlert UUID from an older serialized DAG version while the
+# alert row remains attached to the original version. The Deadline-specific overlay supplies a
+# unique, test-owned identity and its harness deletes that identity. Other test overlays mount the
+# shared DAG fixture tree, so the stable fallback lets them parse this untriggered fixture cleanly.
+DAG_ID = os.environ.get("STRATUS_DEADLINE_PROBE_DAG_ID", "stratus_deadline_alert_probe")
 TASK_ID = "exercise_deadline_contract"
 DEADLINE_NAME = "stratus-development-dag-deadline"
 DEADLINE_INTERVAL = timedelta(seconds=12)
 ON_TIME_SLEEP_SECONDS = 1
-MISSED_SLEEP_SECONDS = 18
+MISSED_SLEEP_SECONDS = 35
 ALLOWED_SLEEP_SECONDS = {ON_TIME_SLEEP_SECONDS, MISSED_SLEEP_SECONDS}
 LOGGER = logging.getLogger("stratus.airflow.deadline_alert_probe")
 

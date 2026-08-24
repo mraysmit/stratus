@@ -409,14 +409,17 @@ final class AirflowPipelineDagTest {
         String overlay = Repo.read(DEADLINE_ALERT_OVERLAY_PATH);
         String alerts = read(ALERTS_DAG_PATH);
         assertAll(
-                () -> assertTrue(probe.contains("DAG_ID = \""
-                        + DEADLINE_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(probe.contains(
+                        "DAG_ID = os.environ.get(\"STRATUS_DEADLINE_PROBE_DAG_ID\", \""
+                                + DEADLINE_ALERT_PROBE_DAG_ID + "\")"),
+                        "shared test-DAG mounts must parse without the Deadline-specific overlay"),
                 () -> assertTrue(probe.contains("dag_id=DAG_ID")),
                 () -> assertTrue(probe.contains("DeadlineAlert(")),
                 () -> assertTrue(probe.contains(
                         "reference=DeadlineReference.DAGRUN_QUEUED_AT")),
                 () -> assertTrue(probe.contains("interval=DEADLINE_INTERVAL")),
                 () -> assertTrue(probe.contains("timedelta(seconds=12)")),
+                () -> assertTrue(probe.contains("MISSED_SLEEP_SECONDS = 35")),
                 () -> assertTrue(probe.contains("AsyncCallback(")),
                 () -> assertTrue(probe.contains(
                         "\"stratus_alerts.stratus_deadline_alert\"")),
@@ -436,7 +439,11 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(overlay.contains(
                         "./dags:/opt/airflow/platform-dags:ro")),
                 () -> assertTrue(overlay.contains(
-                        "PYTHONPATH: /opt/airflow/platform-dags")));
+                        "PYTHONPATH: /opt/airflow/platform-dags")),
+                () -> assertTrue(overlay.contains(
+                        "STRATUS_DEADLINE_PROBE_DAG_ID: ${STRATUS_DEADLINE_PROBE_DAG_ID:?")),
+                () -> assertTrue(overlay.contains(
+                        "AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 2")));
     }
 
     @Test
@@ -446,13 +453,16 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("compose.deadline-alert.yaml")),
                 () -> assertTrue(script.contains("airflow-compose-startup.sh")),
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
-                () -> assertTrue(script.contains("readonly DAG_ID=\""
+                () -> assertTrue(script.contains("readonly DAG_ID_PREFIX=\""
                         + DEADLINE_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(script.contains("DAG_ID=\"${DAG_ID_PREFIX}_")),
+                () -> assertTrue(script.contains("export STRATUS_DEADLINE_PROBE_DAG_ID=\"$DAG_ID\"")),
                 () -> assertTrue(script.contains("airflow dags trigger \"$DAG_ID\"")),
                 () -> assertTrue(script.contains(
                         "trigger_probe \"$on_time_run_id\" \"$on_time_correlation\" on-time 1")),
                 () -> assertTrue(script.contains(
-                        "trigger_probe \"$missed_run_id\" \"$missed_correlation\" missed 18")),
+                        "trigger_probe \"$missed_run_id\" \"$missed_correlation\" missed 35")),
+                () -> assertTrue(script.contains("SCHEDULER_HEARTBEAT_SECONDS=2")),
                 () -> assertTrue(script.contains("wait_for_run_state")),
                 () -> assertTrue(script.contains("compose logs --no-color airflow-triggerer")),
                 () -> assertTrue(script.contains("event=airflow_deadline_missed")),
@@ -465,6 +475,8 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("elapsedMs=")),
                 () -> assertTrue(script.contains("capture_failure_diagnostics"),
                         "live failures must retain scheduler, triggerer, and task diagnostics"),
+                () -> assertTrue(script.contains("airflow dags delete \"$DAG_ID\" -y"),
+                        "each run must remove its isolated test-only DAG metadata"),
                 () -> assertTrue(script.contains("cleanup")));
     }
 
