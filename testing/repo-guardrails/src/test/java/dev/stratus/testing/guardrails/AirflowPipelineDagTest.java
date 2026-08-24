@@ -69,6 +69,15 @@ final class AirflowPipelineDagTest {
     private static final Path TABLE_MAINTENANCE_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests",
             "airflow-table-maintenance-live-test.sh"));
+    private static final Path RETRY_ALERT_PROBE_DAG_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests", "dags",
+            "stratus_retry_alert_probe.py"));
+    private static final Path RETRY_ALERT_OVERLAY_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "compose.retry-alert.yaml"));
+    private static final Path RETRY_ALERT_LIVE_TEST_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "airflow-retry-alert-live-test.sh"));
     private static final Path AIRFLOW_SPARK_COMMON_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "lib",
             "airflow-spark-common.sh"));
@@ -76,6 +85,7 @@ final class AirflowPipelineDagTest {
             "platform", "airflow", "developer", "compose.spark.yaml"));
 
     private static final String SPARK_CONNECTION_ID = "spark_default";
+    private static final String RETRY_ALERT_PROBE_DAG_ID = "stratus_retry_alert_probe";
     private static final String HADOOP_AWS_JAR = "/opt/stratus/runtime/hadoop-aws.jar";
     private static final String AWS_SDK_BUNDLE_JAR = "/opt/stratus/runtime/aws-sdk-bundle.jar";
     private static final String S3_ACCELERATOR_JAR =
@@ -280,12 +290,90 @@ final class AirflowPipelineDagTest {
         assertAll(
                 () -> assertTrue(alerts.contains("LOGGER.error")),
                 () -> assertTrue(alerts.contains("event=airflow_task_failed")),
+                () -> assertTrue(alerts.contains("event=airflow_task_retry")),
                 () -> assertTrue(alerts.contains("dag_id")),
                 () -> assertTrue(alerts.contains("task_id")),
                 () -> assertTrue(alerts.contains("run_id")),
                 () -> assertTrue(alerts.contains("logical_date")),
                 () -> assertTrue(alerts.contains("try_number")),
-                () -> assertTrue(alerts.contains("log_url")));
+                () -> assertTrue(alerts.contains("log_url")),
+                () -> assertTrue(alerts.contains("duration_ms")),
+                () -> assertTrue(alerts.contains("start_date"),
+                        "duration must fall back to elapsed wall time during callbacks"),
+                () -> assertTrue(alerts.contains("exception_class")),
+                () -> assertFalse(alerts.contains("exception_message"),
+                        "structured alerts must not copy arbitrary exception text"));
+    }
+
+    @Test
+    void retryAlertProofHasStableTestOnlyLocations() {
+        assertAll(
+                () -> assertTrue(Files.isRegularFile(RETRY_ALERT_PROBE_DAG_PATH),
+                        "The controlled probe DAG must live below scripts/tests/dags"),
+                () -> assertTrue(Files.isRegularFile(RETRY_ALERT_OVERLAY_PATH),
+                        "The probe DAG must be mounted only by a checked-in test overlay"),
+                () -> assertTrue(Files.isRegularFile(RETRY_ALERT_LIVE_TEST_PATH),
+                        "The retry/alert proof must be a checked-in test script"),
+                () -> assertFalse(Files.isRegularFile(
+                        DAG_ROOT.resolve(RETRY_ALERT_PROBE_DAG_PATH.getFileName())),
+                        "The development-only probe must not become a fifth platform DAG"));
+    }
+
+    @Test
+    void retryAlertProbeUsesAirflowAttemptStateAndBoundedRetries() {
+        String probe = Repo.read(RETRY_ALERT_PROBE_DAG_PATH);
+        String overlay = Repo.read(RETRY_ALERT_OVERLAY_PATH);
+        assertAll(
+                () -> assertTrue(probe.contains("DAG_ID = \""
+                        + RETRY_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(probe.contains("dag_id=DAG_ID")),
+                () -> assertTrue(probe.contains(
+                        "from airflow.sdk.bases.operator import BaseOperator")),
+                () -> assertFalse(probe.contains("airflow.models.baseoperator"),
+                        "Airflow 3 probes must use the supported public SDK import"),
+                () -> assertTrue(probe.contains("retries\": 1")),
+                () -> assertTrue(probe.contains("retry_delay\": timedelta(seconds=1)")),
+                () -> assertTrue(probe.contains("task_instance.try_number")),
+                () -> assertTrue(probe.contains("mode == TRANSIENT_MODE")),
+                () -> assertTrue(probe.contains("mode == PERMANENT_MODE")),
+                () -> assertTrue(probe.contains("event=airflow_retry_alert_probe_attempt")),
+                () -> assertTrue(probe.contains("event=airflow_retry_alert_probe_succeeded")),
+                () -> assertTrue(probe.contains("on_retry_callback=stratus_retry_alert")),
+                () -> assertTrue(probe.contains("on_failure_callback=stratus_failure_alert")),
+                () -> assertTrue(overlay.contains(
+                        "./scripts/tests/dags:/opt/airflow/dags:ro")),
+                () -> assertTrue(overlay.contains(
+                        "./dags:/opt/airflow/platform-dags:ro")),
+                () -> assertTrue(overlay.contains(
+                        "PYTHONPATH: /opt/airflow/platform-dags")),
+                () -> assertFalse(overlay.contains(
+                        "/opt/airflow/dags/stratus_retry_alert_probe.py:ro"),
+                        "a file cannot be mounted below the read-only platform DAG mount"));
+    }
+
+    @Test
+    void liveRetryAlertTestProvesRecoveryAndTerminalFailureObservability() {
+        String script = Repo.read(RETRY_ALERT_LIVE_TEST_PATH);
+        assertAll(
+                () -> assertTrue(script.contains("compose.retry-alert.yaml")),
+                () -> assertTrue(script.contains("airflow-compose-startup.sh")),
+                () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
+                () -> assertTrue(script.contains("readonly DAG_ID=\""
+                        + RETRY_ALERT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(script.contains("airflow dags test \"$DAG_ID\"")),
+                () -> assertTrue(script.contains("\\\"mode\\\":\\\"transient\\\"")),
+                () -> assertTrue(script.contains("\\\"mode\\\":\\\"permanent\\\"")),
+                () -> assertTrue(script.contains("tryNumber=1")),
+                () -> assertTrue(script.contains("tryNumber=2")),
+                () -> assertTrue(script.contains("event=airflow_task_retry")),
+                () -> assertTrue(script.contains("event=airflow_task_failed")),
+                () -> assertTrue(script.contains("exception_class=AirflowException")),
+                () -> assertTrue(script.contains("duration_ms=[0-9]")),
+                () -> assertTrue(script.contains("alert_count")),
+                () -> assertTrue(script.contains("assert_not_logged")),
+                () -> assertTrue(script.contains("event=airflow_retry_alert_phase_completed")),
+                () -> assertTrue(script.contains("elapsedMs=")),
+                () -> assertTrue(script.contains("cleanup")));
     }
 
     @Test

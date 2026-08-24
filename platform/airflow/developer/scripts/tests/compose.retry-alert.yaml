@@ -1,0 +1,29 @@
+# Test-only overlay: replace the platform DAG mount with the isolated probe directory. The real
+# callback module remains separately available on PYTHONPATH, but its four platform DAGs are not
+# parsed during this proof.
+x-retry-alert-probe-volume: &retry-alert-probe-volume ./scripts/tests/dags:/opt/airflow/dags:ro
+x-platform-dags-volume: &platform-dags-volume ./dags:/opt/airflow/platform-dags:ro
+x-retry-alert-environment: &retry-alert-environment
+  PYTHONPATH: /opt/airflow/platform-dags
+
+services:
+  airflow-api-server:
+    environment: *retry-alert-environment
+    volumes:
+      - *retry-alert-probe-volume
+      - *platform-dags-volume
+  airflow-dag-processor:
+    environment: *retry-alert-environment
+    volumes:
+      - *retry-alert-probe-volume
+      - *platform-dags-volume
+  airflow-scheduler:
+    environment: *retry-alert-environment
+    volumes:
+      - *retry-alert-probe-volume
+      - *platform-dags-volume
+  airflow-triggerer:
+    environment: *retry-alert-environment
+    volumes:
+      - *retry-alert-probe-volume
+      - *platform-dags-volume

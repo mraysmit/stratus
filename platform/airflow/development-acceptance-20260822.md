@@ -134,11 +134,16 @@ its independent verification, purge cleanup, redaction and timing checks passed
 in 326,099 ms. The
 bronze-to-silver suite `airflow-bronze-to-silver-20260823T084502Z` completed in
 356,572 ms; the full silver-to-gold accepted/blocked suite
-`airflow-silver-to-gold-20260823T093453Z` completed in 716,033 ms. Transient
-retry, permanent-failure alert and the remaining full-pipeline
-API-verifier scenarios remain. Increment 4's overall developer gate remains
-open until those behaviors pass. The post-maintenance offline reactor passed all
-11 modules and 272 tests in 1 minute 22 seconds with zero failures, errors, or
-skips. `git diff --check` was clean. Airflow, Spark, Polaris, OpenBao and Ceph
-were stopped through checked-in lifecycle scripts, and the final Docker query
-found no running Stratus containers.
+`airflow-silver-to-gold-20260823T093453Z` completed in 716,033 ms. Retry/alert
+run `airflow-retry-alert-20260824T040947Z` then proved a real transient failure
+recovering on attempt two and a permanent failure emitting exactly one terminal
+alert after retry exhaustion. Both retry callbacks and the terminal callback
+carried numeric elapsed time and safe exception-class metadata; exception detail
+was excluded from the alert, generated Airflow secrets were absent from the
+transcript, and the isolated 72,759 ms suite cleaned up its Airflow stack.
+Deadline Alert and the remaining full-pipeline API-verifier scenarios remain.
+Increment 4's overall developer gate remains open until those behaviors pass.
+The post-retry/alert offline reactor passed all 11 modules and 275 tests in 1
+minute 13 seconds with zero failures, errors, or skips. `git diff --check` was
+clean. The live harness stopped Airflow; Spark, Polaris, OpenBao and Ceph were
+already stopped, and the final Docker query found no running Stratus containers.

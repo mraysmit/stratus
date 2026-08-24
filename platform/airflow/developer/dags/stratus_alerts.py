@@ -7,6 +7,7 @@ to this record.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 LOGGER = logging.getLogger("stratus.airflow.alerts")
@@ -18,18 +19,54 @@ def _render(value: Any) -> str:
     return UNAVAILABLE if value is None else str(value).replace("\n", "_").replace("\r", "_")
 
 
-def stratus_failure_alert(context: dict[str, Any]) -> None:
-    """Emit the minimum diagnostic fields required by the Increment 4 alert contract."""
+def _duration_ms(task_instance: Any) -> str:
+    """Render Airflow's task duration in milliseconds without failing the callback."""
+    duration_seconds = getattr(task_instance, "duration", None)
+    if duration_seconds is None:
+        start_date = getattr(task_instance, "start_date", None)
+        if start_date is not None:
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+            duration_seconds = (datetime.now(timezone.utc) - start_date).total_seconds()
+    if duration_seconds is None:
+        return UNAVAILABLE
+    try:
+        return str(max(0, round(float(duration_seconds) * 1000)))
+    except (TypeError, ValueError):
+        return UNAVAILABLE
+
+
+def stratus_retry_alert(context: dict[str, Any]) -> None:
+    """Record an intermediate failed attempt that Airflow will retry."""
     task_instance = context.get("task_instance")
     dag_run = context.get("dag_run")
-    LOGGER.error(
-        "event=airflow_task_failed dag_id=%s task_id=%s run_id=%s logical_date=%s "
-        "try_number=%s log_url=%s exception_class=%s",
+    LOGGER.warning(
+        "event=airflow_task_retry dag_id=%s task_id=%s run_id=%s logical_date=%s "
+        "try_number=%s log_url=%s duration_ms=%s exception_class=%s",
         _render(getattr(task_instance, "dag_id", None)),
         _render(getattr(task_instance, "task_id", None)),
         _render(getattr(dag_run, "run_id", context.get("run_id"))),
         _render(context.get("logical_date")),
         _render(getattr(task_instance, "try_number", None)),
         _render(getattr(task_instance, "log_url", None)),
+        _duration_ms(task_instance),
+        _render(type(context.get("exception")).__name__ if context.get("exception") else None),
+    )
+
+
+def stratus_failure_alert(context: dict[str, Any]) -> None:
+    """Emit the minimum diagnostic fields required by the Increment 4 alert contract."""
+    task_instance = context.get("task_instance")
+    dag_run = context.get("dag_run")
+    LOGGER.error(
+        "event=airflow_task_failed dag_id=%s task_id=%s run_id=%s logical_date=%s "
+        "try_number=%s log_url=%s duration_ms=%s exception_class=%s",
+        _render(getattr(task_instance, "dag_id", None)),
+        _render(getattr(task_instance, "task_id", None)),
+        _render(getattr(dag_run, "run_id", context.get("run_id"))),
+        _render(context.get("logical_date")),
+        _render(getattr(task_instance, "try_number", None)),
+        _render(getattr(task_instance, "log_url", None)),
+        _duration_ms(task_instance),
         _render(type(context.get("exception")).__name__ if context.get("exception") else None),
     )

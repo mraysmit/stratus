@@ -141,3 +141,20 @@ one file without changing the rows. An independent packaged verifier checks
 rows, files, snapshots and exact purge cleanup after the real Airflow DAG runs.
 The harness also checks structured phase timings and protected secret values.
 Run `airflow-table-maintenance-20260823T113447Z` passed in 326,099 ms.
+
+The retry and terminal-alert contract has its own isolated test DAG, compose
+overlay, and harness under the clearly named `scripts/tests/` tree:
+
+```bash
+bash platform/airflow/developer/scripts/tests/airflow-retry-alert-live-test.sh
+```
+
+The harness starts only the Airflow developer stack. It verifies a transient
+first-attempt failure emits one structured retry callback and succeeds on the
+second attempt, then verifies a permanent failure retries once and emits exactly
+one structured terminal callback. Callback records include run identity, try
+number, log URL, numeric elapsed milliseconds, and exception class without
+including exception messages. It also validates generated-secret redaction and
+stops Airflow on every exit path. Run
+`airflow-retry-alert-20260824T040947Z` passed in 72,759 ms; its callback timings
+were 2,537 ms, 2,758 ms, and 42 ms.
