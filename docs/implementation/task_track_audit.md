@@ -113,8 +113,11 @@ no gold write, redaction, timings and exact cleanup. The 326.099-second
 table-maintenance suite then proved explicit policy skip, policy-triggered
 compaction from three files to one with all three rows preserved, independent
 row/file/snapshot verification, metadata metrics, redaction, timings and exact
-purge cleanup. All four DAGs parse and register. Retry, alert and remaining
-API-verifier scenarios remain. The
+purge cleanup. All four DAGs parse and register. The 72.759-second retry/alert
+suite then proved transient recovery on attempt two, permanent retry exhaustion,
+exactly one terminal failure alert, numeric callback durations, safe exception
+metadata, generated-secret checks and Airflow cleanup. Deadline Alert and the
+remaining API-verifier scenarios remain. The
 Increment 4 developer gate follows. This
 checkpoint updates delivery state only; the detailed gap lists below remain the
 dated 2026-07-11 audit history. See

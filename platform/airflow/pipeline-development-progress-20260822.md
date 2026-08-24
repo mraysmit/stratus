@@ -47,6 +47,20 @@ policy's trigger and target size as explicit Iceberg rewrite options. The rerun
 reduced three files to one while preserving all three rows. No mocking
 framework was used.
 
+The retry/alert slice began with repository contracts for a test-only probe,
+isolated compose overlay, checked-in live harness, retry callback, terminal
+callback, elapsed-time fields, safe exception metadata, and cleanup. The first
+red run failed because the three test artifacts and retry/timing callback
+behavior did not exist. The initial implementation made the focused suite green,
+but its first live startup exposed an invalid file-under-read-only-directory
+mount. A new failing mount contract required a whole test-DAG directory and a
+separate platform callback path before the overlay was corrected. The next live
+run exposed a deprecated Airflow operator import and unavailable callback
+duration; failing regressions were added first for the supported Airflow SDK
+import, start-time duration fallback, and numeric live duration. The final
+implementation passed all 18 focused DAG guardrails and the real Airflow proof.
+No mocking framework was used.
+
 Live execution continued in the same red-green sequence. Focused guardrails
 failed before each correction for the missing S3A runtime, AWS SDK bundle,
 analytics accelerator, verifier event-log directory, credential-identifier
@@ -60,9 +74,10 @@ framework was used.
 - `stratus_common.py` is the single `SparkSubmitOperator` factory. It uses the
   protected `spark_default` connection and accepted mounted jobs/runtime JARs;
   DAG source contains no Spark master, Polaris secret, or Ceph secret.
-- `stratus_alerts.py` emits one structured failure record with DAG, task, run,
-  logical-date, attempt, log URL, and exception-class context. It deliberately
-  omits arbitrary exception messages and credentials.
+- `stratus_alerts.py` emits structured retry and terminal-failure records with
+  DAG, task, run, logical-date, attempt, log URL, numeric elapsed milliseconds,
+  and exception-class context. It deliberately omits arbitrary exception
+  messages and credentials.
 - `stratus_landing_to_bronze.py` uses a rescheduling `S3KeySensor`, two retries
   with a five-minute delay, one active run, the real packaged `IngestionJob` and
   `QualityCheckJob` classes, the Airflow run ID as batch/correlation ID, and a
@@ -317,21 +332,50 @@ Run ID: `airflow-table-maintenance-20260823T113447Z`.
 The ignored raw transcript is
 `developer/evidence/airflow-table-maintenance-20260823T113447Z.log`.
 
+## Live retry and failure-alert evidence
+
+Run ID: `airflow-retry-alert-20260824T040947Z`.
+
+- The isolated development-only DAG failed in transient mode on attempt one,
+  emitted exactly one `event=airflow_task_retry` callback, and succeeded on
+  attempt two. It emitted no terminal failure alert.
+- Permanent mode failed on attempts one and two, emitted its retry callback only
+  after the first attempt, and emitted exactly one `event=airflow_task_failed`
+  callback after retry exhaustion on attempt two.
+- The callback records included DAG, task, run, logical date, try number, log URL,
+  numeric `duration_ms`, and `exception_class`. They deliberately excluded
+  exception messages; the controlled permanent-failure detail was absent from
+  the terminal alert record.
+- The observed callback durations were 2,537 ms for the recovered transient
+  attempt, 2,758 ms for the permanent retry, and 42 ms for the terminal attempt.
+- The harness checked every generated Airflow configuration secret against the
+  complete transcript. It ran without Ceph, OpenBao, Polaris, or Spark, then
+  stopped the isolated Airflow stack through the checked-in lifecycle script.
+
+| Event or phase | Duration/result |
+|---|---:|
+| Airflow startup and probe registration | 53,944 ms |
+| Transient retry recovery | 9,517 ms |
+| Permanent failure and terminal alert | 9,047 ms |
+| Complete suite | 72,759 ms |
+
+The ignored raw transcript is
+`developer/evidence/airflow-retry-alert-20260824T040947Z.log`.
+
 ## Repository verification and shutdown
 
-After the maintenance evidence and status updates, `mvn -o verify` completed the
-full 11-module reactor successfully in 1 minute 22 seconds. The executed modules
-ran 272 tests with zero failures, errors, or skips; this includes all 15 Airflow
-DAG guardrails, all eight new maintenance policy/verifier tests, the maintenance
+After the retry/alert evidence and status updates, `mvn -o verify` completed the
+full 11-module reactor successfully in 1 minute 13 seconds. The executed modules
+ran 275 tests with zero failures, errors, or skips; this includes all 18 Airflow
+DAG guardrails, all maintenance policy/verifier tests, the maintenance
 procedure-option regression, the SLF4J/Log4j2 logging and redaction tests, and
 the repository Java policy. `git diff --check` reported no whitespace errors.
-Airflow stopped through the live harness trap; Spark, Polaris, OpenBao, and Ceph
-then stopped through their checked-in lifecycle scripts. The final filtered
-Docker query returned no running Stratus containers. OpenBao's in-memory dev
-secrets were discarded by design.
+The retry/alert harness stopped its Airflow stack. Spark, Polaris, OpenBao, and
+Ceph were already stopped, and the final filtered Docker query returned no
+running Stratus containers.
 
 ## Remaining P1-4.3 work
 
-1. Prove transient retry and permanent-failure alert behavior.
+1. Prove Deadline Alert behavior for an exceeded timing expectation.
 2. Complete the Airflow API/orchestration verifier scenarios across the full
    pipeline, including positive and deliberately blocked paths.
