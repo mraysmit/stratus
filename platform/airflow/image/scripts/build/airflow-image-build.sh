@@ -1,5 +1,41 @@
 #!/usr/bin/env bash
-# Assemble the Stratus Airflow image from already-verified local artifacts.
+#
+# Stratus Airflow development image assembly
+#
+# Purpose:
+#   Assemble the local Stratus Airflow image from digest-pinned OCI stages and an
+#   already-resolved Python wheelhouse. This script performs no Python dependency
+#   resolution: it verifies the cache before Docker can copy it into an image layer.
+#
+# Inputs:
+#   - platform/airflow/image/{artifact-lock.properties,requirements.lock};
+#   - artifacts/wheelhouse plus its resolved-artifacts.sha256 manifest;
+#   - the digest-pinned Airflow and Spark source images, locally cached or reachable
+#     through Docker; and
+#   - optional STRATUS_AIRFLOW_IMAGE, defaulting to stratus/airflow:dev.
+#   There are no positional arguments. Run the artifact resolver first whenever the
+#   lock changes or the wheelhouse is absent.
+#
+# Outputs:
+#   - the local OCI image named by STRATUS_AIRFLOW_IMAGE;
+#   - artifacts/development-image-id.txt containing the resulting immutable image ID;
+#   - structured timestamped build events on standard output.
+#
+# Failure and recovery:
+#   Hash failure, a missing locked artifact, an unexpected wheelhouse file, or a pip
+#   selection mismatch stops execution before docker build. Docker updates the target
+#   tag only after successful assembly. Cache replacement and recovery belong to the
+#   resolver; this script mounts the image definition read-only during preflight.
+#
+# Usage:
+#   bash platform/airflow/image/scripts/build/airflow-image-build.sh
+#   STRATUS_AIRFLOW_IMAGE=example/airflow:test bash \
+#     platform/airflow/image/scripts/build/airflow-image-build.sh
+#
+# Maintenance:
+#   Keep the hash check, offline pip report, exact file-set comparison and digest-based
+#   source image lookup aligned. Never weaken them to make a stale cache build. Update
+#   AirflowArtifactBaselineTest and AirflowWheelhouseBehaviorTest with this contract.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +71,17 @@ fi
 MSYS_NO_PATHCONV=1 docker run --rm --user 0:0 --entrypoint /bin/bash \
   --volume "${IMAGE_DIR}:/workspace:ro" \
   "${AIRFLOW_BASE_IMAGE}@${AIRFLOW_BASE_DIGEST}" \
-  -ec 'python -m pip install --dry-run --ignore-installed --disable-pip-version-check --no-build-isolation --no-index --find-links=/workspace/artifacts/wheelhouse --no-deps --require-hashes --requirement=/workspace/requirements.lock >/dev/null'
+  -ec '
+    report=/tmp/stratus-wheelhouse-pip-report.json
+    selected=/tmp/stratus-wheelhouse-selected-artifacts.txt
+    python -m pip install --dry-run --ignore-installed --disable-pip-version-check \
+      --no-build-isolation --no-index --find-links=/workspace/artifacts/wheelhouse \
+      --no-deps --require-hashes --requirement=/workspace/requirements.lock \
+      --report "${report}" >/dev/null
+    source /workspace/scripts/lib/airflow-wheelhouse-integrity.sh
+    pip_report_selected_artifacts "${report}" "${selected}"
+    verify_wheelhouse_exact_file_set "${selected}" /workspace/artifacts/wheelhouse
+  '
 WHEELHOUSE_BYTES="$(du -sb "${IMAGE_DIR}/artifacts/wheelhouse" | awk '{print $1}')"
 log INFO wheelhouse_lock_verified "wheelhouse_bytes=${WHEELHOUSE_BYTES}"
 log INFO build_started "image=${IMAGE_TAG} context=${IMAGE_DIR} wheelhouse_bytes=${WHEELHOUSE_BYTES}"

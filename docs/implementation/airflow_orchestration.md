@@ -70,6 +70,13 @@ accepted compatibility baseline until that audit passes.
 The Java policy for Stratus-owned builds and the Spark/Airflow runtime is Java 21. Component-specific
 exceptions are recorded separately and must not silently change this runtime.
 
+The image resolver builds and hash-checks a temporary wheelhouse before promotion. A failed move
+restores the previous cache immediately, and a later invocation recovers the previous cache if the
+process stopped between directory moves. Image preflight asks pip to select the locked artifacts
+offline and requires that selected filename set to match the complete wheelhouse, excluding only
+its checksum manifest. This rejects both missing requirements and unreferenced archives before the
+Dockerfile can copy them into an image layer.
+
 ## 4. Developer topology and lifecycle
 
 `compose.yaml` runs PostgreSQL, Airflow init, API server, DAG processor, scheduler and triggerer.
@@ -186,7 +193,7 @@ Current task state:
 
 | Task | State | Exit condition |
 |---|---|---|
-| `P1-4.1-S2` image/runtime assembly | Accepted point-in-time on 2026-08-22; cache-lock hardening added 2026-08-25 | rebuild/smoke the current script state; production publication remains separate |
+| `P1-4.1-S2` image/runtime assembly | Reverified 2026-08-25 after exact-set and recovery hardening; build and smoke passed | retain the locked artifact set; later publication remains a separate task |
 | `P1-4.1-D1` Compose lifecycle | Accepted for development | production topology remains separate |
 | `P1-4.2-D1` Airflow-to-Spark submission | Accepted for development | repeat on dependency/runtime change |
 | `P1-4.3-V1` embedded gate evidence | Accepted point-in-time on 2026-08-24 | retained as historical evidence |
