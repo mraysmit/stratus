@@ -109,8 +109,10 @@ final class AirflowArtifactBaselineTest {
     private static final Path REQUIREMENTS_IN_PATH = Path.of("requirements.in");
     private static final Path REQUIREMENTS_LOCK_PATH = Path.of("requirements.lock");
     private static final Path ARTIFACT_LOCK_PATH = Path.of("artifact-lock.properties");
-    private static final Path VULNERABILITY_REVIEW_PATH = Path.of("vulnerability-review.md");
-    private static final Path VULNERABILITY_WAIVER_PATH = Path.of("vulnerability-waiver.md");
+    private static final Path VULNERABILITY_REVIEW_PATH =
+            Path.of("archive", "vulnerability-review.md");
+    private static final Path VULNERABILITY_WAIVER_PATH =
+            Path.of("archive", "vulnerability-waiver.md");
     private static final Path IMAGE_GITIGNORE_PATH = Path.of(".gitignore");
     private static final Path IMAGE_DOCKERIGNORE_PATH = Path.of(".dockerignore");
     private static final Path ARTIFACT_RESOLVER_PATH = Path.of(
@@ -304,8 +306,12 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(resolver.contains(requirement(AIOHTTP, AIOHTTP_VERSION)),
                         "Resolution must verify the fixed aiohttp version against Airflow's constraint"),
                 () -> assertTrue(resolver.contains(
-                                "find \"${WHEELHOUSE_DIR}\" -maxdepth 1 -type f -delete"),
-                        "Resolution must remove superseded artifacts before populating the wheelhouse"),
+                                "mktemp -d \"${ARTIFACT_DIR}/wheelhouse.next.XXXXXX\""),
+                        "Resolution must stage a complete candidate before replacing the active wheelhouse"),
+                () -> assertTrue(resolver.contains("--no-build-isolation"),
+                        "Downloading a locked source archive must not resolve temporary build dependencies"),
+                () -> assertTrue(resolver.contains("mv \"${STAGING_DIR}\" \"${WHEELHOUSE_DIR}\""),
+                        "Only a completely verified candidate may become the active wheelhouse"),
                 () -> assertTrue(resolver.contains("sha256sum --check")),
                 () -> assertFalse(resolver.contains("sha512sum"),
                         "The resolver must not download or hash a Spark archive"),
@@ -332,6 +338,12 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(scan.contains(
                         "docker save --output \"${ARCHIVE_NAME}\" \"${IMAGE_TAG}\"")),
                 () -> assertTrue(build.contains("development-image-id.txt")),
+                () -> assertTrue(build.contains("--dry-run")
+                                && build.contains("--no-index")
+                                && build.contains("--no-build-isolation")
+                                && build.contains("--require-hashes")
+                                && build.contains("requirements.lock"),
+                        "Assembly must reject a self-consistent stale wheelhouse that no longer satisfies the lock"),
                 () -> assertTrue(scan.contains("scan-archive-image-id.txt")),
                 () -> assertTrue(scan.contains("trap cleanup EXIT")),
                 () -> assertTrue(scan.contains("trap 'exit 130' INT")),
@@ -394,7 +406,7 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(waiver.contains("Developer use only")),
                 () -> assertTrue(waiver.contains("Production promotion is prohibited")),
                 () -> assertTrue(waiver.contains("No automatic renewal")),
-                () -> assertTrue(review.contains(VULNERABILITY_WAIVER_PATH.toString())),
+                () -> assertTrue(review.contains(VULNERABILITY_WAIVER_PATH.getFileName().toString())),
                 () -> assertFalse(review.contains("No waiver granted"),
                         "The review must not contradict the approved developer waiver"));
     }

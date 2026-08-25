@@ -245,7 +245,7 @@ blocked_conf="{\"bronze_table\":\"$source_table\",\"silver_table\":\"$target_tab
 positive_conf_base64="$(printf '%s' "$positive_conf" | base64 | tr -d '\r\n')"
 blocked_conf_base64="$(printf '%s' "$blocked_conf" | base64 | tr -d '\r\n')"
 positive_tasks_base64="$(printf '%s' '{"apply_table_maintenance_policy":"success"}' | base64 | tr -d '\r\n')"
-blocked_tasks_base64="$(printf '%s' '{"run_silver_transform":"failed","run_silver_quality":"upstream_failed"}' | base64 | tr -d '\r\n')"
+blocked_tasks_base64="$(printf '%s' '{"evaluate_bronze_promotion":"failed","run_silver_transform":"upstream_failed","run_silver_quality":"upstream_failed"}' | base64 | tr -d '\r\n')"
 
 phase java_api_verification run_repository_maven -o test \
   -Porchestration-integration-tests -pl :stratus-orchestration-verifier -am \

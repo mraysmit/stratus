@@ -25,6 +25,12 @@ The current `P1-4.1-S2` image boundary is split into three operations:
 3. `image/scripts/tests/airflow-image-acceptance-test.sh` orchestrates the smoke
    and daemon-isolated vulnerability scan and records phase timings.
 
+The resolver stages and hash-verifies a complete candidate wheelhouse before atomically replacing
+the active cache. The build independently performs an offline lock-to-wheelhouse dry run, preventing
+a stale self-consistent artifact manifest from reintroducing full PySpark or another superseded
+package. This guard was added after a 2026-08-25 validation attempt caught a 455.5 MB stale PySpark
+archive before image assembly.
+
 Run the current development image acceptance from any directory with Bash 4+:
 
 ```bash
@@ -51,8 +57,8 @@ gate: any Critical occurrence fails the script. High findings remain visible in
 the report for reachability analysis, remediation, or a time-bounded waiver.
 The current S2 inventory and development disposition are recorded in
 [`image/development-vulnerability-review-s2.md`](image/development-vulnerability-review-s2.md).
-The older [`image/vulnerability-review.md`](image/vulnerability-review.md) and
-[`image/vulnerability-waiver.md`](image/vulnerability-waiver.md) apply only to
+The older [`image/archive/vulnerability-review.md`](image/archive/vulnerability-review.md) and
+[`image/archive/vulnerability-waiver.md`](image/archive/vulnerability-waiver.md) apply only to
 the superseded S1 image and remain historical evidence.
 
 The 2026-08-17 Trivy 0.74.0 scan of image
@@ -87,8 +93,14 @@ tree, and the Derby server JAR in the canonical Spark distribution. The smoke
 test proves those components are absent while still exercising the required
 Airflow, provider, Java, and Spark client interfaces.
 
-The full Java orchestration verifier and its DAG execution scenarios remain the
-scope of `P1-4.3-V1`. The image smoke test is the provider/import evidence for
+Airflow 3.3.1's official Python 3.14 constraints retain Spark provider 6.3.1,
+Amazon provider 9.34.0 and boto3 1.43.56. Spark provider 6.3.2 and Amazon provider
+9.35.0 were released on 2026-08-23; they remain upgrade candidates until a complete
+lock, image, provider, landing-sensor, Spark-submission and REST regression passes.
+
+The full Java orchestration verifier and its DAG execution scenarios were the
+scope of `P1-4.3-V1`. `P1-4.3-V2` exposes promotion as a named Airflow task while
+retaining writer-side evidence enforcement. The image smoke test is the provider/import evidence for
 the shared `P1-4.1-S2` artifact baseline, and the submission probe is its
 cross-component compatibility evidence; neither substitutes for that verifier.
 
@@ -96,4 +108,4 @@ The completed orchestration role can be shown through the one-command customer
 pipeline, fail-closed quality and API-driven maintenance demonstrations in
 [`developer/demos/README.md`](developer/demos/README.md). Those demonstrations
 compose accepted live harnesses and default to checked cleanup; the canonical
-development suite remains the authoritative complete regression.
+development suite remains release/gate evidence rather than an ordinary feedback loop.

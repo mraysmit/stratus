@@ -26,8 +26,9 @@ import org.slf4j.LoggerFactory;
  * <p>The shell harness owns real S3/Iceberg fixtures and independently verifies table side
  * effects. This class owns the Airflow protocol assertions: authentication, service health, DAG
  * registration, API-triggered execution, bounded polling, and exact terminal task states. The
- * blocked scenario is intentionally expected to fail at the embedded promotion gate; accepting
- * any downstream task state other than {@code upstream_failed} would hide an unauthorized write.
+ * blocked scenario is intentionally expected to fail at the explicit promotion-gate task;
+ * accepting any downstream task state other than {@code upstream_failed} would hide an
+ * unauthorized write.
  */
 @Tag("orchestration-integration")
 final class AirflowOrchestrationVerificationTest {
