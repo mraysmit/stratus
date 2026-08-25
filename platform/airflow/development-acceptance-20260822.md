@@ -1,5 +1,9 @@
 # Airflow development acceptance evidence - 2026-08-22
 
+> Point-in-time evidence: the image and lifecycle sections record the 2026-08-22 acceptance, and
+> later sections are dated addenda through the 2026-08-24 V1 gate. This file does not accept the
+> 2026-08-25 explicit promotion-task change.
+
 ## Scope and decision
 
 This record covers the development implementation of `P1-4.1-S2`, `P1-4.1-D1`,
@@ -121,7 +125,7 @@ bash platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh
 silver-to-gold source contracts, metadata-policy maintenance contract,
 Airflow-native four-DAG parse/registry proof, and
 complete live accepted/blocked slices passed on 2026-08-23; see
-[`pipeline-development-progress-20260822.md`](pipeline-development-progress-20260822.md).
+[archived pipeline progress record](archive/pipeline-development-progress-20260822.md).
 The live runs proved protected landing detection, three-row ingestion, bronze
 quality, quality-gated transformation and materialisation, deterministic silver
 output, governed gold aggregation, silver/gold quality, deliberate promotion

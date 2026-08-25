@@ -38,7 +38,7 @@ directory holds the product integration that runs it.
 The Spark harness is a consumer: it never starts Ceph, OpenBao, or Polaris on
 your behalf and fails with a remediation command when one is missing. Bring
 those up first (see the
-[operations runbook](../../docs/operations/harness_operations_runbook.md) §2),
+[operations runbook](../../docs/operations/stratus_harness_operations_runbook.md) §2),
 then:
 
 ```bash

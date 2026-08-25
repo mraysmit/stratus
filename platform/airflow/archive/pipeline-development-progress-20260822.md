@@ -1,5 +1,8 @@
 # Airflow pipeline DAG development progress - 2026-08-22
 
+> Archived point-in-time progress evidence. Do not use this file as the current DAG design or test
+> contract; see [`docs/implementation/airflow_orchestration.md`](../../../docs/implementation/airflow_orchestration.md).
+
 ## Scope
 
 `P1-4.3-V1` is development-verified. This record covers its accepted
@@ -456,7 +459,7 @@ The ignored raw transcript is
 ## Audience demonstration layer
 
 The accepted Airflow behavior is now available as three shorter, one-command
-demonstrations under [`developer/demos/README.md`](developer/demos/README.md).
+demonstrations under [`developer/demos/README.md`](../developer/demos/README.md).
 They reuse the accepted live harnesses and their independent Spark verifiers;
 the wrapper layer supplies an audience talk track, readable fixture, expected
 outcome, stable evidence markers, elapsed time and checked cleanup. It does not
@@ -509,7 +512,7 @@ new deadline cannot resolve through a stale version-specific alert row.
 
 `P1-4.3-V1` implementation and development verification are complete. The
 `P1-4.G-D` D1-D2 evidence matrix and development-state promotion manifest are
-now complete in [`developer-gate-20260824.md`](developer-gate-20260824.md) and
+now complete in [`developer-gate-20260824.md`](../developer-gate-20260824.md) and
 guarded by `AirflowDeveloperGateTest`. The repository maintainer explicitly
 directed completion after the canonical suite passed, so `P1-4.3-V1` and
 `P1-4.G-D` are accepted and their D1-D2 checkboxes are closed.

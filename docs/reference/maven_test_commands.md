@@ -41,7 +41,7 @@ Targeted profiles deliberately skip the aggregate coverage report because they e
 
 `-Pall-tests` only removes the tag filters. It supplies no endpoint, credential, or truststore, so invoking `./mvnw ... -Pall-tests` bare will fail. Each live layer obtains its environment from its own harness wrapper script, and no single wrapper supplies the environment of another — the Ceph wrapper knows nothing of Polaris.
 
-A complete sweep is therefore the offline regression followed by each live layer through its own wrapper, as set out in [harness_operations_runbook.md](../operations/harness_operations_runbook.md) section 3. `-Pall-tests` is useful passed *through* a wrapper, to widen that layer's run (see Running Live Profiles Through a Wrapper below).
+A complete sweep is therefore the offline regression followed by each live layer through its own wrapper, as set out in [stratus_harness_operations_runbook.md](../operations/stratus_harness_operations_runbook.md) section 3. `-Pall-tests` is useful passed *through* a wrapper, to widen that layer's run (see Running Live Profiles Through a Wrapper below).
 
 ## Validation Rules
 

@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
  * @version 1.0.0
  */
 @Tag("unit")
-final class AirflowDemoContractTest {
+final class AirflowDemoConformanceTest {
 
     private static final Path DEMO_ROOT = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "demos"));

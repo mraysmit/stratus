@@ -1,8 +1,7 @@
 """Promote one quality-approved bronze batch into silver and verify silver quality.
 
-The transform receives the exact bronze quality run that authorises the promotion. TransformJob
-evaluates that evidence before it resolves or writes the silver target, so missing evidence and a
-blocking failure both make the Airflow task fail without creating or changing silver. A successful
+Airflow exposes the bronze promotion decision as a distinct task. TransformJob receives the same
+quality run and re-evaluates the evidence before writing as a defence-in-depth check. A successful
 upsert is followed by independently persisted silver checks for the next promotion boundary.
 """
 
@@ -26,6 +25,7 @@ QUALITY_RUN_ID = "{{ dag_run.conf.get(\"quality_run_id\", run_id) }}"
 PIPELINE_RUN_ID = "{{ dag_run.conf.get(\"pipeline_run_id\", run_id) }}"
 TRANSFORM_CLASS = "dev.stratus.jobs.spark.TransformJob"
 QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob"
+PROMOTION_GATE_CLASS = "dev.stratus.jobs.spark.PromotionGate"
 BUSINESS_KEY = "customer_id"
 SEQUENCE_COLUMN = "updated_at"
 DEFAULT_RETRIES = 2
@@ -73,6 +73,16 @@ with DAG(
     max_active_runs=1,
     tags=["stratus", "transform", "bronze", "silver"],
 ) as dag:
+    evaluate_bronze_promotion = spark_submit_task(
+        task_id="evaluate_bronze_promotion",
+        java_class=PROMOTION_GATE_CLASS,
+        application_args=[
+            "--runId", QUALITY_RUN_ID,
+            "--targetTable", SOURCE_TABLE,
+        ],
+        on_failure_callback=stratus_failure_alert,
+    )
+
     run_silver_transform = spark_submit_task(
         task_id="run_silver_transform",
         java_class=TRANSFORM_CLASS,
@@ -100,4 +110,4 @@ with DAG(
         on_failure_callback=stratus_failure_alert,
     )
 
-    run_silver_transform >> run_silver_quality
+    evaluate_bronze_promotion >> run_silver_transform >> run_silver_quality

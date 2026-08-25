@@ -78,7 +78,7 @@ bash platform/airflow/developer/scripts/tests/airflow-pipeline-dag-parse-test.sh
 This checked-in test starts Airflow, runs its health contract, requires an empty
 import-error list, requires all four pipeline DAGs in Airflow's registry, records
 phase timings, and shuts Airflow down through the lifecycle script. See
-[`pipeline-development-progress-20260822.md`](../pipeline-development-progress-20260822.md)
+[archived pipeline progress record](../archive/pipeline-development-progress-20260822.md)
 for the accepted live pipeline evidence and maintenance guidance.
 
 The accepted live landing-to-bronze slice uses the same provider prerequisites
@@ -96,7 +96,7 @@ Run `airflow-pipeline-20260823T071231Z` passed in 187,300 ms. The locked S3A
 dependencies and AWS bundle Log4j compatibility bridge are mounted from the
 Spark artifact set; Spark continues to use exactly one SLF4J 2 provider.
 
-The accepted bronze-to-silver slice is exercised by the second checked-in live
+The bronze-to-silver slice is exercised by the second checked-in live
 harness in the same test directory:
 
 ```bash
@@ -104,10 +104,10 @@ bash platform/airflow/developer/scripts/tests/airflow-bronze-to-silver-live-test
 ```
 
 The harness first proves the accepted path from an isolated landing object
-through bronze quality, gated deterministic transform, two passing silver
+through bronze quality, an explicit promotion task, a defence-in-depth gated deterministic transform, two passing silver
 checks and an independently verified three-row Iceberg snapshot. It then adds
-a genuine blocking quality failure, requires the Airflow transform task to
-fail, and independently proves that no silver target was created. Both paths
+a genuine blocking quality failure, requires the Airflow promotion task to fail,
+leaves transform and downstream quality `upstream_failed`, and independently proves that no silver target was created. Both paths
 clean their exact tables, quality rows and landing objects. Run
 `airflow-bronze-to-silver-20260823T084502Z` passed in 356,572 ms.
 
@@ -121,10 +121,10 @@ The checked-in silver-to-gold harness continues through the real upstream DAGs:
 bash platform/airflow/developer/scripts/tests/airflow-silver-to-gold-live-test.sh
 ```
 
-Its accepted path proves the silver quality gate, governed country aggregation,
+Its accepted V1 path proved the silver quality gate, governed country aggregation,
 gold quality results and independent aggregate/snapshot verification. Its
-blocked path persists a real failing silver check, requires materialisation to
-fail before writing gold, and independently proves the target is absent. Both
+blocked path persists a real failing silver check, requires the explicit gate to
+fail before materialisation, and independently proves the target is absent. Both
 paths remove only their exact bronze/silver/gold probe tables, quality rows and
 landing objects. Run `airflow-silver-to-gold-20260823T093453Z` passed in 716,033
 ms. Normal silver-to-gold executions use two retries; the harness sets
@@ -189,19 +189,23 @@ lifecycle scripts. Its Java verifier authenticates to Airflow 3.3.1, validates
 scheduler and metadata health, requires all four Stratus DAGs to be registered
 and unpaused, supplies caller-owned run IDs, and records bounded poll, DAG, and
 task timings. It requires a metadata-policy maintenance run to succeed and a
-bronze-to-silver run with a persisted blocking quality result to fail on its
-first transform attempt, leaving the downstream quality task
+bronze-to-silver run with a persisted blocking quality result to fail at
+`evaluate_bronze_promotion`, leaving transform and downstream quality tasks
 `upstream_failed`. Independent Spark verifiers prove three maintenance files
 were compacted to one without losing rows and that the blocked silver target was
 never created. Exact fixtures are purged, generated secrets are scanned, and all
 five provider stacks are stopped in reverse order on every exit path.
 
-Accepted run `airflow-api-orchestration-20260824T073836Z` completed in 420,772
+The V1 accepted run `airflow-api-orchestration-20260824T073836Z` completed in 420,772
 ms. The positive DAG used 34,657 ms of Airflow time; the deliberately blocked DAG
 used 18,056 ms, failed the transform on attempt one, and left the downstream
 quality task unexecuted. The Java verification completed in 57,137 ms, both
 independent side-effect checks passed, and cleanup reported
 `remainingStratusContainers=0`.
+
+Those task-state details are historical V1 evidence. `P1-4.3-V2` now exposes
+promotion as its own Airflow task and retains the writer check as defence in depth;
+fresh parse, focused-live and API evidence is required before V2 is accepted.
 
 Expected-failure retry overrides must reach both `airflow-dag-processor` and
 `airflow-scheduler`: Airflow 3 serializes DAG defaults in the DAG processor, while
@@ -223,7 +227,7 @@ points reuse the live acceptance harnesses, print concise expected outcomes and
 default to checked cleanup. Pass `--keep-running` only when the Airflow UI should
 remain available for inspection, then use the documented demo shutdown command.
 
-The complete regression remains:
+The complete regression is reserved for release/gate evidence, not routine feedback:
 
 ```bash
 bash platform/airflow/developer/scripts/tests/airflow-development-acceptance-suite.sh

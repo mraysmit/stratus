@@ -4,7 +4,8 @@ Verifies that Apache Airflow is deployed with its PostgreSQL metadata database, 
 
 Prerequisite: `compute` verification passed against a live cluster.
 
-Implementation status (2026-08-24): development implementation verified.
+Implementation status: V1 is accepted point-in-time evidence from 2026-08-24;
+V2 explicit promotion-task verification is in progress from 2026-08-25.
 `P1-4.3-V1` now has an executable
 Airflow 3 REST verifier, real HTTP protocol fixtures, bounded configuration,
 SLF4J lifecycle/timing telemetry, and a checked-in full-stack live harness. The
@@ -64,6 +65,10 @@ failed in 18,056 ms, with `run_silver_transform=failed` on attempt one and
 proved three rows remained after compaction from three files to one and proved
 the silver target was absent. Exact cleanup completed with
 `remainingStratusContainers=0`.
+
+The preceding task states are preserved V1 evidence. The current V2 contract expects
+`evaluate_bronze_promotion=failed` and both `run_silver_transform` and
+`run_silver_quality=upstream_failed`; a new live run must pass before V2 supersedes V1.
 
 ## Maintenance for an Airflow version change
 

@@ -1,1604 +1,263 @@
 # Stratus Increment 4 — Apache Airflow Orchestration
 
+**Canonical implementation guide**
+
+**Last reviewed:** 2026-08-25
+
 **Current stage:** Development implementation and functional acceptance.
 
 **Later stage:** Production deployment hardening and readiness.
 
-Development (`D`), shared functional (`S`/`V`) and developer-gate (`G-D`) tasks drive the current
-implementation. Production (`P`), production recovery (`R`) and production-gate (`G-P`) tasks are
-retained as later-stage backlog and do not block development unless they expose a fundamental
-functional or architectural incompatibility. The development environment proves the intended
-versions, behavior, APIs, protocols, data contracts, security semantics and integrations; the later
-stage changes deployment hardening and operational qualities around that proven system.
+**Developer profile:** accepted on 2026-08-24; post-acceptance promotion-gate remediation is being reverified
 
-## 1. Purpose
+**Production profile:** planned and not yet accepted
 
-This document is the technical implementation plan for Increment 4 of the Stratus platform as defined in [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md).
+## 1. Purpose and source of truth
 
-Increment 4 delivers Apache Airflow as the orchestration and control-plane layer for the batch platform created in Increment 3. Airflow schedules and coordinates Spark jobs, data quality checks, promotion gates, and Iceberg table maintenance. When this increment is complete, the bronze, silver, and gold pipeline runs as managed DAGs with retries, failure visibility, structured run metadata, and deterministic promotion blocking. A Java verification suite uses the Airflow REST API and the table layer to confirm the orchestration layer works end to end.
+Airflow is the Stratus batch control plane. It coordinates packaged Java Spark jobs; it does not
+perform data-plane transformations itself. The checked-in DAGs, Compose manifests, lifecycle
+scripts and executable tests are the implementation source of truth. This guide describes those
+artifacts and the remaining production boundary without copying executable DAG source into prose.
 
-**Prerequisites:**
-- Increment 1 complete — Ceph RGW cluster running, all buckets and service accounts in place
-- Increment 2 complete — Polaris running, all namespaces and the `platform.quality_check_results` table created, all Increment 2 gate tests passing
-- Increment 3 complete — Spark cluster running, Spark jobs implemented, all Increment 3 gate tests passing
+The definitive implementation locations are:
 
-**Track rule:** Developer work requires the developer gates of Increments 1-3. Increment 4 production acceptance requires their production gates, except final security-dependent checks close after Increment 7 as defined by the Phase 1 plan.
+- developer runtime: [`platform/airflow/developer/`](../../platform/airflow/developer/);
+- DAGs: [`platform/airflow/developer/dags/`](../../platform/airflow/developer/dags/);
+- live tests: [`platform/airflow/developer/scripts/tests/`](../../platform/airflow/developer/scripts/tests/);
+- Java REST verifier: [`verification/orchestration/`](../../verification/orchestration/);
+- accepted point-in-time evidence: [`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md);
+- promotion-boundary decision: [`ADR-P1-007`](../decisions/ADR-P1-007-airflow-promotion-gate-boundary.md).
 
----
+## 2. Supported profiles
 
-## 2. Assumptions and Prerequisites
-
-- Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
-- Podman 5.8.2 installed on the Airflow host, or a newer approved stable patch after regression testing
-- JDK 21 and Maven 3.9.16 on the approved build worker; development hosts may use the same toolchain, while verification hosts require only the approved container runtime and verifier runtime inputs
-- DNS resolution: `airflow.stratus.local` resolves to the Airflow host
-- Airflow host can reach:
-  - Spark master on port 7077
-  - Spark master web UI on port 8080
-  - Ceph RGW on port 443
-  - Polaris on port 8181
-- `svc-airflow` Ceph RGW credentials from Increment 1 are available
-- `svc-spark` Ceph RGW credentials and Polaris principal credentials from Increment 3 are available
-- The Stratus application fat JAR from Increment 3 is available to the Airflow runtime
-
-### Reference documentation audit
-
-Reference baseline: 2026-08-17.
-
-The current Apache Airflow stable documentation line is Airflow 3.x. Stratus standardizes this increment on Airflow 3.3.1 with Python 3.14 and uses the Airflow 3 service split: API server, DAG processor, scheduler, triggerer, init task, and PostgreSQL metadata database. Airflow 3.3.1's official Python 3.14 constraints select Spark provider 6.3.1, Amazon provider 9.34.0, and boto3 1.43.56. The custom image provides the Spark 4.1.3 Java 21 command-line submission runtime and lightweight `pyspark-client` 4.1.3 dependency, without the full PySpark distribution or its duplicate JAR tree. This avoids carrying an obsolete Airflow 2.x webserver topology, a stale Spark 3.x client, or unnecessarily old provider dependencies into the design.
-
-Airflow 3.3.1 is tested with PostgreSQL 14-18. Stratus retains the approved PostgreSQL 17.10 matrix entry for Increment 4 rather than changing the database major after planning; the developer deployment work verifies that exact pairing in `P1-4.1-D1`.
-
-The official `apache/airflow:3.3.1-python3.14` image currently embeds Python
-3.14.3 while upstream Python 3.14.6 is available. Stratus records that
-patch-level lag as an upstream-image monitoring item. Rebuilding Python on a
-bespoke base would materially depart from the supported Airflow image and is
-not part of this shared-baseline task.
-
-The Airflow submission image uses the Spark 4.1.3 client, while the separately
-validated Increment 3 developer cluster remains on Spark 4.1.2. `P1-4.2-D1`
-accepted this patch-level pairing on 2026-08-22 through a live packaged Java job
-that completed distributed work and Polaris/Ceph-backed Iceberg operations.
-Exact patch alignment remains a future upgrade consideration, not an open
-development compatibility blocker.
-
-The single-host Podman commands are the developer profile. Production uses the same DAGs, providers, images, public API, and verification suite, but requires an external durable metadata database, durable remote logs, managed secrets, trusted HTTPS/OIDC, scheduler and DAG-processor availability appropriate to the selected executor, backup/restore, and failure drills. Local volumes, bootstrap credentials, and a one-host service split cannot pass the production gate.
-
-Airflow's official Docker Compose quickstart is not a production deployment recommendation. The Podman commands here are a lab topology and must be hardened before production use.
-
----
-
-## 3. Topology
-
-Airflow runs on a dedicated host using Podman containers. PostgreSQL is used as the Airflow metadata database. For Increment 4, Airflow uses `LocalExecutor` with one API server, one DAG processor, one scheduler, and one triggerer. A distributed Celery or Kubernetes executor is deferred until operational scale requires it.
-
-```text
-airflow.stratus.local
-┌──────────────────────────────────────────────┐
-│  Podman: airflow-api-server                  │
-│  Airflow UI / REST API :8088                 │
-├──────────────────────────────────────────────┤
-│  Podman: airflow-dag-processor               │
-│  DAG parsing                                 │
-├──────────────────────────────────────────────┤
-│  Podman: airflow-scheduler                   │
-│  Scheduling and task execution               │
-├──────────────────────────────────────────────┤
-│  Podman: airflow-triggerer                   │
-│  Deferrable task triggers                    │
-├──────────────────────────────────────────────┤
-├──────────────────────────────────────────────┤
-│  Podman: airflow-postgres                    │
-│  Airflow metadata database :5432             │
-└──────────────────────────────────────────────┘
-          │
-          │ spark-submit
-          ▼
-spark-master.stratus.local:7077
-          │
-          ▼
-Spark workers → Polaris REST catalog → Ceph RGW Iceberg tables
-```
-
-Airflow is not a compute engine. DAG tasks submit Spark jobs, run lightweight control-plane checks, evaluate promotion gates, and schedule maintenance. Heavy transformations remain in Spark.
-
-### Production profile overlay
-
-| Concern | Production requirement |
-|---|---|
-| Metadata state | external PostgreSQL service over TLS with a scoped Airflow database role, monitored storage, backups, point-in-time recovery where required, and a tested restore before upgrade |
-| Service placement | API server, DAG processor, scheduler, and triggerer run as separately managed services; each has a documented restart policy and the selected executor has an accepted availability/RTO design |
-| Executor | retain `LocalExecutor` for the initial control-plane workload only when capacity and host-recovery evidence support it; move to a distributed executor through a separate dependency and capacity decision, not an undocumented configuration toggle |
-| DAG delivery | immutable DAG revision is delivered by the build/release process; production services do not mount a developer working tree |
-| Task logs | remote logs are written to `s3://stratus-platform/airflow/logs/` through the Ceph RGW connection and remain readable after loss of an Airflow host |
-| User/API ingress | trusted HTTPS with Keycloak-backed Airflow 3 auth-manager integration; internal port `8088` is not directly exposed to users |
-| Secrets | connections, variables, database credentials, OIDC secrets, Ceph RGW credentials, and Spark submission credentials use the approved secret backend/injection path and rotation procedure |
-| Downstream protocols | `spark-submit` to Spark's internal master endpoint, Iceberg REST over HTTPS to Polaris, and S3-compatible HTTPS to Ceph RGW; trust validation is never disabled |
-
-The production environment records at least these effective settings, with secret values omitted from evidence:
-
-```bash
-AIRFLOW__CORE__EXECUTOR=LocalExecutor
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=<TLS PostgreSQL URI from secret injection>
-AIRFLOW__LOGGING__REMOTE_LOGGING=True
-AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER=s3://stratus-platform/airflow/logs
-AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID=ceph_rgw_logs
-```
-
-Increment 7 supplies the production certificate and OIDC configuration. The Increment 4 production gate closes only after metadata restore, remote-log continuity, authenticated API access, scheduler/DAG-processor restart, and the unchanged DAG verification suite pass on this overlay.
-
----
-
-## 4. Ports
-
-| Port | Service | Purpose |
+| Concern | Developer profile | Production profile |
 |---|---|---|
-| 8088 | Airflow API server | Airflow UI and REST API |
-| 5432 | PostgreSQL | Airflow metadata database, local host access only where possible |
+| Runtime | Docker Compose on Docker Desktop/Engine or compatible Compose implementation | Linux OCI runtime selected by the environment; Podman uses Quadlet-managed units |
+| Airflow | 3.3.1, one API server, DAG processor, scheduler and triggerer | same accepted DAG and image contract, with availability sized to RTO/RPO |
+| Executor | LocalExecutor | selected only after capacity and isolation evidence |
+| Metadata | PostgreSQL 17.10 named volume | durable external PostgreSQL with backup and restore proof |
+| Logs | local named volume/bind mount | approved durable remote log store with continuity proof |
+| Identity | loopback-only SimpleAuthManager exception | trusted HTTPS and Keycloak/OIDC; no anonymous administrator |
+| Secrets | generated ignored `.env` and protected Airflow connections | managed secrets, rotation and audited retrieval |
+| Acceptance | deterministic small fixtures and functional evidence | representative load, recovery, security and capacity evidence |
 
-The Airflow host must also be able to reach the ports from previous increments:
+The developer topology is disposable and is not production evidence. The production deployment
+manifest does not yet exist. The deprecated `podman generate systemd` workflow is not part of the
+design; a future Podman deployment must use Quadlet or another approved current mechanism.
 
-| Port | Service | Purpose |
+## 3. Runtime and dependency baseline
+
+The image is built from the digest-pinned Airflow 3.3.1 Python 3.14 base and obtains the Spark
+4.1.3 Java 21 command-line runtime from a digest-pinned OCI stage. Stratus uses
+`SparkSubmitOperator` with packaged Java applications and `pyspark-client`; full PySpark and its
+duplicate JAR tree are intentionally absent. The data-plane cluster has separately accepted
+Spark-client compatibility evidence.
+
+Airflow 3.3.1's official Python 3.14 constraints select:
+
+| Dependency | Retained version | Decision on 2026-08-25 |
+|---|---:|---|
+| Spark provider | 6.3.1 | retain the official Airflow constraint while 6.3.2 is assessed |
+| Amazon provider | 9.34.0 | retain the official Airflow constraint while 9.35.0 is assessed |
+| boto3 | 1.43.56 | retain the official constraint as one tested set |
+
+Spark provider 6.3.2 and Amazon provider 9.35.0 were released on 2026-08-23. Their existence does
+not justify an isolated patch bump: any upgrade must regenerate a complete locked dependency set,
+build the candidate image, run provider imports and smoke tests, and repeat the Spark submission,
+landing sensor and orchestration API proofs. The current official constraint set remains the
+accepted compatibility baseline until that audit passes.
+
+The Java policy for Stratus-owned builds and the Spark/Airflow runtime is Java 21. Component-specific
+exceptions are recorded separately and must not silently change this runtime.
+
+## 4. Developer topology and lifecycle
+
+`compose.yaml` runs PostgreSQL, Airflow init, API server, DAG processor, scheduler and triggerer.
+`compose.spark.yaml` adds only the Spark-facing mounts and configuration required by submission
+tests. The API is published on loopback. DAGs and helper modules are mounted from the repository;
+metadata and logs use named volumes so ordinary shutdown is non-destructive.
+
+Run lifecycle operations from the repository root with Bash 4+:
+
+```bash
+bash platform/airflow/developer/scripts/lifecycle/airflow-compose-startup.sh
+bash platform/airflow/developer/scripts/tests/airflow-compose-verify-health.sh
+bash platform/airflow/developer/scripts/lifecycle/airflow-compose-shutdown.sh
+```
+
+The first startup creates ignored `.env` state from `.env.template`. Reset deletes disposable
+Airflow developer state and therefore prompts unless explicitly forced:
+
+```bash
+bash platform/airflow/developer/scripts/lifecycle/airflow-compose-reset.sh
+```
+
+Lifecycle scripts own Compose project naming, migration, health polling and checked shutdown.
+Operators should use those scripts instead of issuing ad hoc container commands.
+
+## 5. DAG inventory and schedules
+
+| DAG | Current schedule | Task chain | Purpose |
+|---|---|---|---|
+| `stratus_landing_to_bronze` | `*/15 * * * *` | landing sensor → ingestion → bronze quality | detect one landing object, append its batch to bronze and persist checks |
+| `stratus_bronze_to_silver` | manual/API (`None`) | bronze promotion gate → transform → silver quality | fail closed on persisted bronze evidence, upsert the correlated batch and record silver checks |
+| `stratus_silver_to_gold` | manual/API (`None`) | silver quality → silver promotion gate → materialisation → gold quality | persist and expose the silver verdict before rebuilding and checking gold |
+| `stratus_table_maintenance` | `@daily` | maintenance policy job | inspect Iceberg metadata and apply the named policy |
+
+The two transition DAGs intentionally remain manual/API-triggered in the developer profile. Their
+production cadence and triggering contract must be approved with source-arrival, backfill and
+capacity policy; documentation must not claim they already run hourly or daily.
+
+All Spark work uses the shared `spark_submit_task` helper and `SparkSubmitOperator`. The helper
+selects the protected Airflow Spark connection and packaged Stratus jobs JAR. DAG configuration
+accepts caller-owned correlation IDs and isolated source/target names where the contract permits.
+Normal retries are two attempts separated by five minutes. Expected-failure live tests may set the
+documented retry environment variables to zero so a deliberately blocked proof does not wait
+through production-like retry delays.
+
+## 6. Promotion-gate contract
+
+Blocking quality results are persisted in `platform.quality_check_results`. A promotion requires an
+exact quality `runId` and source `targetTable`; missing results and any blocking failure deny the
+promotion.
+
+For every governed write boundary:
+
+1. Airflow runs `dev.stratus.jobs.spark.PromotionGate` as a named task.
+2. A denied verdict fails that task and downstream writers remain `upstream_failed`.
+3. A permitted verdict allows the writer task to start.
+4. `TransformJob` or `MaterialisationJob` rechecks the same evidence immediately before writing.
+5. The next layer's quality task independently persists its results.
+
+The explicit task makes the decision, retry history and named owner visible in Airflow. The in-job
+check is defence in depth against task clearing, DAG misuse and time-of-check/time-of-use drift.
+Developer DAGs do not accept promotion overrides. A future production override requires an
+authenticated named steward, reason, timestamp, affected table/run, immutable audit record and
+post-event review as defined by the architecture and ADR.
+
+## 7. Accountability, correlation and alerting
+
+Every DAG has a named Airflow owner and every governed table has a named data steward. Run IDs,
+pipeline IDs, source batches, source/target tables, task attempts and quality result IDs must remain
+correlated across Airflow logs, Spark events, Iceberg snapshots and audit evidence. Stewardship is
+not satisfied by a team alias alone: production procedures must identify who approved access,
+movement, override or lifecycle action.
+
+Failure callbacks emit structured identifiers, attempt information, log URL, elapsed time and
+exception class without exception messages or secrets. Retry callbacks, terminal failures and
+native Deadline Alerts have isolated live tests. Development callbacks write structured local log
+events; routing to the approved production alert sink is deferred and must be proven before the
+production gate.
+
+## 8. Verification strategy
+
+Use the narrowest tier that can invalidate the change:
+
+| Tier | Command or entry point | Intended use |
 |---|---|---|
-| 7077 | Spark master | Spark job submission |
-| 8080 | Spark master UI | Operational verification |
-| 443 | Ceph RGW | Landing-zone detection and Spark object storage access |
-| 8181 | Polaris | Spark Iceberg catalog access |
-
-For Increment 4, Airflow's own endpoint may be HTTP inside the lab network. TLS and Keycloak-backed authentication are hardened in Increment 7.
-
----
-
-## 5. Airflow Image
-
-The target design uses the official Airflow image as the control-plane base and a
-digest-pinned official Spark 4.1.3 Scala 2.13 Java 21 image as the source of the
-submission runtime. A multi-stage OCI build copies the canonical Spark runtime
-between registry-backed stages. The 546.3 MB Spark archive is not downloaded into
-or copied from the host build context.
-
-The current `platform/airflow/image/Dockerfile` and scripts implement the accepted
-`P1-4.1-S2` assembly path. The 2026-08-17 `P1-4.1-S1` result remains historical
-evidence only; the current build does not transfer the Spark archive or a full
-PySpark distribution through the host context.
-
-The replacement image contract is:
-
-| Layer | Source and rule |
-|---|---|
-| Airflow control plane | Airflow 3.3.1 Python 3.14 official image, pinned by immutable digest |
-| Spark submission runtime | Spark 4.1.3 Scala 2.13 Java 21 official image, pinned by immutable digest and copied through an OCI stage |
-| Python providers | hash-locked small artifacts resolved by the approved build worker; no mutable resolution during image assembly |
-| PySpark Python distribution | excluded by the accepted compatibility proof; `pyspark-client` is retained, and any future in-process Python Spark requirement must reopen this decision under TDD |
-| Hardening | remove unused inherited executables and server components, retain a single Spark/Hadoop JAR tree, and rerun smoke and vulnerability gates |
-| Later production publication | after development acceptance, publish once, record digest/provenance/SBOM, and deploy that digest without rebuilding |
-
-Provider 6.3.1 declares `pyspark-client` as a normal dependency and `pyspark` as
-an optional extra, while `SparkSubmitOperator` invokes the `spark-submit` binary.
-`P1-4.1-S2` proved imports, dependency validation and executable discovery;
-`P1-4.2-D1` then proved a real JAR submission. The accepted lock therefore keeps
-`pyspark-client` and excludes the full PySpark package. An in-process Python
-Spark DAG changes that contract and must begin with a failing compatibility test.
-
-The dated evidence, compatibility gate, and time budgets are defined in
-[`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md).
-
-### Development image build and later publication
-
-During the current development stage, the container image is built locally from the pinned Airflow
-and Spark OCI source stages using the small verified context, then subjected to dependency,
-provider-import, runtime and vulnerability checks. The lifecycle test consumes that already-built
-local development image and never builds it as part of startup.
-
-After development-system acceptance, `P1-0.1` moves the same build contract to the approved build
-worker and adds registry publication, the final digest, SBOM, provenance, signing or attestation and
-independent deployment verification. Those later controls qualify the image for production; they
-are not prerequisites for functional development acceptance.
-
-```bash
-bash platform/airflow/image/scripts/build/airflow-image-resolve-artifacts.sh
-bash platform/airflow/image/scripts/build/airflow-image-build.sh
-bash platform/airflow/image/scripts/tests/airflow-image-acceptance-test.sh
-```
-
-The checked-in defaults and artifact lock contain immutable multi-platform image
-digests. Release automation may override them only with newly approved
-digest-qualified references after regression and scan review; floating defaults
-are not permitted. The vulnerability scan exports the image and gives Trivy only
-a read-only archive, never the host container-engine control socket. Deployment
-production manifests consume the published result digest and never invoke the resolver.
-
----
-
-## 6. Airflow Directory Layout
-
-Create persistent directories on the Airflow host:
-
-```bash
-sudo mkdir -p /data/airflow/dags
-sudo mkdir -p /data/airflow/logs
-sudo mkdir -p /data/airflow/plugins
-sudo mkdir -p /data/airflow/jars
-sudo mkdir -p /data/airflow/postgres
-sudo chown -R $USER:$USER /data/airflow
-```
-
-The deployment pipeline retrieves the accepted Increment 3 application JAR from the approved artifact repository, verifies its recorded checksum, and stages it at `/data/airflow/jars/stratus.jar`. It must not copy from a local `target/` directory or build on the Airflow host. The deployment record captures the artifact coordinates, checksum, source repository, and deployed path.
-
-The mounted directory layout is:
-
-```text
-/data/airflow/
-├── dags/       Airflow DAG files
-├── logs/       task logs
-├── plugins/    Airflow plugins, if needed later
-├── jars/       Stratus Spark application JAR
-└── postgres/   PostgreSQL data directory
-```
-
----
-
-## 7. Airflow Configuration
-
-### Environment file
-
-Create `/etc/stratus/airflow.env` on the Airflow host:
-
-```bash
-# /etc/stratus/airflow.env
-
-AIRFLOW__CORE__EXECUTOR=LocalExecutor
-AIRFLOW__CORE__LOAD_EXAMPLES=False
-AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
-AIRFLOW__CORE__DEFAULT_TIMEZONE=UTC
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:<airflow-db-secret>@localhost:5432/airflow
-AIRFLOW__API__BASE_URL=http://airflow.stratus.local:8088
-
-# Bootstrap UI/API user for Increment 4 bootstrap only.
-# Increment 7 replaces this with Keycloak-backed authentication.
-_AIRFLOW_WWW_USER_USERNAME=admin
-_AIRFLOW_WWW_USER_PASSWORD=<bootstrap secret from approved secret store>
-_AIRFLOW_WWW_USER_FIRSTNAME=Stratus
-_AIRFLOW_WWW_USER_LASTNAME=Admin
-_AIRFLOW_WWW_USER_EMAIL=stratus-admin@example.com
-
-# Spark
-STRATUS_SPARK_MASTER=spark://spark-master.stratus.local:7077
-STRATUS_SPARK_APP_JAR=/opt/airflow/jars/stratus.jar
-
-# Polaris and Ceph RGW used by Spark jobs
-STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
-STRATUS_POLARIS_CLIENT_ID=svc-spark
-STRATUS_POLARIS_CLIENT_SECRET=<svc-spark Polaris client secret>
-STRATUS_POLARIS_CATALOG=stratus
-CEPH_RGW_ENDPOINT=https://object-store.stratus.local
-CEPH_RGW_ACCESS_KEY=svc-spark
-CEPH_RGW_SECRET_KEY=<svc-spark Ceph RGW secret>
-
-# Landing-zone detection account
-STRATUS_AIRFLOW_S3_ACCESS_KEY=svc-airflow
-STRATUS_AIRFLOW_S3_SECRET_KEY=<svc-airflow Ceph RGW secret>
-STRATUS_LANDING_BUCKET=stratus-landing
-```
-
-### Spark submit configuration
-
-Spark jobs submitted by Airflow use the same catalog settings validated in Increment 3. DAGs should pass them as `--conf` values to `spark-submit`, not duplicate transformation logic inside Python tasks.
-
-The minimum `spark-submit` configuration is:
-
-```bash
---master spark://spark-master.stratus.local:7077
---conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
---conf spark.sql.catalog.stratus=org.apache.iceberg.spark.SparkCatalog
---conf spark.sql.catalog.stratus.type=rest
---conf spark.sql.catalog.stratus.uri=https://polaris.stratus.local:8181/api/catalog
---conf spark.sql.catalog.stratus.credential=svc-spark:<client-secret>
---conf spark.sql.catalog.stratus.scope=PRINCIPAL_ROLE:ALL
---conf spark.sql.catalog.stratus.warehouse=stratus
---conf spark.sql.catalog.stratus.io-impl=org.apache.iceberg.aws.s3.S3FileIO
---conf spark.sql.catalog.stratus.s3.endpoint=https://object-store.stratus.local
---conf spark.sql.catalog.stratus.s3.access-key-id=svc-spark
---conf spark.sql.catalog.stratus.s3.secret-access-key=<svc-spark secret>
---conf spark.sql.catalog.stratus.s3.path-style-access=true
---conf spark.sql.defaultCatalog=stratus
-```
-
----
-
-## 8. Podman Container Setup
-
-### Start PostgreSQL
-
-Run on `airflow.stratus.local`:
-
-```bash
-export STRATUS_AIRFLOW_DB_PASSWORD=<airflow-db secret from approved secret store>
-
-podman run -d \
-  --name airflow-postgres \
-  --hostname airflow-postgres \
-  --network host \
-  -e POSTGRES_USER=airflow \
-  -e POSTGRES_PASSWORD="$STRATUS_AIRFLOW_DB_PASSWORD" \
-  -e POSTGRES_DB=airflow \
-  -v /data/airflow/postgres:/var/lib/postgresql/data:z \
-  --restart unless-stopped \
-  docker.io/library/postgres:17.10
-```
-
-### Initialise Airflow metadata
-
-Run once after PostgreSQL starts:
-
-```bash
-podman run --rm \
-  --name airflow-init \
-  --network host \
-  --env-file /etc/stratus/airflow.env \
-  -v /data/airflow/dags:/opt/airflow/dags:z \
-  -v /data/airflow/logs:/opt/airflow/logs:z \
-  -v /data/airflow/plugins:/opt/airflow/plugins:z \
-  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  stratus/airflow:3.3.1 \
-  bash -c 'airflow db migrate && airflow users create \
-    --username "$_AIRFLOW_WWW_USER_USERNAME" \
-    --password "$_AIRFLOW_WWW_USER_PASSWORD" \
-    --firstname "$_AIRFLOW_WWW_USER_FIRSTNAME" \
-    --lastname "$_AIRFLOW_WWW_USER_LASTNAME" \
-    --role Admin \
-    --email "$_AIRFLOW_WWW_USER_EMAIL"'
-```
-
-### Start the API server
-
-```bash
-podman run -d \
-  --name airflow-api-server \
-  --hostname airflow.stratus.local \
-  --network host \
-  --env-file /etc/stratus/airflow.env \
-  -v /data/airflow/dags:/opt/airflow/dags:z \
-  -v /data/airflow/logs:/opt/airflow/logs:z \
-  -v /data/airflow/plugins:/opt/airflow/plugins:z \
-  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
-  --restart unless-stopped \
-  stratus/airflow:3.3.1 \
-  airflow api-server --port 8088
-```
-
-### Start the DAG processor
-
-```bash
-podman run -d \
-  --name airflow-dag-processor \
-  --hostname airflow-dag-processor.stratus.local \
-  --network host \
-  --env-file /etc/stratus/airflow.env \
-  -v /data/airflow/dags:/opt/airflow/dags:z \
-  -v /data/airflow/logs:/opt/airflow/logs:z \
-  -v /data/airflow/plugins:/opt/airflow/plugins:z \
-  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
-  --restart unless-stopped \
-  stratus/airflow:3.3.1 \
-  airflow dag-processor
-```
-
-### Start the scheduler
-
-```bash
-podman run -d \
-  --name airflow-scheduler \
-  --hostname airflow-scheduler.stratus.local \
-  --network host \
-  --env-file /etc/stratus/airflow.env \
-  -v /data/airflow/dags:/opt/airflow/dags:z \
-  -v /data/airflow/logs:/opt/airflow/logs:z \
-  -v /data/airflow/plugins:/opt/airflow/plugins:z \
-  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
-  --restart unless-stopped \
-  stratus/airflow:3.3.1 \
-  airflow scheduler
-```
-
-### Start the triggerer
-
-```bash
-podman run -d \
-  --name airflow-triggerer \
-  --hostname airflow-triggerer.stratus.local \
-  --network host \
-  --env-file /etc/stratus/airflow.env \
-  -v /data/airflow/dags:/opt/airflow/dags:z \
-  -v /data/airflow/logs:/opt/airflow/logs:z \
-  -v /data/airflow/plugins:/opt/airflow/plugins:z \
-  -v /data/airflow/jars:/opt/airflow/jars:ro,z \
-  -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
-  --restart unless-stopped \
-  stratus/airflow:3.3.1 \
-  airflow triggerer
-```
-
-### Verify the containers
-
-```bash
-podman ps | grep airflow
-podman logs airflow-api-server | tail -30
-podman logs airflow-dag-processor | tail -30
-podman logs airflow-scheduler | tail -30
-podman logs airflow-triggerer | tail -30
-```
-
-Open `http://airflow.stratus.local:8088` in a browser and log in with the bootstrap admin user.
-
-### Auto-start with systemd
-
-Generate systemd units for each running container:
-
-```bash
-podman generate systemd --new --name airflow-postgres \
-  | sudo tee /etc/systemd/system/stratus-airflow-postgres.service
-
-podman generate systemd --new --name airflow-api-server \
-  | sudo tee /etc/systemd/system/stratus-airflow-api-server.service
-
-podman generate systemd --new --name airflow-dag-processor \
-  | sudo tee /etc/systemd/system/stratus-airflow-dag-processor.service
-
-podman generate systemd --new --name airflow-scheduler \
-  | sudo tee /etc/systemd/system/stratus-airflow-scheduler.service
-
-podman generate systemd --new --name airflow-triggerer \
-  | sudo tee /etc/systemd/system/stratus-airflow-triggerer.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now stratus-airflow-postgres.service
-sudo systemctl enable --now stratus-airflow-api-server.service
-sudo systemctl enable --now stratus-airflow-dag-processor.service
-sudo systemctl enable --now stratus-airflow-scheduler.service
-sudo systemctl enable --now stratus-airflow-triggerer.service
-```
-
----
-
-## 9. Airflow Connections and Variables
-
-For Increment 4, store platform settings as Airflow variables and connections. These values are still backed by environment secrets in the lab. They move to the platform secrets manager in a later operational maturity increment.
-
-### Create Airflow variables
-
-Run inside the scheduler container:
-
-```bash
-podman exec airflow-scheduler airflow variables set stratus_spark_master "$STRATUS_SPARK_MASTER"
-podman exec airflow-scheduler airflow variables set stratus_spark_app_jar "$STRATUS_SPARK_APP_JAR"
-podman exec airflow-scheduler airflow variables set stratus_polaris_uri "$STRATUS_POLARIS_URI"
-podman exec airflow-scheduler airflow variables set stratus_polaris_catalog "$STRATUS_POLARIS_CATALOG"
-podman exec airflow-scheduler airflow variables set ceph_rgw_endpoint "$CEPH_RGW_ENDPOINT"
-podman exec airflow-scheduler airflow variables set stratus_landing_bucket "$STRATUS_LANDING_BUCKET"
-```
-
-### Create an S3-compatible connection for Ceph RGW landing detection
-
-```bash
-podman exec airflow-scheduler airflow connections add stratus_landing \
-  --conn-type aws \
-  --conn-login "$STRATUS_AIRFLOW_S3_ACCESS_KEY" \
-  --conn-password "$STRATUS_AIRFLOW_S3_SECRET_KEY" \
-  --conn-extra "{\"endpoint_url\": \"${CEPH_RGW_ENDPOINT}\", \"verify\": \"/etc/stratus/pki/stratus-ca.crt\"}"
-```
-
-The CA bundle must be mounted read-only into the Airflow containers and must validate the certificate presented by `CEPH_RGW_ENDPOINT`. Do not disable certificate verification, including during routine lab verification. Airflow's connection type and provider package retain the upstream name `aws`; that is the official S3-compatible provider API, not an AWS infrastructure dependency.
-
----
-
-## 10. DAG Design
-
-Increment 4 introduces four platform DAGs. Each DAG is stored under `/data/airflow/dags` and versioned in the Stratus repository under `airflow/dags`.
-
-| DAG | Schedule | Purpose |
+| Offline contracts | `./mvnw -o verify` | ordinary feedback for source, lock, DAG and documentation drift |
+| Image smoke/security | `platform/airflow/image/scripts/tests/airflow-image-acceptance-test.sh` | candidate image or dependency change |
+| Lifecycle/parse | `airflow-compose-lifecycle-test.sh`, `airflow-pipeline-dag-parse-test.sh` | Compose or DAG-import change |
+| Focused live slice | named landing, bronze/silver, silver/gold, maintenance, retry or deadline script | behavior changed in that slice |
+| API control plane | `airflow-api-orchestration-live-test.sh` | API, task-state or promotion-boundary change |
+| Canonical suite | `airflow-development-acceptance-suite.sh` | release/gate evidence only, not routine feedback |
+
+The long suite deliberately composes many proofs and is not an acceptable inner development loop.
+Tests must reuse suite-scoped providers where isolation allows, generate unique tables/run IDs, emit
+phase timings, enforce bounded waits and clean exact fixtures. Tiny queries taking tens of seconds
+can be dominated by Spark application startup, dependency distribution, catalog/object-store
+initialisation and Airflow scheduling; timing records must keep those phases separate from query
+execution rather than labelling the whole interval as query latency.
+
+The Java verifier authenticates through Airflow's public REST API, validates health and DAG
+registration, triggers caller-correlated runs, polls with a bound, checks exact DAG/task terminal
+states and independently verifies Iceberg side effects. The blocked API scenario now expects
+`evaluate_bronze_promotion=failed`, with transform and downstream quality both
+`upstream_failed`.
+
+## 9. Evidence status
+
+The 2026-08-24 developer gate is point-in-time evidence for the V1 implementation; it is not a
+claim that every later commit is accepted. `P1-4.3-V2` changes the observable promotion boundary
+and therefore requires fresh offline, DAG-parse, focused live and API task-state evidence before it
+can supersede V1. Historical run durations and task states remain unchanged in their dated records.
+
+Current task state:
+
+| Task | State | Exit condition |
 |---|---|---|
-| `stratus_landing_to_bronze` | event-driven or every 15 minutes | Detect source files and submit the Spark ingestion job |
-| `stratus_bronze_to_silver` | hourly or dataset-triggered | Run bronze quality checks, evaluate promotion, and transform to silver |
-| `stratus_silver_to_gold` | daily or dataset-triggered | Run silver quality checks, evaluate promotion, and materialise gold tables |
-| `stratus_table_maintenance` | daily / weekly | Inspect Iceberg metadata tables, apply per-table policy, and run snapshot expiry, compaction, or orphan cleanup when thresholds are breached |
-
-### Common DAG rules
-
-- Each DAG must generate a `run_id` and pass it to every Spark job it submits.
-- Every Spark job must write structured success or failure metadata to task logs.
-- Every quality job must write records to `stratus.platform.quality_check_results`.
-- Promotion must be blocked when any blocking quality check has `status = failed`.
-- Warnings do not block promotion, but they must be visible in task logs.
-- Overrides require both `override_principal` and `override_reason`.
-- DAG code must remain orchestration logic only. Transformations stay in Spark job classes.
-- Maintenance DAGs must emit the metadata signals they used for decisions, including file count, average file size, snapshot count, manifest count, delete-file count, and orphan cleanup result.
-
-### Common Spark submit helper
-
-Create `airflow/dags/stratus_common.py`:
-
-```python
-from __future__ import annotations
-
-import os
-
-from airflow.models import Variable
-
-
-def spark_submit_command(main_class: str, *job_args: str) -> list[str]:
-    catalog = Variable.get("stratus_polaris_catalog", default_var="stratus")
-    polaris_uri = Variable.get("stratus_polaris_uri")
-    s3_endpoint = Variable.get("ceph_rgw_endpoint")
-    master = Variable.get("stratus_spark_master")
-    app_jar = Variable.get("stratus_spark_app_jar")
-
-    client_id = os.environ["STRATUS_POLARIS_CLIENT_ID"]
-    client_secret = os.environ["STRATUS_POLARIS_CLIENT_SECRET"]
-    access_key = os.environ["CEPH_RGW_ACCESS_KEY"]
-    secret_key = os.environ["CEPH_RGW_SECRET_KEY"]
-
-    return [
-        "spark-submit",
-        "--master", master,
-        "--class", main_class,
-        "--conf", "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
-        "--conf", f"spark.sql.catalog.{catalog}=org.apache.iceberg.spark.SparkCatalog",
-        "--conf", f"spark.sql.catalog.{catalog}.type=rest",
-        "--conf", f"spark.sql.catalog.{catalog}.uri={polaris_uri}",
-        "--conf", f"spark.sql.catalog.{catalog}.credential={client_id}:{client_secret}",
-        "--conf", f"spark.sql.catalog.{catalog}.scope=PRINCIPAL_ROLE:ALL",
-        "--conf", f"spark.sql.catalog.{catalog}.warehouse={catalog}",
-        "--conf", f"spark.sql.catalog.{catalog}.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.endpoint={s3_endpoint}",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.access-key-id={access_key}",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.secret-access-key={secret_key}",
-        "--conf", f"spark.sql.catalog.{catalog}.s3.path-style-access=true",
-        "--conf", f"spark.sql.defaultCatalog={catalog}",
-        app_jar,
-        *job_args,
-    ]
-```
-
-### Landing to bronze DAG
-
-Create `airflow/dags/stratus_landing_to_bronze.py`:
-
-```python
-from __future__ import annotations
-
-import shlex
-from datetime import datetime, timedelta
-
-from airflow import DAG
-from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
-from airflow.operators.bash import BashOperator
-
-from stratus_common import spark_submit_command
-
-
-default_args = {
-    "owner": "platform",
-    "retries": 2,
-    "retry_delay": timedelta(minutes=5),
-}
-
-with DAG(
-    dag_id="stratus_landing_to_bronze",
-    default_args=default_args,
-    start_date=datetime(2026, 1, 1),
-    schedule="*/15 * * * *",
-    catchup=False,
-    max_active_runs=1,
-    tags=["stratus", "ingestion", "bronze"],
-) as dag:
-
-    wait_for_source_file = S3KeySensor(
-        task_id="wait_for_source_file",
-        bucket_key="customers/{{ ds }}/customers.csv",
-        bucket_name="{{ var.value.stratus_landing_bucket }}",
-        aws_conn_id="stratus_landing",
-        poke_interval=60,
-        timeout=600,
-        mode="reschedule",
-    )
-
-    run_ingestion = BashOperator(
-        task_id="run_ingestion",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.LandingToBronzeJob",
-            "--sourceFile", "s3a://stratus-landing/customers/{{ ds }}/customers.csv",
-            "--targetTable", "stratus.bronze.customers",
-            "--sourceSystem", "verification",
-            "--runId", "{{ run_id }}",
-        )),
-    )
-
-    run_bronze_quality = BashOperator(
-        task_id="run_bronze_quality",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.QualityCheckJob",
-            "--targetTable", "stratus.bronze.customers",
-            "--runId", "{{ run_id }}",
-            "--checks", "[{\"type\":\"row_count_min\",\"severity\":\"blocking\",\"threshold\":1}]",
-        )),
-    )
-
-    wait_for_source_file >> run_ingestion >> run_bronze_quality
-```
-
-### Bronze to silver DAG
-
-Create `airflow/dags/stratus_bronze_to_silver.py`:
-
-```python
-from __future__ import annotations
-
-import shlex
-from datetime import datetime, timedelta
-
-from airflow import DAG
-from airflow.operators.bash import BashOperator
-
-from stratus_common import spark_submit_command
-
-
-default_args = {
-    "owner": "platform",
-    "retries": 2,
-    "retry_delay": timedelta(minutes=5),
-}
-
-with DAG(
-    dag_id="stratus_bronze_to_silver",
-    default_args=default_args,
-    start_date=datetime(2026, 1, 1),
-    schedule="@hourly",
-    catchup=False,
-    max_active_runs=1,
-    tags=["stratus", "transform", "silver"],
-) as dag:
-
-    run_quality = BashOperator(
-        task_id="run_bronze_quality",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.QualityCheckJob",
-            "--targetTable", "stratus.bronze.customers",
-            "--runId", "{{ run_id }}",
-            "--checks", "[{\"type\":\"uniqueness\",\"columns\":[\"customer_id\"],\"severity\":\"blocking\"}]",
-        )),
-    )
-
-    evaluate_promotion = BashOperator(
-        task_id="evaluate_promotion",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.PromotionGateJob",
-            "--runId", "{{ run_id }}",
-            "--targetTable", "stratus.bronze.customers",
-        )),
-    )
-
-    run_transform = BashOperator(
-        task_id="run_transform",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.BronzeToSilverJob",
-            "--sourceTable", "stratus.bronze.customers",
-            "--targetTable", "stratus.silver.customers",
-            "--businessKey", "customer_id",
-            "--runId", "{{ run_id }}",
-        )),
-    )
-
-    run_quality >> evaluate_promotion >> run_transform
-```
-
-### Silver to gold DAG
-
-Create `airflow/dags/stratus_silver_to_gold.py`:
-
-```python
-from __future__ import annotations
-
-import shlex
-from datetime import datetime, timedelta
-
-from airflow import DAG
-from airflow.operators.bash import BashOperator
-
-from stratus_common import spark_submit_command
-
-
-default_args = {
-    "owner": "platform",
-    "retries": 2,
-    "retry_delay": timedelta(minutes=5),
-}
-
-with DAG(
-    dag_id="stratus_silver_to_gold",
-    default_args=default_args,
-    start_date=datetime(2026, 1, 1),
-    schedule="@daily",
-    catchup=False,
-    max_active_runs=1,
-    tags=["stratus", "materialisation", "gold"],
-) as dag:
-
-    run_quality = BashOperator(
-        task_id="run_silver_quality",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.QualityCheckJob",
-            "--targetTable", "stratus.silver.customers",
-            "--runId", "{{ run_id }}",
-            "--checks", "[{\"type\":\"row_count_min\",\"severity\":\"blocking\",\"threshold\":1}]",
-        )),
-    )
-
-    evaluate_promotion = BashOperator(
-        task_id="evaluate_promotion",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.PromotionGateJob",
-            "--runId", "{{ run_id }}",
-            "--targetTable", "stratus.silver.customers",
-        )),
-    )
-
-    run_materialisation = BashOperator(
-        task_id="run_materialisation",
-        bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-            "dev.stratus.jobs.spark.SilverToGoldJob",
-            "--sourceTables", "stratus.silver.customers",
-            "--targetTable", "stratus.gold.customer_summary",
-            "--runId", "{{ run_id }}",
-        )),
-    )
-
-    run_quality >> evaluate_promotion >> run_materialisation
-```
-
-### Table maintenance DAG
-
-Create `airflow/dags/stratus_table_maintenance.py`:
-
-```python
-from __future__ import annotations
-
-import shlex
-from datetime import datetime, timedelta
-
-from airflow import DAG
-from airflow.operators.bash import BashOperator
-
-from stratus_common import spark_submit_command
-
-
-default_args = {
-    "owner": "platform",
-    "retries": 1,
-    "retry_delay": timedelta(minutes=10),
-}
-
-TABLES = [
-    {
-        "name": "stratus.bronze.customers",
-        "policy": "bronze-default-v1",
-    },
-    {
-        "name": "stratus.silver.customers",
-        "policy": "silver-default-v1",
-    },
-    {
-        "name": "stratus.gold.customer_summary",
-        "policy": "gold-default-v1",
-    },
-]
-
-with DAG(
-    dag_id="stratus_table_maintenance",
-    default_args=default_args,
-    start_date=datetime(2026, 1, 1),
-    schedule="@daily",
-    catchup=False,
-    max_active_runs=1,
-    tags=["stratus", "maintenance", "iceberg"],
-) as dag:
-
-    for table in TABLES:
-        BashOperator(
-            task_id=f"maintain_{table['name'].replace('.', '_')}",
-            bash_command=" ".join(shlex.quote(part) for part in spark_submit_command(
-                "dev.stratus.jobs.spark.TableMaintenanceJob",
-                "--targetTable", table["name"],
-                "--policy", table["policy"],
-                "--decisionMode", "metadata_table_thresholds",
-                "--runId", "{{ run_id }}",
-            )),
-        )
-```
-
-`TableMaintenanceJob` must query Iceberg metadata tables and emit the observed file count, small-file count, average file size, snapshot-chain length, manifest count, delete-file count, orphan-file count, selected action, and policy version. The DAG is only the trigger; it must not hard-code maintenance operations that bypass table policy.
-
----
-
-## 11. Promotion Gate Contract
-
-The promotion gate is the most important control-plane behavior in Increment 4. It must be deterministic and fail closed.
-
-```text
-Quality job writes records to platform.quality_check_results
-      │
-      ▼
-Airflow task: evaluate_promotion
-      │
-      ├── no blocking failures       → success, downstream task runs
-      ├── blocking failure exists    → task fails, downstream task skipped
-      └── override supplied          → override record written, downstream task runs
-```
-
-### Gate input
-
-| Argument | Description |
-|---|---|
-| `runId` | Airflow DAG run ID or generated platform run ID |
-| `targetTable` | Dataset being promoted |
-| `overridePrincipal` | Optional principal authorising an override |
-| `overrideReason` | Required when `overridePrincipal` is provided |
-
-### Gate output
-
-| Result | Airflow behavior |
-|---|---|
-| `PROMOTE` | Task exits with code 0 |
-| `BLOCK` | Task exits with non-zero code |
-| `OVERRIDDEN` | Task exits with code 0 and writes an override record |
-
-No downstream transform or materialisation task should run after a blocking quality failure unless an explicit override is recorded.
-
----
-
-## 12. Alerting
-
-Increment 4 uses Airflow's built-in task failure behavior, Deadline Alerts where timing guarantees are required, and a simple SMTP or webhook callback. Full observability integration with Prometheus and Grafana follows the operational model in the architecture document and can be expanded after the core orchestration behavior is proven.
-
-### Minimum alert events
-
-- DAG failure
-- task failure after all retries are exhausted
-- promotion gate blocked
-- Deadline Alert for ingestion or materialisation DAGs
-- maintenance DAG failure
-
-### Failure callback contract
-
-Each failure alert must include:
-
-| Field | Description |
-|---|---|
-| `dag_id` | Airflow DAG identifier |
-| `task_id` | failed task |
-| `run_id` | DAG run identifier |
-| `logical_date` | Airflow logical date |
-| `try_number` | final attempt count |
-| `log_url` | Airflow task log URL |
-
----
-
-## 13. Java Verification Suite
-
-The Java source and Maven dependencies in this section are build inputs only. The approved build system publishes the executable verifier as a pinned container image. Operators execute that image and do not build on the verification host or inside the verification container.
-
-The verification suite uses the Airflow REST API to trigger DAGs, poll DAG run state, and confirm side effects through Spark/Iceberg tables. It does not replace the DAGs themselves; it verifies Airflow coordinates the already-working Increment 3 jobs correctly.
-
-### Maven dependencies
-
-Add to `pom.xml` if they are not already present:
-
-```xml
-<dependency>
-    <groupId>com.fasterxml.jackson.core</groupId>
-    <artifactId>jackson-databind</artifactId>
-    <version>2.17.1</version>
-    <scope>test</scope>
-</dependency>
-<dependency>
-    <groupId>org.awaitility</groupId>
-    <artifactId>awaitility</artifactId>
-    <version>4.2.1</version>
-    <scope>test</scope>
-</dependency>
-```
-
-The Spark and Iceberg dependencies from Increment 3 remain in place for table assertions.
-
-### Configuration
-
-| Variable | Description |
-|---|---|
-| `STRATUS_AIRFLOW_BASE_URL` | e.g. `http://airflow.stratus.local:8088` |
-| `STRATUS_AIRFLOW_USERNAME` | Airflow API username |
-| `STRATUS_AIRFLOW_PASSWORD` | Airflow API password |
-| `STRATUS_SPARK_MASTER` | e.g. `spark://spark-master.stratus.local:7077` |
-| `STRATUS_POLARIS_URI` | Polaris REST API base URL |
-| `STRATUS_POLARIS_CLIENT_ID` | `svc-spark` |
-| `STRATUS_POLARIS_CLIENT_SECRET` | svc-spark client secret |
-| `STRATUS_POLARIS_CATALOG` | `stratus` |
-| `CEPH_RGW_ENDPOINT` | Ceph RGW S3 endpoint |
-| `CEPH_RGW_ACCESS_KEY` | `svc-spark` access key |
-| `CEPH_RGW_SECRET_KEY` | `svc-spark` secret key |
-
-### Shared Airflow REST client
-
-Place in `verification/orchestration/src/test/java/dev/stratus/verification/orchestration/AirflowTestClient.java`:
-
-```java
-package dev.stratus.verification.orchestration;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-
-public class AirflowTestClient {
-
-    private final HttpClient http = HttpClient.newHttpClient();
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final String baseUrl;
-    private final String bearerToken;
-
-    public AirflowTestClient() throws Exception {
-        this.baseUrl = System.getenv("STRATUS_AIRFLOW_BASE_URL");
-        String username = System.getenv("STRATUS_AIRFLOW_USERNAME");
-        String password = System.getenv("STRATUS_AIRFLOW_PASSWORD");
-        this.bearerToken = fetchToken(username, password);
-    }
-
-    private String fetchToken(String username, String password) throws Exception {
-        String body = """
-            {
-              "username": "%s",
-              "password": "%s"
-            }
-            """.formatted(username, password);
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/auth/token"))
-            .timeout(Duration.ofSeconds(30))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build();
-
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("Airflow token request failed: "
-                + response.statusCode() + " " + response.body());
-        }
-        return mapper.readTree(response.body()).get("access_token").asText();
-    }
-
-    public JsonNode get(String path) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + path))
-            .timeout(Duration.ofSeconds(30))
-            .header("Authorization", "Bearer " + bearerToken)
-            .GET()
-            .build();
-
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("Airflow GET failed: " + response.statusCode() + " " + response.body());
-        }
-        return mapper.readTree(response.body());
-    }
-
-    public JsonNode triggerDag(String dagId, String runId) throws Exception {
-        String body = """
-            {
-              "dag_run_id": "%s",
-              "conf": {
-                "verification": true
-              }
-            }
-            """.formatted(runId);
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/api/v2/dags/" + dagId + "/dagRuns"))
-            .timeout(Duration.ofSeconds(30))
-            .header("Authorization", "Bearer " + bearerToken)
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build();
-
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("Airflow trigger failed: " + response.statusCode() + " " + response.body());
-        }
-        return mapper.readTree(response.body());
-    }
-
-    public String dagRunState(String dagId, String runId) throws Exception {
-        JsonNode response = get("/api/v2/dags/" + dagId + "/dagRuns/" + runId);
-        return response.get("state").asText();
-    }
-}
-```
-
-### Verification test class
-
-Place in `verification/orchestration/src/test/java/dev/stratus/verification/orchestration/AirflowOrchestrationVerificationTest.java`:
-
-```java
-package dev.stratus.verification.orchestration;
-
-import org.awaitility.Awaitility;
-import org.junit.jupiter.api.*;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.UUID;
-
-import static org.assertj.core.api.Assertions.*;
-
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class AirflowOrchestrationVerificationTest {
-
-    static AirflowTestClient airflow;
-
-    static final List<String> REQUIRED_DAGS = List.of(
-        "stratus_landing_to_bronze",
-        "stratus_bronze_to_silver",
-        "stratus_silver_to_gold",
-        "stratus_table_maintenance"
-    );
-
-    @BeforeAll
-    static void connect() throws Exception {
-        assertThat(System.getenv("STRATUS_AIRFLOW_BASE_URL"))
-            .as("STRATUS_AIRFLOW_BASE_URL must be set").isNotBlank();
-        airflow = new AirflowTestClient();
-    }
-
-    @Test
-    @Order(1)
-    void airflowReachable() {
-        assertThatNoException()
-            .as("Airflow REST API must be reachable")
-            .isThrownBy(() -> airflow.get("/api/v2/monitor/health"));
-    }
-
-    @Test
-    @Order(2)
-    void allRequiredDagsExistAndAreUnpaused() throws Exception {
-        var dags = airflow.get("/api/v2/dags?limit=100");
-        List<String> dagIds = dags.get("dags").findValuesAsText("dag_id");
-
-        assertThat(dagIds)
-            .as("All Increment 4 DAGs must be registered")
-            .containsAll(REQUIRED_DAGS);
-    }
-
-    @Test
-    @Order(3)
-    void maintenanceDagCanRunSuccessfully() throws Exception {
-        String runId = "verification-maintenance-" + UUID.randomUUID();
-        airflow.triggerDag("stratus_table_maintenance", runId);
-
-        Awaitility.await()
-            .atMost(Duration.ofMinutes(10))
-            .pollInterval(Duration.ofSeconds(10))
-            .untilAsserted(() -> assertThat(
-                airflow.dagRunState("stratus_table_maintenance", runId))
-                .isIn("success", "failed"));
-
-        assertThat(airflow.dagRunState("stratus_table_maintenance", runId))
-            .as("Maintenance DAG must complete successfully")
-            .isEqualTo("success");
-    }
-
-    @Test
-    @Order(4)
-    void bronzeToSilverDagBlocksWhenQualityFails() throws Exception {
-        String runId = "verification-block-" + UUID.randomUUID();
-        airflow.triggerDag("stratus_bronze_to_silver", runId);
-
-        Awaitility.await()
-            .atMost(Duration.ofMinutes(15))
-            .pollInterval(Duration.ofSeconds(10))
-            .untilAsserted(() -> assertThat(
-                airflow.dagRunState("stratus_bronze_to_silver", runId))
-                .isIn("success", "failed"));
-
-        // This verification assumes the test bronze table contains the intentional duplicate
-        // created by the Increment 3 verification dataset.
-        assertThat(airflow.dagRunState("stratus_bronze_to_silver", runId))
-            .as("A blocking quality failure must fail the DAG run")
-            .isEqualTo("failed");
-    }
-
-    @Test
-    @Order(5)
-    void silverToGoldDagCanRunSuccessfullyAfterValidSilverDataExists() throws Exception {
-        String runId = "verification-gold-" + UUID.randomUUID();
-        airflow.triggerDag("stratus_silver_to_gold", runId);
-
-        Awaitility.await()
-            .atMost(Duration.ofMinutes(15))
-            .pollInterval(Duration.ofSeconds(10))
-            .untilAsserted(() -> assertThat(
-                airflow.dagRunState("stratus_silver_to_gold", runId))
-                .isIn("success", "failed"));
-
-        assertThat(airflow.dagRunState("stratus_silver_to_gold", runId))
-            .as("Silver to gold DAG must complete successfully when quality passes")
-            .isEqualTo("success");
-    }
-}
-```
-
-### Running the verification suite
-
-```bash
-export STRATUS_AIRFLOW_BASE_URL=http://airflow.stratus.local:8088
-export STRATUS_AIRFLOW_USERNAME=admin
-export STRATUS_AIRFLOW_PASSWORD=<bootstrap secret from approved secret store>
-export STRATUS_SPARK_MASTER=spark://spark-master.stratus.local:7077
-export STRATUS_POLARIS_URI=https://polaris.stratus.local:8181/api/catalog
-export STRATUS_POLARIS_CLIENT_ID=svc-spark
-export STRATUS_POLARIS_CLIENT_SECRET=<client secret>
-export STRATUS_POLARIS_CATALOG=stratus
-export CEPH_RGW_ENDPOINT=https://object-store.stratus.local
-export CEPH_RGW_ACCESS_KEY=svc-spark
-export CEPH_RGW_SECRET_KEY=<svc-spark secret>
-
-export STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE=registry.stratus.local/stratus/airflow-orchestration-verifier:<version>@sha256:<digest>
-podman run --rm --env-file /etc/stratus/verifiers/airflow-orchestration.env \
-  -v /data/stratus/evidence/increment4:/evidence:z \
-  ${STRATUS_AIRFLOW_ORCHESTRATION_VERIFIER_IMAGE}
-```
-
-All tests must pass before Increment 4 is considered complete.
-
----
-
-## 14. Operational Checks
-
-Once the verification suite passes, perform these additional checks before signing off Increment 4.
-
-### Airflow web UI
-
-Open `http://airflow.stratus.local:8088`. Confirm:
-- all four Stratus DAGs are visible
-- DAGs are unpaused
-- latest successful and failed runs are visible
-- task logs are accessible from the UI
-
-### Airflow scheduler health
-
-```bash
-podman logs airflow-scheduler | tail -50
-```
-
-Expected: no DAG import errors and no repeated database connectivity errors.
-
-### DAG import validation
-
-```bash
-podman exec airflow-scheduler airflow dags list-import-errors
-```
-
-Expected: no import errors.
-
-### Trigger a DAG manually
-
-```bash
-podman exec airflow-scheduler airflow dags trigger stratus_table_maintenance
-podman exec airflow-scheduler airflow dags state stratus_table_maintenance $(date +%Y-%m-%d)
-```
-
-The DAG run should complete successfully and produce task logs.
-
-### Confirm quality results are written
-
-Query `stratus.platform.quality_check_results` via Spark SQL or the Iceberg API and confirm new records exist for the Airflow DAG run IDs.
-
-### Confirm promotion blocking
-
-Run the bronze-to-silver DAG against a dataset with an intentional duplicate business key. Confirm:
-- `run_bronze_quality` succeeds and writes a failed blocking check
-- `evaluate_promotion` fails
-- `run_transform` is skipped
-- the DAG run is marked failed
-
-### Confirm maintenance effects
-
-After the maintenance DAG runs, inspect the target tables:
-- snapshot count should not grow without bound
-- compaction should reduce file-count debt when policy thresholds are breached
-- task logs should report the Iceberg metadata-table metrics that triggered or skipped each action
-- skipped actions should be explicit, with the table name, threshold, observed value, and policy version recorded
-
----
-
-## 15. Implementation Task Track
-
-These tasks execute `P1-4.1` through `P1-4.5`; evidence belongs under `evidence/phase1/increment4/<task-id>/` and IDs remain stable in delivery tooling.
-
-| ID | Parent | Track | Task and definition of done | Owner | Depends on | Deliverable/path | Verification/evidence | Gate | Accepted by | Blocker/risk | Status |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `P1-4.1-S1` | `P1-4.1` | Shared | Lock Airflow image, providers, DAG packaging, constraints, and verifier artifacts. | Build owner | P1-3 developer gate | `platform/airflow/image/`; dependency locks | build, scan, import and provider smoke tests | Historical D1 input | Platform owner | Developer waiver expires 2026-09-16; 35 unique upstream Spark/Hadoop JAR High findings require permanent disposition | Accepted for developer use 2026-08-17 under `WAIVER-P1-4.1-S1-20260817`; retained as historical evidence and superseded for new builds by `P1-4.1-S2` |
-| `P1-4.1-S2` | `P1-4.1` | Shared | Replace host-side Spark/PySpark payload assembly with pinned OCI source stages, decide the PySpark compatibility contract, and produce a timed, scanned local development image. | Build owner | `P1-4.1-S1` evidence | `platform/airflow/image/`; [`airflow_spark_runtime_reassessment_20260818.md`](airflow_spark_runtime_reassessment_20260818.md) | small-context build, provider/dependency proof, smoke, scan and phase timings | D1 | Platform owner | 61 High occurrences remain tracked in the accepted upstream runtime; zero Critical | Development accepted 2026-08-22; exact image, timings, runtime inventory and scan evidence recorded in [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
-| `P1-4.1-D1` | `P1-4.1` | Developer | Implement idempotent LocalExecutor deployment, local PostgreSQL, startup/reset, and health checks. | Operations owner | `P1-4.1-S2` | `platform/airflow/developer/` | two lifecycle cycles and DB migration output using an already-built local development image | D1 | Platform owner | None for this task | Development accepted 2026-08-22; two complete Airflow 3.3.1 LocalExecutor/PostgreSQL 17.10 cycles passed with migrations, component health, timing and clean shutdown. Native scheduled runs on 2026-08-24 found and corrected the worker execution-API route to internal Compose DNS |
-| `P1-4.2-D1` | `P1-4.2` | Developer | Configure Spark submission, Polaris/Ceph trust, protected connections, and immutable DAG delivery. | Data-engineering owner | `P1-4.1-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/compose.spark.yaml`; `platform/airflow/developer/scripts/tests/airflow-spark-submission-test.sh` | Spark task, catalog/object-store operation, immutable-input and secret-redaction evidence | D1 | Security owner | None for this task | Development accepted 2026-08-22; Spark 4.1.3 client submitted to Spark 4.1.2, and distributed count plus Polaris/Ceph Iceberg create/write/read/drop passed |
-| `P1-4.3-V1` | `P1-4.3` | Developer | Implement and verify ingestion, transforms, quality halt, maintenance, retry, and alert DAGs. | Data-engineering owner | `P1-4.2-D1` | `platform/airflow/developer/dags/`; `platform/airflow/developer/scripts/tests/`; `verification/orchestration/` | run IDs, pass/fail paths, retry/alert reports | D1-D2 | Data owner | External alert sink selection does not block the structured development callback | Development accepted 2026-08-24 - canonical run `airflow-development-acceptance-20260824T103411Z` passed all pipeline, maintenance, retry, native Deadline Alert and public-API positive/fail-closed scenarios, with independent side-effect proof, exact cleanup, 294-test pre/post reactors, and zero remaining Stratus containers |
-| `P1-4.1-P1` | `P1-4.1` | Production | Publish the accepted S2 image through the approved artifact pipeline and provision external PostgreSQL TLS/backup/restore plus production Airflow service placement. | Database, build and operations owners | `P1-4.1-S2`, `P1-0.1`, development-system acceptance | `platform/airflow/`; `environments/production/airflow/`; DB runbook | immutable digest/SBOM/provenance, migration, failover/recovery and service restart | P1-P6 | Platform owner | Deferred production-hardening entry gate and DB HA decision | Not started |
-| `P1-4.2-P1` | `P1-4.2` | Production | Apply OIDC/HTTPS, managed secrets, immutable DAG promotion, Ceph remote logs, and restricted administration. | Security owner | `P1-4.1-P1`, Increment 7 controls | `platform/airflow/config/`; `environments/production/airflow/` | auth negative tests, log continuity, rotation | P5-P11 | Operations owner | OIDC integration | Not started |
-| `P1-4.5-R1` | `P1-4.5` | Production | Prove scheduler/service failure, DB restore, DAG rollback, retry safety, and alert routing. | Operations owner | `P1-4.2-P1` | `operations/runbooks/airflow/` | timed drills, restored run metadata, alert exercise | P12-P16 | Platform owner | Maintenance window | Not started |
-| `P1-4.4-V1` | `P1-4.4` | Production | Run production DAG and quality-gate regression with capacity and observability evidence. | QA owner | `P1-4.5-R1` | production test reports | run IDs, JUnit, metrics, failed promotion proof | P15-P18 | Data owner | Representative schedule load | Not started |
-| `P1-4.G-D` | `P1-4` | Developer | Accept D1-D2. | Platform owner | `P1-4.3-V1` | [`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md) | gate/evidence matrix and development-state promotion manifest | D1-D2 | Data owner | No open functional defect | Development accepted 2026-08-24 - the repository maintainer directed closure after canonical run `airflow-development-acceptance-20260824T103411Z` passed every phase in 2,975.509 seconds, repeated 294 offline tests, and left zero Stratus containers |
-| `P1-4.G-P` | `P1-4` | Production | Accept P1-P18 with promotion and readiness evidence. | Platform owner | `P1-4.4-V1` | production gate record | gate/evidence matrix | P1-P18 | Operations owner | Open production defect | Not started |
-
-### 15.1 Current implementation evidence and remaining work
-
-`P1-4.1-S1` has an implemented artifact baseline accepted for developer use
-under `WAIVER-P1-4.1-S1-20260817`. The waiver expires 2026-09-16, prohibits
-production promotion, and does not close the residual findings:
-
-- The strict-TDD repository contract
-  `AirflowArtifactBaselineTest` was observed failing for the absent image,
-  locks, resolver, smoke test, and scan test, then passing after implementation.
-- The complete offline Maven `clean verify` reactor passed 222 tests with zero
-  failures, errors, or skips in 60.6 seconds wall-clock after the documentation
-  status guardrail was added.
-- `artifact-lock.properties` pins the Airflow and Temurin image indexes, the
-  official Airflow Python 3.14 constraint SHA-256, and the Spark 4.1.3 archive
-  SHA-512. `requirements.lock` hash-locks all seven direct/runtime Python inputs.
-- Artifact resolution passed on 2026-08-17: seven Python artifacts, the official
-  constraint, and the 546.3 MiB Spark archive all verified in 87.428 seconds.
-  A repeated resolver run reused the verified constraint and Spark archive
-  successfully, and the resolver clears stale wheelhouse entries first.
-- Hardened image `stratus/airflow:dev` built as
-  `sha256:89db37a79b60dd9224874afca3a4b57afadbeab0a205f8835958fecea259bc97`
-  in 46.010 seconds. LiteLLM, Ray, Docker, `uv`/`uvx`, the duplicate PySpark
-  JAR tree, and the vulnerable Derby 10.16.1.1 server JAR were removed during
-  image assembly.
-- The 13.339-second runtime smoke passed for Airflow 3.3.1, Python 3.14.3,
-  Amazon provider 9.34.0, Spark provider 6.3.1, boto3 1.43.56, PySpark 4.1.3,
-  Py4J 0.10.9.9, Temurin Java 21.0.11, Spark submit 4.1.3, and both required
-  provider imports. It additionally proved that every removed component and
-  duplicate runtime tree is absent.
-- A daemon-isolated Trivy 0.74.0 archive scan completed on 2026-08-17 in
-  358.930 seconds with
-  `--ignore-unfixed --severity HIGH,CRITICAL`. The explicit zero-Critical gate
-  passed. The retained report contains 84 High occurrences representing 35
-  unique package/CVE pairs, all in the upstream Spark 4.1.3/Hadoop JAR set;
-  Debian, Python, Go-binary, and Rust-binary High findings are zero. Compared
-  with the pre-hardening result of 5 Critical plus 185 High occurrences and 86
-  unique High findings, the final image removes all Criticals, 101 High
-  occurrences, and 51 unique High findings. The residual JAR inventory remains
-  evidence to triage, not an implicit security waiver. Package-family ownership,
-  reachability posture, and review triggers are recorded in
-  `platform/airflow/image/vulnerability-review.md`; the explicit scope,
-  compensating controls, actions, invalidation rules, and expiry are recorded in
-  `platform/airflow/image/vulnerability-waiver.md`.
-
-On 2026-08-18, a Java 21 rebuild attempt showed that the legacy resolver and host
-build context carried more than 1 GB of duplicate Spark/PySpark payload. Artifact
-resolution took 663.689 seconds, and the Docker Desktop transfer was stopped after
-about 305 seconds with only about 310 MB transferred. This invalidated the old
-assembly path as an acceptable developer workflow; it did not invalidate the
-historical digest or its time-bounded waiver evidence.
-
-The replacement path was accepted on 2026-08-22:
-
-- `P1-4.1-S2` built `stratus/airflow:dev` as
-  `sha256:27f05eb17bd3ad3504faf1c53089085ddd6e31fae48c2c47716b8bc3342f6a91`
-  from digest-pinned Airflow and Spark OCI stages. Its build context was 9.93 MB,
-  the first non-cached build took 24.595 seconds, and a warm build took 5.998
-  seconds.
-- Runtime smoke verified Airflow 3.3.1, Python 3.14, Spark 4.1.3, Java 21.0.11,
-  Scala 2.13.17, both required providers, and the absence of the full PySpark
-  distribution and superseded vulnerable surfaces.
-- Trivy reported zero Critical and 61 High occurrences across 38 unique
-  package/CVE pairs. The current inventory and development disposition are in
-  `platform/airflow/image/development-vulnerability-review-s2.md`; the historical
-  S1 waiver does not apply to this image.
-- `P1-4.1-D1` passed two full migration, startup, health and shutdown cycles with
-  Airflow 3.3.1 LocalExecutor and PostgreSQL 17.10.
-- `P1-4.2-D1` ran packaged job
-  `dev.stratus.jobs.spark.SparkSubmissionProbeJob` through the immutable Airflow
-  DAG. Application `app-20260822090425-0003` completed a distributed count and
-  Polaris/Ceph-backed Iceberg create, write, read and drop, while input hashes and
-  transcript secret-redaction checks passed. Total suite time was 110.629 seconds.
-- The first live `P1-4.3-V1` slice passed as run
-  `airflow-pipeline-20260823T071231Z`. Its protected sensor, packaged ingestion
-  and bronze-quality tasks produced three batch rows and one passing quality
-  result. `AirflowPipelineVerifierJob` independently verified the rows, result
-  and Iceberg snapshot, then removed the result and probe table; the harness
-  removed the landing object and Airflow services. All six phase markers and
-  the 187.300-second suite duration were retained. Access/secret keys were
-  absent and the AWS SDK bundle was proven through the Log4j2 compatibility
-  path without an SLF4J NOP fallback.
-- The next live slice passed as run
-  `airflow-bronze-to-silver-20260823T084502Z` in 356.572 seconds. Its accepted
-  path produced and independently verified three silver rows, two passing
-  silver checks and a concrete snapshot. Its deliberate blocking check caused
-  the promotion gate to fail before any target write; the independent verifier
-  proved the target absent. Both paths removed exact test tables, quality rows
-  and landing fixtures, and the transcript passed the secret-value checks.
-- The silver-to-gold slice passed as run
-  `airflow-silver-to-gold-20260823T093453Z` in 716.033 seconds. Its accepted path
-  built the upstream silver table, promoted two passing silver checks, wrote and
-  independently verified three country aggregates totalling three customers,
-  persisted two passing gold checks, and proved snapshot
-  `4905475424229459833`. Its blocked path added a genuine
-  `requires_four_silver_rows` failure; `MaterialisationJob` examined all three
-  silver results and failed before creating gold. The independent verifier
-  proved the absent target, and both paths removed their exact bronze, silver,
-  gold, quality and landing artifacts. The final parse run
-  `airflow-pipeline-parse-20260823T093309Z` also registered all three DAGs with
-  no import errors in 90.312 seconds.
-- The table-maintenance slice passed as run
-  `airflow-table-maintenance-20260823T113447Z` in 326.099 seconds. An exact
-  allow-listed probe began with three rows, three files and three snapshots.
-  The skip policy observed three small files against threshold four and made no
-  change; the run policy observed the same files against threshold two and
-  compacted them to one current file while preserving every row. Before/after
-  file, size, snapshot, manifest, delete-file and orphan-file metrics plus each
-  action, threshold and policy version were logged. Independent verification,
-  exact purge cleanup and protected-secret checks passed. The live discovery
-  that Iceberg's default minimum of five inputs contradicted the policy trigger
-  was captured first by a failing regression test, then corrected by carrying
-  the policy's minimum-input and target-size options into the procedure call.
-  Parser run `airflow-pipeline-parse-20260823T112234Z` registered all four DAGs
-  with no import errors in 76.704 seconds.
-- The isolated retry/alert slice passed as run
-  `airflow-retry-alert-20260824T040947Z` in 72.759 seconds. Its transient mode
-  failed on attempt one, emitted one retry callback with a 2,537 ms duration,
-  and recovered on attempt two without a terminal alert. Permanent mode emitted
-  a 2,758 ms retry callback after attempt one and exactly one terminal callback
-  after attempt two with a 42 ms duration. All callback records carried safe
-  run/task/attempt, log-URL, duration, and exception-class context without an
-  exception message. Generated Airflow secrets were absent from the transcript,
-  and the checked-in harness stopped the isolated Airflow stack. Strict TDD also
-  captured and corrected the test-DAG mount boundary, deprecated operator import,
-  and missing runtime-duration fallback; all 18 focused DAG guardrails passed.
-- The native Deadline Alert slice passed as run
-  `airflow-deadline-alert-20260824T051734Z` in 98.764 seconds. A one-second task
-  completed before its 12-second queued-at deadline without an alert. An
-  18-second task produced exactly one asynchronous triggerer callback with
-  13,278 ms observed elapsed time and a 1,278 ms breach, then completed
-  successfully. The callback carried safe DAG/run/correlation identity,
-  deadline name/timestamps and numeric timing. Secret checks and cleanup passed.
-  The first scheduled attempt had exposed LocalExecutor workers calling the
-  execution API through scheduler-container loopback; a failing deployment
-  regression required and then proved the corrected internal
-  `airflow-api-server:8080` route. Failure diagnostics are now retained before
-  live cleanup. All 21 DAG and five deployment guardrails passed.
-- The final public-API slice passed as run
-  `airflow-api-orchestration-20260824T073836Z` in 420.772 seconds. Airflow health
-  and the five-DAG registry passed. The maintenance DAG succeeded on attempt one
-  in 34.657 seconds of Airflow time; the deliberately blocked bronze-to-silver
-  DAG failed in 18.056 seconds, with its transform failed on attempt one and its
-  downstream quality task `upstream_failed` without an attempt. Independent
-  Spark verifiers proved three rows remained after three-to-one compaction and
-  proved the blocked silver target absent. Exact Iceberg, quality-result and S3
-  cleanup passed, protected secrets were absent, and checked-in lifecycle scripts
-  stopped every provider with `remainingStratusContainers=0`. Strict-TDD
-  regressions retain the discovered Airflow trigger model, HTTP/1.1 transport,
-  DAG-processor retry override, and explicit Ceph compose-project contracts.
-- The canonical one-command development suite then passed as
-  `airflow-development-acceptance-20260824T103411Z` in 2,975.509 seconds. It
-  reran the offline reactor before live work, rebuilt and scanned the image,
-  proved two lifecycle cycles, parsed the DAG registry, exercised retry and
-  native Deadline Alert behavior, bootstrapped every provider, ran Spark
-  submission and every pipeline/maintenance slice, shut providers down in
-  reverse order, proved public-API positive and fail-closed behavior, reran the
-  offline reactor, and finished with `remainingStratusContainers=0`. The
-  Deadline probe now uses a unique test-owned DAG ID and deletes its metadata so
-  an Airflow 3.3.1 serialized DAG version cannot retain a deadline reference to
-  a prior test run.
-- The accepted behavior is also packaged as an audience-facing demonstration
-  layer in
-  [`platform/airflow/developer/demos/README.md`](../../platform/airflow/developer/demos/README.md).
-  Its three one-command entry points delegate to the accepted live harnesses
-  instead of duplicating DAG or Spark business logic. Live runs on 2026-08-24
-  proved the customer landing-to-gold journey as
-  `airflow-demo-customer-pipeline-20260824T121540Z` in 836.968 seconds, the
-  pass-and-block quality gate as
-  `airflow-demo-quality-gate-20260824T120456Z` in 616.644 seconds, and
-  REST-API-driven table maintenance plus fail-closed task-state inspection as
-  `airflow-demo-api-maintenance-20260824T123014Z` in 556.589 seconds. Every
-  wrapper verified the accepted harness markers and finished with
-  `remainingStratusContainers=0`. Five strict-TDD repository contracts protect
-  the demo structure, shared lifecycle ownership, expected-result guides,
-  audience fixture and entry-point links; the final 12-module offline reactor
-  passed 299 tests with zero failures, errors or skips.
-- The final developer-gate `mvn -o verify` passed the expanded 12-module reactor
-  twice in the canonical suite: 294 offline tests with zero failures, zero
-  errors and zero skips in 56.501 seconds before live testing and 65.475 seconds
-  afterwards. The live-only orchestration test remains excluded from the normal
-  offline count. Bash syntax checks passed for the Airflow test and lifecycle
-  helpers.
-- The post-Deadline offline `mvn -o verify` run passed the complete 11-module
-  reactor in 51.896 seconds: 278 tests, zero failures, zero errors and zero
-  skips. It includes 21 Airflow DAG guardrails, five deployment guardrails, the
-  maintenance policy/verifier
-  tests, the live-discovered Iceberg rewrite-option regression, and repository
-  logging, redaction and Java-policy checks. `git diff --check` was clean; the
-  live harness stopped Airflow, the other Stratus providers were already
-  stopped, and the final Docker query found no running Stratus containers.
-
-The durable acceptance record is
-[`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
-
-The `P1-4.G-D` developer gate is accepted. Remaining tracked work is outside the
-completed Airflow development implementation:
-
-1. Track the 61 current S2 High occurrences and reassess them when the pinned
-   Airflow or Spark upstream distributions change. They are visible development
-   risk, not evidence of production readiness.
-2. After the complete development system is accepted, activate the separate production-hardening
-   stage. It publishes the accepted S2 build contract through `P1-0.1` and then executes production
-   tasks `P1-4.1-P1` through `P1-4.4-V1` and `P1-4.G-P`.
-
-## 16. Completion Gates
-
-### Developer gate
-
-- [x] **D1** - Single-host Airflow 3.3.1 starts/stops idempotently and DAG scheduling, Spark submission, retry, failure alert, quality halt, and verifier tests pass.
-- [x] **D2** - Local metadata/log state, bootstrap credentials, local CA, and reduced service availability are recorded in the promotion manifest.
+| `P1-4.1-S2` image/runtime assembly | Accepted point-in-time on 2026-08-22; cache-lock hardening added 2026-08-25 | rebuild/smoke the current script state; production publication remains separate |
+| `P1-4.1-D1` Compose lifecycle | Accepted for development | production topology remains separate |
+| `P1-4.2-D1` Airflow-to-Spark submission | Accepted for development | repeat on dependency/runtime change |
+| `P1-4.3-V1` embedded gate evidence | Accepted point-in-time on 2026-08-24 | retained as historical evidence |
+| `P1-4.3-V2` explicit gate task plus writer recheck | In progress | offline, parse, focused live and API proofs pass |
+| `P1-4.G-D` developer gate | Accepted for the V1 state on 2026-08-24 | does not automatically accept V2 |
+| `P1-4.1-P1`, `P1-4.5-R1`, `P1-4.4-V1` | Planned | hardened deployment, recovery, observability, capacity and schedule evidence pass |
 
 ### Developer-to-production promotion controls
 
-The authoritative D2 development-state promotion manifest is in
-[`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md).
-It records local PostgreSQL and log/event state, disposable credentials, local
-CA material, reduced single-host availability, loopback HTTP/SimpleAuth,
-workstation-built artifacts, structured-log-only alert delivery, developer-sized
-workloads, and disposable dependency bootstrap. Every row maps the condition to
-its production replacement task and a rollback or stop condition. An unlisted
-developer shortcut blocks gate acceptance until it is assessed and added.
+- [x] **D1** — V1 functional behavior and its producing evidence were complete on 2026-08-24.
+- [x] **D2** — V1 developer shortcuts and production replacements were recorded in the gate.
+
+The [`P1-4.G-D`](../../platform/airflow/developer-gate-20260824.md) developer gate is accepted only
+for the dated V1 state. V2 remains in progress and cannot inherit that acceptance.
+In short, the `P1-4.G-D` developer gate is accepted for V1, not for subsequent source changes.
 
 ### Gate traceability rule
 
-The D1 and D2 identifiers above are normative. Both are complete because every
-producing task is accepted, the linked evidence resolves, the repository
-maintainer explicitly directed completion, and the canonical suite passed in
-full. The gate task reviews evidence; it does not create missing evidence on
-behalf of its producers.
+Every later acceptance record must name the producing task, immutable source revision, run IDs,
+task states, data-side result, cleanup result, owner and exceptions. Dated evidence is never edited
+to make it appear to describe a later implementation.
 
-### Production gate
+### Implementation task track
 
-Increment 4 is accepted when all of the following are true:
+| Task | Dependency | Required evidence | State |
+|---|---|---|---|
+| `P1-4.1-D1` | `P1-4.1-S2` local development image | two Compose lifecycle cycles and health | Accepted for development |
+| `P1-4.1-P1` | `P1-4.1-S2`, `P1-0.1` | published digest, hardened topology, restore and continuity | Planned |
+| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | In progress |
 
-- [ ] **P1** - PostgreSQL metadata database running and managed by systemd on `airflow.stratus.local`
-- [ ] **P2** - Airflow API server running and managed by systemd on `airflow.stratus.local`
-- [ ] **P3** - Airflow DAG processor running and managed by systemd
-- [ ] **P4** - Airflow scheduler running and managed by systemd on `airflow.stratus.local`
-- [ ] **P5** - Airflow triggerer running and managed by systemd
-- [ ] **P6** - Airflow UI and public REST API are reachable through trusted HTTPS/OIDC; port 8088, if retained internally, is not an unauthenticated production ingress
-- [ ] **P7** - Airflow DAG import check reports no errors
-- [ ] **P8** - All four DAGs exist: `stratus_landing_to_bronze`, `stratus_bronze_to_silver`, `stratus_silver_to_gold`, `stratus_table_maintenance`
-- [ ] **P9** - Airflow can submit Spark jobs to `spark-master.stratus.local:7077`
-- [ ] **P10** - Landing-to-bronze DAG detects a source file and writes a bronze Iceberg table
-- [ ] **P11** - Bronze-to-silver DAG runs quality checks and blocks downstream transform when a blocking failure exists
-- [ ] **P12** - Silver-to-gold DAG materialises a gold table when quality passes
-- [ ] **P13** - Maintenance DAG inspects Iceberg metadata tables, applies per-table policy, and runs or skips snapshot expiry and file rewrite operations with recorded evidence
-- [ ] **P14** - Task retries work for a transient failure
-- [ ] **P15** - Failure alerts fire when a task exhausts retries
-- [ ] **P16** - `AirflowOrchestrationVerificationTest` passes against the live platform
-- [ ] **P17** - Airflow task logs include run IDs, target tables, Spark application IDs, and quality gate decisions
-- [ ] **P18** - external metadata database and remote logs restore successfully; managed secrets and scheduler/DAG-processor availability meet the approved RTO/RPO design
+## 10. Production acceptance boundary
 
-The developer gate marks Increment 4 functionally accepted for the current development stage and
-unblocks Increment 5 engineering. The production gate remains inactive until the later production
-deployment hardening stage.
+Production acceptance requires, at minimum:
 
----
+- immutable published image digest, SBOM, provenance and vulnerability disposition;
+- durable PostgreSQL backup/restore and remote-log continuity;
+- trusted TLS, OIDC, managed secrets and named service identities;
+- accepted scheduler/DAG-processor/executor availability and capacity;
+- approved transition schedules, backfill rules and overlap behavior;
+- promotion override audit and named steward procedure;
+- alert routing, retry, deadline, dependency-loss and recovery drills;
+- unchanged DAG/API/data-side verification against representative workloads.
 
-## 17. Troubleshooting
+No developer Compose result may be used as evidence for these controls.
 
-### Airflow API server cannot connect to metadata database
+The current V2 live gate is also waiting for a rebuilt local Airflow image. The 2026-08-25 build
+proved the corrected 9.93 MB context but the digest-pinned Spark layer pull ended with an external
+short read; this is a missing test prerequisite, not a passed DAG parse or runtime result.
 
-```bash
-podman logs airflow-api-server
-podman logs airflow-postgres
-```
+An interim 2026-08-25 parse imported the real DAG modules in the digest-pinned upstream Airflow
+3.3.1 image with the locked Spark and Amazon provider wheels. It constructed the exact bronze and
+gold task graphs documented above. This validates Python, provider and dependency construction but
+does not replace the developer Compose registry, scheduler or live data-side proofs.
 
-Common causes:
-- PostgreSQL container is not running
-- `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` points to the wrong host or port
-- PostgreSQL data directory permissions are wrong
+## 11. Troubleshooting
 
-### DAGs do not appear in the UI
+- Start with `airflow-compose-verify-health.sh`; it checks service and metadata health consistently.
+- Use Airflow's import-error endpoint/CLI if DAGs do not register, then run the parse test.
+- Verify the protected `spark_default` connection, mounted jobs JAR, Spark defaults, truststore and
+  locked runtime hashes when submission fails.
+- Check the exact quality `runId` and source table when a promotion task denies access.
+- A gate denial with downstream `upstream_failed` is expected fail-closed behavior, not a missing
+  retry. Investigate the persisted quality result before clearing tasks.
+- Use the lifecycle shutdown script after tests; use reset only when disposable metadata/log state
+  is intentionally being removed.
 
-```bash
-podman exec airflow-scheduler airflow dags list-import-errors
-```
+## 12. Authoritative upstream references
 
-Common causes:
-- Python syntax error in a DAG file
-- missing provider package in the Airflow image
-- DAG file not mounted under `/opt/airflow/dags`
-
-### Spark submit fails from Airflow
-
-- Confirm `spark-submit` exists inside the Airflow container: `podman exec airflow-scheduler spark-submit --version`
-- Confirm Airflow can reach the Spark master: `podman exec airflow-scheduler nc -zv spark-master.stratus.local 7077`
-- Confirm `/opt/airflow/jars/stratus.jar` exists inside the scheduler container
-- Check Spark master UI for a submitted application
-
-### Spark job cannot connect to Polaris
-
-- Confirm the Polaris REST API is reachable from the Airflow host:
-
-```bash
-podman exec airflow-scheduler curl --cacert /etc/stratus/certs/ca.crt \
-  https://polaris.stratus.local:8181/api/catalog/v1/config
-```
-
-- Confirm `STRATUS_POLARIS_CLIENT_ID` and `STRATUS_POLARIS_CLIENT_SECRET` are present in the scheduler environment
-- Confirm the catalog URI includes `/api/catalog`
-
-### Landing-zone sensor never succeeds
-
-- Confirm the expected key exists in Ceph RGW:
-
-```bash
-aws s3 --endpoint-url https://object-store.stratus.local ls s3://stratus-landing/customers/$(date +%F)/customers.csv
-```
-
-- Confirm the `stratus_landing` Airflow connection has the Ceph RGW endpoint in its JSON extras
-- Confirm the `svc-airflow` credentials can list the landing bucket
-
-### Promotion gate does not block
-
-- Query `stratus.platform.quality_check_results` for the Airflow `run_id`
-- Confirm failed checks use `severity = blocking` and `status = failed`
-- Confirm the DAG calls `PromotionGateJob` before the downstream transform or materialisation task
-- Confirm downstream tasks depend on the gate task and are not configured with a permissive trigger rule such as `all_done`
-
-### Task retries do not happen
-
-- Confirm `retries` and `retry_delay` are set in the DAG or task
-- Confirm the task exits with a non-zero code on failure
-- Check the task instance history in the Airflow UI
-
-### DAG processor is not parsing DAGs
-
-```bash
-podman logs airflow-dag-processor | tail -50
-podman exec airflow-scheduler airflow dags list-import-errors
-```
-
-Common causes:
-- DAG directory is not mounted into the DAG processor container
-- provider package missing from the Airflow image
-- Python import error in a DAG file
-- scheduler and DAG processor are not using the same Airflow image and mounted plugin paths
-
----
-
-## 18. References
-
-- Apache Airflow documentation: https://airflow.apache.org/docs/
-- Airflow 3.3 prerequisites and supported databases/Python: https://airflow.apache.org/docs/apache-airflow/stable/installation/prerequisites.html
-- Airflow Docker deployment guide: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html
-- Airflow REST API: https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html
-- Airflow Spark provider: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/
-- Airflow Spark provider changelog: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/changelog.html
-- Airflow Amazon provider: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/
-- PostgreSQL 17 release notes: https://www.postgresql.org/docs/17/release.html
-- Apache Spark standalone cluster: https://spark.apache.org/docs/latest/spark-standalone.html
-- Apache Iceberg Spark procedures: https://iceberg.apache.org/docs/latest/spark-procedures/
-- Stratus Phase 1 implementation plan: [stratus_implementation_plan_phase1.md](stratus_implementation_plan_phase1.md)
-- Stratus architecture: [stratus_on_prem_data_fabric_architecture.md](../architecture/stratus_on_prem_data_fabric_architecture.md)
-- Increment 1 — Ceph object storage foundation: [ceph_storage.md](ceph_storage.md)
-- Increment 2 — Iceberg and Polaris: [iceberg_polaris_catalog.md](iceberg_polaris_catalog.md)
-- Increment 3 — Spark: [spark_compute.md](spark_compute.md)
+- Airflow downloads and supported versions: https://airflow.apache.org/docs/apache-airflow/stable/installation/supported-versions.html
+- Airflow 3.3.1 constraints: https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.14.txt
+- Spark provider: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/
+- Amazon provider: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/
+- Spark 4.1.3: https://spark.apache.org/docs/4.1.3/
+- Podman systemd/Quadlet guidance: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html

@@ -1,8 +1,8 @@
 """Quality-gate a silver customer table before rebuilding its gold summary.
 
-The silver checks and MaterialisationJob share one quality run ID. MaterialisationJob evaluates
-that persisted evidence before executing SQL or replacing the gold table. A successful rebuild is
-followed by independently persisted gold row-count and country-uniqueness checks.
+Airflow exposes the silver promotion decision as a distinct task. MaterialisationJob receives the
+same quality run and re-evaluates the evidence before replacing gold as a defence-in-depth check.
+A successful rebuild is followed by independently persisted gold quality checks.
 """
 
 import base64
@@ -23,6 +23,7 @@ TARGET_TABLE = "{{ dag_run.conf.get(\"gold_table\", \"" + GOLD_TABLE + "\") }}"
 QUALITY_RUN_ID = "{{ dag_run.conf.get(\"quality_run_id\", run_id) }}"
 PIPELINE_RUN_ID = "{{ dag_run.conf.get(\"pipeline_run_id\", run_id) }}"
 QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob"
+PROMOTION_GATE_CLASS = "dev.stratus.jobs.spark.PromotionGate"
 MATERIALISATION_CLASS = "dev.stratus.jobs.spark.MaterialisationJob"
 DEFAULT_RETRIES = 2
 RETRIES_ENVIRONMENT_VARIABLE = "STRATUS_SILVER_TO_GOLD_RETRIES"
@@ -89,6 +90,16 @@ with DAG(
         on_failure_callback=stratus_failure_alert,
     )
 
+    evaluate_silver_promotion = spark_submit_task(
+        task_id="evaluate_silver_promotion",
+        java_class=PROMOTION_GATE_CLASS,
+        application_args=[
+            "--runId", QUALITY_RUN_ID,
+            "--targetTable", SOURCE_TABLE,
+        ],
+        on_failure_callback=stratus_failure_alert,
+    )
+
     run_gold_materialisation = spark_submit_task(
         task_id="run_gold_materialisation",
         java_class=MATERIALISATION_CLASS,
@@ -114,4 +125,4 @@ with DAG(
         on_failure_callback=stratus_failure_alert,
     )
 
-    run_silver_quality >> run_gold_materialisation >> run_gold_quality
+    run_silver_quality >> evaluate_silver_promotion >> run_gold_materialisation >> run_gold_quality

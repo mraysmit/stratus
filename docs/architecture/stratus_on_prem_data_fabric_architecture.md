@@ -4,7 +4,7 @@
 
 - Author: Mark Raysmith Cityline Ltd
 - Created: 2025-10-20
-- Last updated: 2026-07-22
+- Last updated: 2026-08-25
 
 ## 1. Executive Summary
 
@@ -624,7 +624,9 @@ Airflow should not be treated as:
 - treat DAG import errors as platform incidents, not harmless UI noise
 
 ### Deployment posture
-The initial deployment uses Airflow 3.x with one API server, one DAG processor, one scheduler, one triggerer, PostgreSQL for metadata, and `LocalExecutor`. That is sufficient for the first governed batch workflows and keeps the operational surface small. If task concurrency, isolation, or worker placement becomes a real constraint, move to CeleryExecutor or KubernetesExecutor as a deliberate scaling step.
+The developer profile uses Docker Compose with Airflow 3.3.1, one API server, one DAG processor, one scheduler, one triggerer, PostgreSQL for metadata, and `LocalExecutor`. This is sufficient for functional development evidence and keeps the local operational surface small; it is not a production topology. Production uses the same accepted image, DAGs and contracts but requires durable external metadata and logs, managed secrets, trusted identity, backup/restore, availability and capacity evidence. If concurrency, isolation or placement becomes a measured constraint, move to CeleryExecutor or KubernetesExecutor as a deliberate scaling step.
+
+Where Podman is selected for production Linux hosts, services use Quadlet or another current approved unit mechanism. The deprecated `podman generate systemd` workflow is excluded.
 
 Airflow's metadata database is part of the control plane and must be backed up. Losing it means losing run history, task state, retry state, and operational audit context.
 
@@ -820,7 +822,7 @@ Airflow gate task — query check_results for this run_id
 promote   halt pipeline / alert / await override
 ```
 
-The Airflow gate task queries `platform.quality_check_results` for the current `run_id`, asserts that all blocking checks have status `passed`, and only then triggers the downstream promotion or materialisation task.
+The Airflow gate task queries `platform.quality_check_results` for the exact quality `run_id` and source table, asserts that all blocking checks have status `passed`, and only then triggers the downstream transformation or materialisation task. The writer rechecks the same evidence immediately before writing as defence in depth; the explicit Airflow task remains the visible orchestration and audit boundary. See [ADR-P1-007](../decisions/ADR-P1-007-airflow-promotion-gate-boundary.md).
 
 ### Override model
 
@@ -1454,7 +1456,7 @@ Phase 1 may run single instances of Polaris, Atlas, Ranger, Airflow, and Keycloa
 Minimum production posture should include:
 - PostgreSQL backup and restore testing for Airflow and any catalog or governance metadata stores that use PostgreSQL
 - exported Keycloak realm configuration and FreeIPA backup procedures
-- documented rebuild path for every Podman image and systemd unit
+- documented rebuild path for every OCI image and runtime unit
 - persistent volumes outside container writable layers
 - restore drills before sensitive or business-critical datasets are onboarded
 
@@ -1778,7 +1780,7 @@ Phase 1 operational acceptance is captured in [stratus_phase1_operational_readin
 
 ### 14.7 Upstream reference audit and version discipline
 
-Reference baseline: 2026-07-10.
+Reference baseline: 2026-08-25.
 
 The platform depends on fast-moving open source projects. Each implementation increment must start by checking current upstream documentation and release notes for the selected versions, then recording the approved version matrix in the increment runbook. A design document may intentionally pin an older version for compatibility, but that pin must be explicit and verified.
 
@@ -1798,7 +1800,7 @@ Minimum version matrix to maintain:
 | Apache Flink | align Flink major version, Java support, connectors, checkpointing, and Iceberg runtime |
 | FreeIPA / Keycloak | use current identity-provider documentation for LDAP/Kerberos/OIDC integration and avoid stale user-guide assumptions |
 
-Current Phase 1 target baseline as of 2026-08-17:
+Current Phase 1 target baseline as of 2026-08-25:
 
 | Component | Target |
 |---|---|
@@ -1824,6 +1826,8 @@ Current Phase 1 target baseline as of 2026-08-17:
 | FreeIPA | approved package stream from the selected Linux distribution, pinned by repository/channel and package version in the environment version matrix |
 
 Spark 4.2.0 is treated as preview and is not the Phase 1 production target until it becomes a stable release and the Iceberg runtime, Airflow Spark provider, Trino connector, and verification suites are updated together.
+
+Airflow 3.3.1's official Python 3.14 constraints still select Spark provider 6.3.1, Amazon provider 9.34.0 and boto3 1.43.56. Spark provider 6.3.2 and Amazon provider 9.35.0 were released on 2026-08-23. They remain upgrade candidates, not piecemeal replacements: promotion requires a regenerated dependency lock plus image, import, Spark-submission, landing-sensor and public-API regression evidence.
 
 No implementation increment should be signed off with floating container tags, unverified compatibility assumptions, or examples copied from quickstarts without adapting them to the Stratus security and QA model.
 

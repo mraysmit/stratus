@@ -4,6 +4,10 @@
 
 **Later stage:** Production deployment hardening and readiness.
 
+**Document classification:** Accepted active decision. This is not an archived progress report;
+the measured trigger evidence is historical, while the runtime assembly and validation-tier rules
+remain current.
+
 ## 1. Status and decision
 
 Status: **implemented and accepted for development on 2026-08-22**.
@@ -121,6 +125,11 @@ These are objectives to be measured on the reference host, not reasons to hide
 work or skip assertions. A budget breach fails the performance review and records
 the slow phase separately from functional acceptance.
 
+The later warm offline run of 65.475 seconds exceeded the under-60-second objective. Functional
+acceptance remains valid, but the budget is not marked met; profiling and narrower routine feedback
+remain required. The roughly 49-minute canonical Airflow suite is release/gate evidence and must
+not be used as the inner development loop.
+
 The lifecycle and Spark-submission tiers must emit phase timings. Tests should
 share a suite-scoped environment where isolation permits it and use unique run
 identifiers and tables rather than restarting Spark, Ceph, Polaris, or Airflow for
@@ -145,6 +154,40 @@ every trivial assertion.
   retry/alert, Deadline Alert, and public-API positive/fail-closed scenarios pass;
   the final 420.772-second full-stack run also passed independent side-effect,
   exact cleanup, secret, and zero-remaining-container checks.
+- `P1-4.3-V2`: in progress from 2026-08-25. Promotion becomes an explicit Airflow
+  task while each writer rechecks the same evidence; fresh live task-state proof is required.
+
+The 2026-08-25 provider audit found Spark provider 6.3.2 and Amazon provider 9.35.0,
+both released on 2026-08-23. Airflow 3.3.1's official Python 3.14 constraints still
+select 6.3.1, 9.34.0 and boto3 1.43.56. Stratus retains that tested set until an
+upgrade candidate passes a regenerated lock plus image, provider, Spark-submission,
+landing-sensor and REST verification.
+
+### 2026-08-25 stale-wheelhouse finding
+
+A rebuild attempt found that the ignored local wheelhouse still held the superseded full
+`pyspark-4.1.3.tar.gz` (455,504,008 bytes, SHA-256 `b600238e...`) while the tracked lock required
+`pyspark-client==4.1.3` (SHA-256 `ff687ddd...`). Because the build checked only the wheelhouse's
+self-generated manifest, this stale but internally consistent cache passed and produced a 458.59 MB
+host context. The upstream `pyspark-client` artifact is 1.6 MB; it is distinct from the optional
+455.5 MB `pyspark` distribution.
+
+The resolver now stages downloads in a temporary directory, disables unnecessary PEP 517 build
+isolation for the locked source archive, verifies all hashes, and atomically swaps the wheelhouse
+only after success. The build now performs an offline `pip --dry-run` against `requirements.lock`
+before sending any context. The bad cache fails this check in 6.7 seconds. A refreshed resolution
+completed in 33.2 seconds and restored a 9,931,122-byte wheelhouse; the next Docker build transferred
+the 9.93 MB context in 1.2 seconds.
+
+The candidate image did not complete because Docker's first pull of the digest-pinned Spark OCI
+layer ended in an external short read after 541 seconds at 420,930,690 of 463,020,878 bytes. No
+candidate image or new live acceptance claim was produced. Image smoke, DAG registry and V2 live
+proofs remain pending until that immutable layer can be fetched successfully.
+
+After a later registry DNS failure and a pinned pull that made no terminal progress, an ephemeral
+read-only Airflow 3.3.1 container imported both changed DAGs using the verified local provider
+wheels. The resulting task IDs and edges matched the explicit-gate design. This is useful parse
+evidence only; it is not a successful candidate-image build or deployed Airflow registry result.
 
 The Java policy remains Java 21 for Stratus-owned builds and Spark/Airflow
 runtimes. Component-mandated exceptions, including the selected Trino release's
@@ -160,4 +203,8 @@ Java requirement, remain explicit and independently recorded.
   https://hub.docker.com/r/apache/spark/tags
 - Apache Spark 4.1.3 documentation:
   https://spark.apache.org/docs/4.1.3/
+- PyPI `pyspark-client` 4.1.3 artifact metadata:
+  https://pypi.org/project/pyspark-client/4.1.3/
+- PyPI full `pyspark` 4.1.3 artifact metadata:
+  https://pypi.org/project/pyspark/4.1.3/
 

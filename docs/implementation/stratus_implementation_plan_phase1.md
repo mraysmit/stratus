@@ -106,7 +106,7 @@ Evidence should be durable enough that another engineer can understand what pass
 
 ### Phase 1 Work-Package Tracker
 
-The rows below are portfolio-level parent work packages. Each owning increment document decomposes its parent IDs into shared (`S`), developer (`D`), production (`P`), verification (`V`), recovery (`R`), and gate (`G`) child tasks with deliverable paths and gate mappings. The execution sources of truth are the Implementation Task Track sections in [Increment 1](ceph_storage.md#17-implementation-task-track), [Increment 2](iceberg_polaris_catalog.md#12-implementation-task-track), [Increment 3](spark_compute.md#12-implementation-task-track), [Increment 4](airflow_orchestration.md#15-implementation-task-track), [Increment 5](trino_query.md#13-implementation-task-track), [Increment 6](atlas_ranger_governance.md#15-implementation-task-track), and [Increment 7](freeipa_keycloak_identity.md#16-implementation-task-track). This table remains the portfolio roll-up.
+The rows below are portfolio-level parent work packages. Each owning increment document decomposes its parent IDs into shared (`S`), developer (`D`), production (`P`), verification (`V`), recovery (`R`), and gate (`G`) child tasks with deliverable paths and gate mappings. The execution sources of truth are the Implementation Task Track sections in [Increment 1](ceph_storage.md#17-implementation-task-track), [Increment 2](iceberg_polaris_catalog.md#12-implementation-task-track), [Increment 3](spark_compute.md#12-implementation-task-track), [Increment 4](airflow_orchestration.md#implementation-task-track), [Increment 5](trino_query.md#13-implementation-task-track), [Increment 6](atlas_ranger_governance.md#15-implementation-task-track), and [Increment 7](freeipa_keycloak_identity.md#16-implementation-task-track). This table remains the portfolio roll-up.
 
 | ID | Work package | Owner | Depends on | Exit evidence | Accepted by | Status |
 |---|---|---|---|---|---|---|
@@ -131,8 +131,8 @@ The rows below are portfolio-level parent work packages. Each owning increment d
 | P1-3.6 | Spark maintenance and lineage payloads | Data engineering owner | P1-3.5 development accepted | Metadata-driven maintenance run evidence and logged lineage payloads for each job | Data platform owner | Development accepted 2026-08-09: maintenance metrics, retention protection and lineage payloads are proven; production event-history and telemetry export are deferred to `P1-3.6-P1` and `P1-3.6-P2` |
 | P1-4.1 | Airflow platform deployment | Operations owner | P1-3 developer gate accepted | Airflow services and PostgreSQL metadata database healthy; DAG directory/version recorded | Platform owner | Development accepted 2026-08-22: `P1-4.1-S2` produced the pinned OCI-stage image with a 9.93 MB context, smoke and zero-Critical scan evidence; `P1-4.1-D1` passed two LocalExecutor/PostgreSQL lifecycle cycles. Registry publication remains deferred to production hardening. See [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
 | P1-4.2 | Spark submission from Airflow | Operations owner | P1-4.1, P1-3.1 | Airflow task submits a Spark job with approved service credentials | Data engineering owner | Development accepted 2026-08-22 (`P1-4.2-D1`): immutable DAG and packaged Java job completed distributed Spark work plus Polaris/Ceph Iceberg create/write/read/drop; connection, input-hash, timing and secret-redaction checks passed. See [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md) |
-| P1-4.3 | Batch pipeline DAGs | Data engineering owner | P1-4.2 | Ingestion, bronze-to-silver, and silver-to-gold DAG run evidence with run IDs | Data owner | Development accepted 2026-08-24 (`P1-4.3-V1`, `P1-4.G-D`): canonical run `airflow-development-acceptance-20260824T103411Z` passed all offline, image, lifecycle, registry, alert, provider, Spark, pipeline, maintenance and public-API phases in 2,975.509 seconds, repeated 294 offline tests, performed exact cleanup, and left zero Stratus containers. The accepted D1 matrix and D2 manifest are in [`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md). Increment 5 development engineering is unblocked |
-| P1-4.4 | Quality gates in orchestration | Data engineering owner | P1-4.3, P1-3.5 | DAG success path and deliberate quality-failure halt evidence | Data owner | Development behavior verified 2026-08-24: bronze-to-silver and silver-to-gold passed accepted promotion and deliberate blocking/no-write paths with independent verification; final public-API evidence also required the blocked transform to fail on attempt one, its downstream quality task to remain unexecuted, and the silver target to remain absent |
+| P1-4.3 | Batch pipeline DAGs | Data engineering owner | P1-4.2 | Ingestion, bronze-to-silver, and silver-to-gold DAG run evidence with run IDs | Data owner | `P1-4.3-V1` remains accepted point-in-time evidence from 2026-08-24. `P1-4.3-V2` is in progress from 2026-08-25: promotion is now an explicit Airflow task before each governed writer, with the writer retaining a defence-in-depth recheck; fresh offline, parse, focused-live and API task-state evidence is required before V2 supersedes V1. See [`ADR-P1-007`](../decisions/ADR-P1-007-airflow-promotion-gate-boundary.md) and the [dated V1 gate](../../platform/airflow/developer-gate-20260824.md) |
+| P1-4.4 | Quality gates in orchestration | Data engineering owner | P1-4.3, P1-3.5 | DAG success path and deliberate quality-failure halt evidence | Data owner | V1 behavior was verified 2026-08-24. V2 requires the explicit gate task to fail, all downstream writers/checks to remain `upstream_failed`, and independent proof that the target was not created or changed |
 | P1-4.5 | Maintenance DAG and alerts | Operations owner | P1-4.3, P1-3.6 | Metadata-threshold maintenance DAG evidence, task failure alert, Deadline Alert evidence | Operations owner | Development behavior complete: metadata-policy skip and three-to-one compaction passed as run `airflow-table-maintenance-20260823T113447Z`; retry recovery and one terminal failure alert passed as `airflow-retry-alert-20260824T040947Z`; on-time suppression and exactly one native Deadline Alert after a deliberate 12-second breach passed as `airflow-deadline-alert-20260824T051734Z`. Structured fields, numeric timings, secret checks and cleanup passed |
 | P1-5.1 | Trino cluster deployment | Query platform owner | P1-4 accepted | Trino coordinator/worker health, version pin, configuration snapshot | Platform owner | Not started |
 | P1-5.2 | Trino Polaris and Ceph access | Query platform owner | P1-5.1, P1-2.3 | Trino resolves Polaris tables and reads Ceph-backed Iceberg data through approved credentials | Data platform owner | Not started |
@@ -363,6 +363,9 @@ Data flows from a raw source file through bronze, silver, and gold Iceberg table
 
 ## 7. Increment 4 — Orchestration
 
+Development accepted 2026-08-24 at the `P1-4.G-D` gate for the dated V1 state;
+the 2026-08-25 V2 promotion-task change requires its own superseding evidence.
+
 ### What we are building
 Apache Airflow — the scheduler and control-plane for batch workflows.
 
@@ -375,8 +378,8 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
 - Airflow configured with service account credentials to submit Spark jobs
 - DAGs created for:
   - **Ingestion DAG** — detect new files in landing zone → run ingestion job → run quality checks → promote to bronze
-  - **Bronze-to-silver DAG** — run transform job → run quality checks → run promotion gate → promote to silver
-  - **Silver-to-gold DAG** — run materialisation job → run quality checks → promote to gold
+- **Bronze-to-silver DAG** — evaluate the persisted bronze quality gate → run the correlated transform → record silver quality
+- **Silver-to-gold DAG** — record silver quality → evaluate its explicit promotion gate → run materialisation → record gold quality
   - **Maintenance DAG** — scheduled trigger that queries Iceberg metadata tables, evaluates per-table thresholds, emits alerts for breached thresholds, and then runs snapshot expiry, compaction, delete-file cleanup, or orphan cleanup as policy requires
 - Each DAG emits structured success/failure events
 - Airflow alerts configured for job failure and Deadline Alert breach
@@ -387,8 +390,8 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
 |---|---|
 | Airflow reachable | Airflow web UI accessible; DAGs listed |
 | Ingestion DAG | Triggered by new file in landing zone; completes with bronze table updated |
-| Bronze-to-silver DAG | Runs on schedule; silver table updated; quality gate enforced |
-| Silver-to-gold DAG | Runs on schedule; gold table updated |
+| Bronze-to-silver DAG | API/manual trigger updates silver only after the explicit quality gate passes |
+| Silver-to-gold DAG | API/manual trigger updates gold only after silver quality and the explicit gate pass |
 | Promotion gate in DAG | A deliberately failed quality check halts the DAG at the gate task; downstream tasks do not run |
 | Maintenance DAG | Snapshot count reduced on active tables after run |
 | Retry behaviour | A transiently failed task retries and succeeds on second attempt |
@@ -396,7 +399,7 @@ Spark jobs exist but nothing runs them on a schedule or manages dependencies bet
 | Deadline Alert | A DAG that exceeds its defined timing expectation triggers a Deadline Alert |
 
 ### Demonstrated outcome
-The batch pipeline runs on a schedule without manual intervention. Quality gates are enforced automatically. A failed job alerts rather than silently producing bad data.
+Landing ingestion and maintenance have developer schedules. Bronze-to-silver and silver-to-gold are deliberately API/manual-triggered until the production cadence, backfill and overlap policy is approved. Quality gates fail closed and a failed job emits structured alert evidence rather than silently producing bad data.
 
 ---
 

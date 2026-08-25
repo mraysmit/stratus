@@ -114,6 +114,8 @@ final class AirflowPipelineDagTest {
     private static final String TABLE_MAINTENANCE_DAG_ID = "stratus_table_maintenance";
     private static final String INGESTION_CLASS = "dev.stratus.jobs.spark.IngestionJob";
     private static final String QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob";
+    private static final String PROMOTION_GATE_CLASS =
+            "dev.stratus.jobs.spark.PromotionGate";
     private static final String TRANSFORM_CLASS = "dev.stratus.jobs.spark.TransformJob";
     private static final String MATERIALISATION_CLASS =
             "dev.stratus.jobs.spark.MaterialisationJob";
@@ -233,6 +235,7 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains("max_active_runs=1")),
                 () -> assertTrue(dag.contains(TRANSFORM_CLASS)),
                 () -> assertTrue(dag.contains(QUALITY_CLASS)),
+                () -> assertTrue(dag.contains(PROMOTION_GATE_CLASS)),
                 () -> assertTrue(dag.contains(BRONZE_TABLE)),
                 () -> assertTrue(dag.contains(SILVER_TABLE)),
                 () -> assertTrue(dag.contains("bronze_table")),
@@ -242,11 +245,16 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains("pipeline_run_id")),
                 () -> assertTrue(dag.contains("--qualityRunId"),
                         "TransformJob must enforce the recorded bronze verdict before writing"),
+                () -> assertTrue(dag.contains("task_id=\"evaluate_bronze_promotion\""),
+                        "Airflow must expose the bronze promotion decision as its own task"),
+                () -> assertTrue(dag.contains("\"--runId\", QUALITY_RUN_ID")),
+                () -> assertTrue(dag.contains("\"--targetTable\", SOURCE_TABLE")),
                 () -> assertTrue(dag.contains("--sourceBatch"),
                         "Each run must transform only the correlated bronze delivery"),
                 () -> assertTrue(dag.contains("--businessKey")),
                 () -> assertTrue(dag.contains("--sequenceColumn")),
-                () -> assertTrue(dag.contains("run_silver_transform >> run_silver_quality")),
+                () -> assertTrue(dag.contains("evaluate_bronze_promotion "
+                        + ">> run_silver_transform >> run_silver_quality")),
                 () -> assertTrue(dag.contains("on_failure_callback=stratus_failure_alert")));
     }
 
@@ -261,6 +269,7 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains(SILVER_TO_GOLD_RETRIES_ENV)),
                 () -> assertTrue(dag.contains("max_active_runs=1")),
                 () -> assertTrue(dag.contains(QUALITY_CLASS)),
+                () -> assertTrue(dag.contains(PROMOTION_GATE_CLASS)),
                 () -> assertTrue(dag.contains(MATERIALISATION_CLASS)),
                 () -> assertTrue(dag.contains(SILVER_TABLE)),
                 () -> assertTrue(dag.contains(GOLD_TABLE)),
@@ -270,11 +279,15 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains("pipeline_run_id")),
                 () -> assertTrue(dag.contains("--qualityRunId"),
                         "MaterialisationJob must enforce silver quality before writing gold"),
+                () -> assertTrue(dag.contains("task_id=\"evaluate_silver_promotion\""),
+                        "Airflow must expose the silver promotion decision as its own task"),
+                () -> assertTrue(dag.contains("\"--runId\", QUALITY_RUN_ID")),
+                () -> assertTrue(dag.contains("\"--targetTable\", SOURCE_TABLE")),
                 () -> assertTrue(dag.contains("--sourceTables")),
                 () -> assertTrue(dag.contains("--sql")),
                 () -> assertTrue(dag.contains("customer_count")),
-                () -> assertTrue(dag.contains("run_silver_quality >> run_gold_materialisation "
-                        + ">> run_gold_quality")),
+                () -> assertTrue(dag.contains("run_silver_quality >> evaluate_silver_promotion "
+                        + ">> run_gold_materialisation >> run_gold_quality")),
                 () -> assertTrue(dag.contains("on_failure_callback=stratus_failure_alert")));
     }
 
