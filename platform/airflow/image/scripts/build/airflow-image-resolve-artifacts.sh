@@ -1,5 +1,42 @@
 #!/usr/bin/env bash
-# Resolve and verify every non-container input for the Stratus Airflow image.
+#
+# Stratus Airflow image artifact resolver
+#
+# Purpose:
+#   Resolve every non-container input required by the Airflow image under the exact
+#   digest-pinned Airflow/Python runtime. Downloads are staged and verified before
+#   they may replace the active wheelhouse used by image assembly.
+#
+# Inputs:
+#   - artifact-lock.properties for the Airflow image, constraints URL and hashes;
+#   - requirements.lock for exact Python distributions and SHA-256 hashes;
+#   - HTTPS access to the locked constraints URL and registry access when the pinned
+#     Airflow image is not already local; and
+#   - Bash, Docker, curl and the standard GNU/MSYS utilities used below.
+#   There are no positional arguments. Invocation must be exclusive; concurrent
+#   resolvers against the same artifacts directory are not supported.
+#
+# Outputs:
+#   - the verified constraints file under platform/airflow/image/artifacts/;
+#   - artifacts/wheelhouse containing only the newly selected Python artifacts;
+#   - wheelhouse/resolved-artifacts.sha256 covering every selected file;
+#   - structured timestamped resolution and recovery events.
+#
+# Failure and recovery:
+#   A failed download, constraint check, hash check or candidate promotion exits
+#   non-zero. The active wheelhouse is retained until the candidate is complete. If
+#   its final move fails, the previous wheelhouse is restored immediately; after an
+#   abrupt interruption, cleanup or the next invocation restores/finalizes the known
+#   promotion state before new work. Temporary and backup paths remain strictly below
+#   this image's artifacts directory.
+#
+# Usage:
+#   bash platform/airflow/image/scripts/build/airflow-image-resolve-artifacts.sh
+#
+# Maintenance:
+#   Preserve staged resolution, exact hashes, the bounded artifacts-directory move
+#   targets and both rollback paths. Do not resolve full PySpark or a host-side Spark
+#   archive. Extend the behavioral tests before changing promotion semantics.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,6 +44,8 @@ IMAGE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LOCK_FILE="${IMAGE_DIR}/artifact-lock.properties"
 ARTIFACT_DIR="${IMAGE_DIR}/artifacts"
 WHEELHOUSE_DIR="${ARTIFACT_DIR}/wheelhouse"
+PREVIOUS_DIR="${ARTIFACT_DIR}/wheelhouse.previous"
+source "${IMAGE_DIR}/scripts/lib/airflow-wheelhouse-integrity.sh"
 STAGING_DIR=""
 START_NS="$(date +%s%N)"
 
@@ -20,9 +59,15 @@ elapsed_ms() {
 }
 
 cleanup() {
+  local original_exit=$?
+  if ! recover_wheelhouse_promotion "${WHEELHOUSE_DIR}" "${PREVIOUS_DIR}"; then
+    printf 'event=wheelhouse_cleanup_recovery_failed active=%s previous=%s\n' \
+      "${WHEELHOUSE_DIR}" "${PREVIOUS_DIR}" >&2
+  fi
   if [[ -n "${STAGING_DIR}" && -d "${STAGING_DIR}" ]]; then
     rm -rf -- "${STAGING_DIR}"
   fi
+  return "${original_exit}"
 }
 
 trap cleanup EXIT
@@ -51,6 +96,7 @@ CONSTRAINTS_NAME="$(property constraints.name)"
 CONSTRAINTS_URL="$(property constraints.url)"
 CONSTRAINTS_SHA256="$(property constraints.sha256)"
 mkdir -p "${ARTIFACT_DIR}"
+recover_wheelhouse_promotion "${WHEELHOUSE_DIR}" "${PREVIOUS_DIR}"
 log INFO resolution_started "airflow_image=${AIRFLOW_IMAGE}@${AIRFLOW_DIGEST}"
 
 step_ns="$(date +%s%N)"
@@ -94,13 +140,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --user 0:0 --entrypoint /bin/bash \
     | xargs -0 sha256sum > resolved-artifacts.sha256
   sha256sum --check resolved-artifacts.sha256
 )
-PREVIOUS_DIR="${ARTIFACT_DIR}/wheelhouse.previous"
-rm -rf -- "${PREVIOUS_DIR}"
-if [[ -d "${WHEELHOUSE_DIR}" ]]; then
-  mv "${WHEELHOUSE_DIR}" "${PREVIOUS_DIR}"
-fi
-mv "${STAGING_DIR}" "${WHEELHOUSE_DIR}"
+promote_wheelhouse_candidate "${WHEELHOUSE_DIR}" "${STAGING_DIR}" "${PREVIOUS_DIR}"
 STAGING_DIR=""
-rm -rf -- "${PREVIOUS_DIR}"
 log INFO python_artifacts_verified "duration_ms=$(elapsed_ms "${step_ns}") count=$(find "${WHEELHOUSE_DIR}" -maxdepth 1 -type f ! -name resolved-artifacts.sha256 | wc -l | tr -d ' ')"
 log INFO resolution_completed "duration_ms=$(elapsed_ms "${START_NS}") artifact_dir=${ARTIFACT_DIR}"

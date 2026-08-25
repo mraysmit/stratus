@@ -25,11 +25,13 @@ The current `P1-4.1-S2` image boundary is split into three operations:
 3. `image/scripts/tests/airflow-image-acceptance-test.sh` orchestrates the smoke
    and daemon-isolated vulnerability scan and records phase timings.
 
-The resolver stages and hash-verifies a complete candidate wheelhouse before atomically replacing
-the active cache. The build independently performs an offline lock-to-wheelhouse dry run, preventing
-a stale self-consistent artifact manifest from reintroducing full PySpark or another superseded
-package. This guard was added after a 2026-08-25 validation attempt caught a 455.5 MB stale PySpark
-archive before image assembly.
+The resolver stages and hash-verifies a complete candidate wheelhouse before replacing the active
+cache. Replacement retains and automatically restores the previous cache if candidate promotion
+fails; the next invocation also recovers an interrupted replacement before doing new work. The
+build independently performs an offline lock-to-wheelhouse dry run and requires the complete
+wheelhouse file set to equal the artifacts selected by pip. Missing and unexpected files therefore
+fail before Docker receives the build context. These guards were added after a 2026-08-25
+validation attempt caught a 455.5 MB stale PySpark archive before image assembly.
 
 Run the current development image acceptance from any directory with Bash 4+:
 

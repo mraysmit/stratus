@@ -45,6 +45,8 @@ import org.junit.jupiter.api.Test;
  *   <li>The approved Airflow/provider/Python/Spark/Java versions agree across dependency intent,
  *       exact hash locks, image inputs, and verification scripts.</li>
  *   <li>Image assembly consumes prepared artifacts and cannot download mutable dependencies.</li>
+ *   <li>The complete wheelhouse equals pip's offline selection, with no unexpected archives.</li>
+ *   <li>Candidate promotion restores or recovers the previous wheelhouse when replacement fails.</li>
  *   <li>Smoke and scan scripts retain the checks needed to detect runtime or hardening regressions.</li>
  *   <li>The recorded vulnerability waiver is bound to a specific image, scope, finding count, and
  *       expiry, and the implementation documents preserve the same acceptance boundary.</li>
@@ -119,6 +121,8 @@ final class AirflowArtifactBaselineTest {
             "scripts", "build", "airflow-image-resolve-artifacts.sh");
     private static final Path IMAGE_BUILD_PATH = Path.of(
             "scripts", "build", "airflow-image-build.sh");
+    private static final Path WHEELHOUSE_INTEGRITY_LIBRARY_PATH = Path.of(
+            "scripts", "lib", "airflow-wheelhouse-integrity.sh");
     private static final Path IMAGE_SMOKE_TEST_PATH = Path.of(
             "scripts", "tests", "airflow-image-smoke-test.sh");
     private static final Path VULNERABILITY_SCAN_TEST_PATH = Path.of(
@@ -191,9 +195,18 @@ final class AirflowArtifactBaselineTest {
                 () -> assertFile(IMAGE_DOCKERIGNORE_PATH),
                 () -> assertFile(ARTIFACT_RESOLVER_PATH),
                 () -> assertFile(IMAGE_BUILD_PATH),
+                () -> assertFile(WHEELHOUSE_INTEGRITY_LIBRARY_PATH),
                 () -> assertFile(IMAGE_SMOKE_TEST_PATH),
                 () -> assertFile(VULNERABILITY_SCAN_TEST_PATH),
                 () -> assertFile(IMAGE_ACCEPTANCE_TEST_PATH));
+    }
+
+    @Test
+    void imageBuildShellScriptsDocumentTheirOperationalContract() {
+        assertAll(
+                () -> assertDocumentedShellHeader(ARTIFACT_RESOLVER_PATH),
+                () -> assertDocumentedShellHeader(IMAGE_BUILD_PATH),
+                () -> assertDocumentedShellHeader(WHEELHOUSE_INTEGRITY_LIBRARY_PATH));
     }
 
     @Test
@@ -310,8 +323,8 @@ final class AirflowArtifactBaselineTest {
                         "Resolution must stage a complete candidate before replacing the active wheelhouse"),
                 () -> assertTrue(resolver.contains("--no-build-isolation"),
                         "Downloading a locked source archive must not resolve temporary build dependencies"),
-                () -> assertTrue(resolver.contains("mv \"${STAGING_DIR}\" \"${WHEELHOUSE_DIR}\""),
-                        "Only a completely verified candidate may become the active wheelhouse"),
+                () -> assertTrue(resolver.contains("promote_wheelhouse_candidate"),
+                        "Only a verified candidate may replace the active wheelhouse with rollback"),
                 () -> assertTrue(resolver.contains("sha256sum --check")),
                 () -> assertFalse(resolver.contains("sha512sum"),
                         "The resolver must not download or hash a Spark archive"),
@@ -342,8 +355,10 @@ final class AirflowArtifactBaselineTest {
                                 && build.contains("--no-index")
                                 && build.contains("--no-build-isolation")
                                 && build.contains("--require-hashes")
-                                && build.contains("requirements.lock"),
-                        "Assembly must reject a self-consistent stale wheelhouse that no longer satisfies the lock"),
+                                && build.contains("requirements.lock")
+                                && build.contains("pip_report_selected_artifacts")
+                                && build.contains("verify_wheelhouse_exact_file_set"),
+                        "Assembly must reject missing and unexpected wheelhouse artifacts"),
                 () -> assertTrue(scan.contains("scan-archive-image-id.txt")),
                 () -> assertTrue(scan.contains("trap cleanup EXIT")),
                 () -> assertTrue(scan.contains("trap 'exit 130' INT")),
@@ -442,6 +457,25 @@ final class AirflowArtifactBaselineTest {
     private static void assertFile(Path relative) {
         assertTrue(Files.isRegularFile(IMAGE_ROOT.resolve(relative)),
                 () -> "Missing Airflow image artifact: " + relative);
+    }
+
+    private static void assertDocumentedShellHeader(Path relative) {
+        String script = read(relative);
+        assertAll(
+                () -> assertTrue(script.startsWith("#!/usr/bin/env bash\n"),
+                        () -> relative + " must retain its Bash interpreter declaration"),
+                () -> assertTrue(script.contains("# Purpose:"),
+                        () -> relative + " must explain why it exists"),
+                () -> assertTrue(script.contains("# Inputs:"),
+                        () -> relative + " must document files, arguments and environment inputs"),
+                () -> assertTrue(script.contains("# Outputs:"),
+                        () -> relative + " must document files and state it creates"),
+                () -> assertTrue(script.contains("# Failure and recovery:"),
+                        () -> relative + " must describe its fail-closed and recovery behavior"),
+                () -> assertTrue(script.contains("# Usage:"),
+                        () -> relative + " must show how it is invoked"),
+                () -> assertTrue(script.contains("# Maintenance:"),
+                        () -> relative + " must identify the contract future changes must preserve"));
     }
 
     private static String read(Path relative) {

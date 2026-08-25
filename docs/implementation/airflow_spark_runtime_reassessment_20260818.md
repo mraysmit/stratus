@@ -173,13 +173,37 @@ host context. The upstream `pyspark-client` artifact is 1.6 MB; it is distinct f
 455.5 MB `pyspark` distribution.
 
 The resolver now stages downloads in a temporary directory, disables unnecessary PEP 517 build
-isolation for the locked source archive, verifies all hashes, and atomically swaps the wheelhouse
-only after success. The build now performs an offline `pip --dry-run` against `requirements.lock`
-before sending any context. The bad cache fails this check in 6.7 seconds. A refreshed resolution
+isolation for the locked source archive, verifies all hashes, and promotes the wheelhouse only
+after success, with immediate rollback and next-invocation recovery for an interrupted promotion.
+The build now performs an offline `pip --dry-run` against `requirements.lock` and requires the
+wheelhouse to contain exactly the artifacts selected by that report before sending any context.
+The bad cache fails this check in 6.7 seconds. A refreshed resolution
 completed in 33.2 seconds and restored a 9,931,122-byte wheelhouse; the next Docker build transferred
 the 9.93 MB context in 1.2 seconds.
 
-The candidate image did not complete because Docker's first pull of the digest-pinned Spark OCI
+A same-day follow-up review found two limits in the first hardening pass. Pip's dry run rejected a
+cache that lacked a locked requirement, but did not by itself reject an additional unreferenced
+archive. The directory replacement also used two individually atomic moves without restoring the
+previous directory if the second move failed. Four behavioral tests were added first and failed for
+the absent exact-set, rollback and recovery behavior. The implementation now compares every
+wheelhouse filename with pip's offline selection, restores the previous directory when candidate
+promotion fails, and recovers an interrupted promotion when the resolver next starts. The focused
+suite passed all 13 artifact tests, the pinned Airflow container selected and verified exactly seven
+current artifacts, and the final 12-module offline reactor passed 305 tests with zero failures,
+errors or skips. This is build-contract evidence; it does not supersede the pending image and live
+V2 acceptance work below.
+
+After both digest-pinned source images became locally available, the corrected checked-in build
+completed on 2026-08-25 in 7,632 ms. It rechecked all seven hashes, reported
+`wheelhouse_file_set_verified artifact_count=7`, retained a 9,931,122-byte wheelhouse, and produced
+local development image ID
+`sha256:27f05eb17bd3ad3504faf1c53089085ddd6e31fae48c2c47716b8bc3342f6a91`. The checked-in smoke
+test then passed in 17,951 ms: Airflow 3.3.1, Python 3.14, both providers, boto3, aiohttp,
+`pyspark-client`, zstandard, Java 21 and Spark 4.1.3 matched the lock; pip reported no broken
+requirements; and full PySpark, LiteLLM, Ray, the Google provider, Derby server JAR, Docker client
+and unused package-manager commands remained absent.
+
+The earlier candidate attempt did not complete because Docker's first pull of the digest-pinned Spark OCI
 layer ended in an external short read after 541 seconds at 420,930,690 of 463,020,878 bytes. No
 candidate image or new live acceptance claim was produced. Image smoke, DAG registry and V2 live
 proofs remain pending until that immutable layer can be fetched successfully.
