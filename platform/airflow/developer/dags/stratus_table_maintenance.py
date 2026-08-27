@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from airflow import DAG
 
 from stratus_alerts import stratus_failure_alert
-from stratus_common import spark_submit_task
+from stratus_common import spark_submit_task, test_isolated_schedule
 
 DAG_ID = "stratus_table_maintenance"
 DEFAULT_TABLE = "stratus.bronze.customers"
@@ -31,7 +31,7 @@ with DAG(
     description="Apply versioned metadata-table maintenance policy",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    schedule="@daily",
+    schedule=test_isolated_schedule("@daily"),
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "maintenance", "iceberg"],

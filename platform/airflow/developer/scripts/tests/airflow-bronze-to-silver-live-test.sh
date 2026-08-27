@@ -102,18 +102,7 @@ cleanup() {
 trap cleanup EXIT
 
 configure_protected_connections() {
-  compose exec -T airflow-scheduler airflow connections delete spark_default >/dev/null 2>&1 || true
-  compose exec -T airflow-scheduler airflow connections add spark_default \
-    --conn-type spark --conn-host spark://spark-master.stratus.local --conn-port 7077 >/dev/null
-  compose exec -T airflow-scheduler airflow connections delete "$LANDING_CONNECTION_ID" \
-    >/dev/null 2>&1 || true
-  compose exec -T airflow-scheduler bash -c \
-    'airflow connections add stratus_landing --conn-type aws \
-      --conn-login "$AIRFLOW_LANDING_RGW_ACCESS_KEY" \
-      --conn-password "$AIRFLOW_LANDING_RGW_SECRET_KEY" \
-      --conn-extra "{\"endpoint_url\":\"$CEPH_RGW_ENDPOINT\",\"verify\":\"/opt/stratus/certs/stratus-ca.crt\",\"config_kwargs\":{\"s3\":{\"addressing_style\":\"path\"}}}"' >/dev/null
-  compose exec -T airflow-scheduler airflow variables set \
-    "$LANDING_BUCKET_VARIABLE" "$LANDING_BUCKET" >/dev/null
+  verify_protected_connections
 }
 
 stage_bronze() {

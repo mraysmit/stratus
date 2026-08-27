@@ -6,6 +6,7 @@ already-accepted Polaris/Ceph binding. Keeping one operator factory also prevent
 from drifting away from the submission probe that proved this runtime boundary.
 """
 
+import os
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -29,6 +30,12 @@ SPARK_DRIVER_EXTRA_CLASSPATH = ":".join(
 )
 SPARK_EVENT_LOG_DIRECTORY = "file:///opt/airflow/logs/spark-events"
 SPARK_DRIVER_HOST = "airflow-scheduler.stratus.local"
+
+
+def test_isolated_schedule(schedule: str) -> str | None:
+    """Disable automatic schedules only when a live-test overlay requests isolation."""
+    disabled = os.getenv("STRATUS_DISABLE_DAG_SCHEDULES", "false").strip().lower()
+    return None if disabled in {"1", "true", "yes"} else schedule
 
 SPARK_SUBMISSION_CONF = {
     "spark.driver.host": SPARK_DRIVER_HOST,

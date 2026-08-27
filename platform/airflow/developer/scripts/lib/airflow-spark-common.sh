@@ -4,6 +4,11 @@ set -euo pipefail
 # Date: 2026-08-22
 source "$(dirname "${BASH_SOURCE[0]}")/airflow-compose-common.sh"
 
+# Tests invoke DAGs explicitly and must not compete with the landing and maintenance schedules.
+# Operators and demos that do not use this test helper retain the schedules declared in DAG source.
+STRATUS_DISABLE_DAG_SCHEDULES="${STRATUS_DISABLE_DAG_SCHEDULES:-true}"
+export STRATUS_DISABLE_DAG_SCHEDULES
+
 SPARK_HARNESS_DIR="$REPO_DIR/platform/spark/compose-cluster"
 CEPH_HARNESS_DIR="$REPO_DIR/platform/ceph/compose-cluster"
 POLARIS_HARNESS_DIR="$REPO_DIR/platform/polaris/compose-service"
@@ -156,4 +161,12 @@ require_spark_cluster() {
       "$REPO_DIR/jobs/spark/target/stratus-spark-jobs-1.0-SNAPSHOT.jar"; do
     [[ -r "$required_file" ]] || fail "Required Spark submission input is absent: $required_file"
   done
+}
+
+verify_protected_connections() {
+  compose exec -T airflow-scheduler bash -c '
+    test -n "$AIRFLOW_CONN_SPARK_DEFAULT"
+    test -n "$AIRFLOW_CONN_STRATUS_LANDING"
+    test -n "$AIRFLOW_VAR_STRATUS_LANDING_BUCKET"
+  '
 }

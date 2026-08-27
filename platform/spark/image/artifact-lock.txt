@@ -20,5 +20,5 @@ db4b55f24ad1b4e70f17eb1717a4de76a8dadc5a27d764be7c44ff67b2c1c677  bundle-2.35.4.
 6443332781f26a7199009d9517cd1eb013fbf54ca1c9759a2a9e487542b1d52a  hadoop-client-api-3.4.3.jar
 bd20267b0555766ae84697dd888f074ca326d8e2ec3c0008928a6ac2966c67de  hadoop-client-runtime-3.4.3.jar
 40dec251164d1576e000968cd02e56a1125f46b91fb694a06dfa168f1335da48  log4j-slf4j-impl-2.24.3.jar
-8c8e456b08617f2246e998bcf21bf7b53cce616b68dd7cab66a34f8e454a5b7b  stratus-iceberg-aws-runtime-1.0-SNAPSHOT-runtime.jar
+cba9fc27d5ce0fa06fa08f07be3f638db521b10cf0440e47393bec53ac405c2d  stratus-iceberg-aws-runtime-1.0-SNAPSHOT-runtime.jar
 71fb7932f99a727edb23c5a2cb8c6855ac7196fad41aa0669b3998e277165154  wildfly-openssl-2.2.5.Final.jar

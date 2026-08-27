@@ -82,9 +82,7 @@ cleanup() {
 trap cleanup EXIT
 
 configure_protected_connection() {
-  compose exec -T airflow-scheduler airflow connections delete spark_default >/dev/null 2>&1 || true
-  compose exec -T airflow-scheduler airflow connections add spark_default \
-    --conn-type spark --conn-host spark://spark-master.stratus.local --conn-port 7077 >/dev/null
+  verify_protected_connections
 }
 
 log "event=airflow_table_maintenance_suite_started suiteRunId=$suite_run_id dagId=$DAG_ID table=$target_table logLevel=$STRATUS_LOG_LEVEL"

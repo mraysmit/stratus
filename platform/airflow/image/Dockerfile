@@ -23,6 +23,13 @@ COPY --chown=airflow:0 artifacts/wheelhouse/ /opt/stratus/wheelhouse/
 COPY --chown=airflow:0 requirements.lock /opt/stratus/requirements.lock
 COPY --chown=airflow:0 artifact-lock.properties /opt/stratus/artifact-lock.properties
 
+# Docker Desktop preserves the worktree's line endings in COPY input. Normalize
+# the two runtime lock files so a Windows checkout produces the same image as a
+# Linux checkout.
+RUN sed -i 's/\r$//' \
+      /opt/stratus/requirements.lock \
+      /opt/stratus/artifact-lock.properties
+
 ENV JAVA_HOME=/opt/java/openjdk \
     SPARK_HOME=/opt/spark \
     PATH=/opt/java/openjdk/bin:/opt/spark/bin:${PATH}

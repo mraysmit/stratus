@@ -5,18 +5,29 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/airflow-compose-common.sh"
 load_environment
 
+health_components_healthy() {
+  local payload="$1"
+  local compact
+  local component
+  compact="$(tr -d '[:space:]' <<<"$payload")"
+  for component in metadatabase scheduler triggerer dag_processor; do
+    [[ "$compact" == *"\"${component}\":{\"status\":\"healthy\""* ]] || return 1
+  done
+}
+
 endpoint="http://${AIRFLOW_BIND_ADDRESS:-127.0.0.1}:${AIRFLOW_API_PORT:-8088}/api/v2/monitor/health"
 deadline=$((SECONDS + ${AIRFLOW_STARTUP_DEADLINE_SECONDS:-180}))
 health=''
 while (( SECONDS < deadline )); do
   health="$(curl --silent --show-error --max-time 10 "$endpoint" 2>/dev/null || true)"
-  if HEALTH_JSON="$health" python -c 'import json, os, sys; data=json.loads(os.environ["HEALTH_JSON"]); expected=("metadatabase", "scheduler", "triggerer", "dag_processor"); sys.exit(0 if all(data.get(name, {}).get("status") == "healthy" for name in expected) else 1)' 2>/dev/null; then
+  if health_components_healthy "$health"; then
     break
   fi
   sleep 3
 done
 
-HEALTH_JSON="$health" python -c 'import json, os; data=json.loads(os.environ["HEALTH_JSON"]); expected=("metadatabase", "scheduler", "triggerer", "dag_processor"); unhealthy={name:data.get(name) for name in expected if data.get(name, {}).get("status") != "healthy"}; assert not unhealthy, f"Unhealthy Airflow components: {unhealthy}"'
+health_components_healthy "$health" \
+  || fail "Unhealthy Airflow components: $health"
 
 compose exec -T airflow-api-server airflow db check
 compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob --local

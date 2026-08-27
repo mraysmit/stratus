@@ -13,7 +13,7 @@ from airflow import DAG
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 
 from stratus_alerts import stratus_failure_alert
-from stratus_common import spark_submit_task
+from stratus_common import spark_submit_task, test_isolated_schedule
 
 DAG_ID = "stratus_landing_to_bronze"
 LANDING_CONNECTION_ID = "stratus_landing"
@@ -56,7 +56,7 @@ with DAG(
     description="Ingest the dated customer landing object and record bronze quality",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    schedule="*/15 * * * *",
+    schedule=test_isolated_schedule("*/15 * * * *"),
     catchup=False,
     max_active_runs=1,
     tags=["stratus", "ingestion", "bronze"],

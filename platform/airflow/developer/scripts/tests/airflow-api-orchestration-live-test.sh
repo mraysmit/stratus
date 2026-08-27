@@ -193,9 +193,7 @@ run_bronze_verifier() {
 }
 
 configure_airflow() {
-  compose exec -T airflow-scheduler airflow connections delete spark_default >/dev/null 2>&1 || true
-  compose exec -T airflow-scheduler airflow connections add spark_default \
-    --conn-type spark --conn-host spark://spark-master.stratus.local --conn-port 7077 >/dev/null
+  verify_protected_connections
 
   local attempt listing complete
   for attempt in $(seq 1 30); do
