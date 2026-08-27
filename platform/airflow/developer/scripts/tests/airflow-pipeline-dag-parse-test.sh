@@ -34,7 +34,6 @@ trap shutdown_airflow EXIT
 log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=startup status=STARTED"
 phase_started_ms="$(date +%s%3N)"
 bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
-bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
 log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=startup status=SUCCESS elapsedMs=$(elapsed_ms "$phase_started_ms")"
 
 load_environment

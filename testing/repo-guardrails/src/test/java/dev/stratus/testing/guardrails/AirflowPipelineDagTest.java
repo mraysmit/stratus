@@ -194,6 +194,8 @@ final class AirflowPipelineDagTest {
                         "the AWS bundle's legacy SLF4J contract must route into Log4j2"),
                 () -> assertTrue(common.contains("spark.driver.extraClassPath")),
                 () -> assertTrue(common.contains("spark.eventLog.dir")),
+                () -> assertTrue(common.contains("STRATUS_DISABLE_DAG_SCHEDULES")),
+                () -> assertTrue(common.contains("test_isolated_schedule")),
                 () -> assertFalse(common.contains("STRATUS_POLARIS_CLIENT_SECRET")),
                 () -> assertFalse(common.contains("CEPH_RGW_SECRET_KEY")),
                 () -> assertFalse(common.contains("spark://")));
@@ -498,7 +500,8 @@ final class AirflowPipelineDagTest {
         String script = Repo.read(DAG_PARSE_TEST_PATH);
         assertAll(
                 () -> assertTrue(script.contains("airflow-compose-startup.sh")),
-                () -> assertTrue(script.contains("airflow-compose-verify-health.sh")),
+                () -> assertFalse(script.contains("airflow-compose-verify-health.sh"),
+                        "startup already performs the full health gate"),
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
                 () -> assertTrue(script.contains("airflow dags list-import-errors")),
                 () -> assertTrue(script.contains("airflow dags list")),
@@ -518,8 +521,13 @@ final class AirflowPipelineDagTest {
         assertAll(
                 () -> assertTrue(common.contains("fetch_airflow_storage_identity")),
                 () -> assertTrue(common.contains("svc-airflow")),
+                () -> assertTrue(common.contains("verify_protected_connections")),
                 () -> assertTrue(overlay.contains("AIRFLOW_LANDING_RGW_ACCESS_KEY")),
                 () -> assertTrue(overlay.contains("AIRFLOW_LANDING_RGW_SECRET_KEY")),
+                () -> assertTrue(overlay.contains("AIRFLOW_CONN_SPARK_DEFAULT")),
+                () -> assertTrue(overlay.contains("AIRFLOW_CONN_STRATUS_LANDING")),
+                () -> assertTrue(overlay.contains("AIRFLOW_VAR_STRATUS_LANDING_BUCKET")),
+                () -> assertTrue(overlay.contains("STRATUS_DISABLE_DAG_SCHEDULES")),
                 () -> assertTrue(overlay.contains("stratus-ca.crt:ro")),
                 () -> assertTrue(overlay.contains("hadoop-aws.jar:ro")),
                 () -> assertTrue(overlay.contains("aws-sdk-bundle.jar:ro")),
@@ -527,16 +535,11 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(overlay.contains("log4j-slf4j-impl.jar:ro")),
                 () -> assertTrue(script.contains("airflow-compose-startup.sh")),
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
-                () -> assertTrue(script.contains("airflow connections add "
-                        + LANDING_CONNECTION_ID)),
-                () -> assertTrue(script.contains("--conn-port 7077 >/dev/null"),
-                        "connection bootstrap output must not expose connection identifiers"),
-                () -> assertTrue(script.contains("addressing_style\\\":\\\"path\\\"}}}\"' >/dev/null"),
-                        "landing connection bootstrap output must be suppressed"),
+                () -> assertTrue(script.contains("verify_protected_connections")),
+                () -> assertFalse(script.contains("airflow connections add"),
+                        "focused tests must not write environment-backed credentials to metadata"),
                 () -> assertTrue(script.contains("readonly LANDING_BUCKET_VARIABLE=\""
                         + LANDING_BUCKET_VARIABLE + "\"")),
-                () -> assertTrue(script.contains(
-                        "airflow variables set \"$LANDING_BUCKET_VARIABLE\"")),
                 () -> assertTrue(script.contains("readonly DAG_ID=\"" + LANDING_DAG_ID + "\"")),
                 () -> assertTrue(script.contains("airflow dags test \"$DAG_ID\"")),
                 () -> assertTrue(script.contains("dev.stratus.jobs.spark.AirflowPipelineVerifierJob")),

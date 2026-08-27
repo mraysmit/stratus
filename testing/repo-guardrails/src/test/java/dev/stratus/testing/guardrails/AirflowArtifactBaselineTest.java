@@ -292,6 +292,8 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(dockerfile.contains("--require-hashes")),
                 () -> assertTrue(dockerfile.contains("USER airflow")),
                 () -> assertTrue(dockerfile.contains(ARTIFACT_LOCK_PATH.toString())),
+                () -> assertTrue(dockerfile.contains("sed -i 's/\\r$//'"),
+                        "The image must normalize copied lock files from Windows checkouts"),
                 () -> assertFalse(dockerfile.matches("(?s).*RUN\\s+.*(curl|wget).*"),
                         "Image assembly must consume only pre-resolved artifacts"));
     }
@@ -344,6 +346,9 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(scan.contains("aquasec/trivy:" + TRIVY_VERSION + "@sha256:")),
                 () -> assertTrue(scan.contains("docker save")),
                 () -> assertTrue(scan.contains("--input")),
+                () -> assertTrue(scan.contains("index.json")
+                                && scan.contains("manifest.json"),
+                        "Archive identity checks must support OCI indexes and legacy manifests"),
                 () -> assertTrue(scan.contains("tar -xOf \"${ARCHIVE}\" manifest.json")),
                 () -> assertTrue(scan.contains("]] " + SHELL_CONJUNCTION
                         + " archive_matches_image; then")),
@@ -360,6 +365,12 @@ final class AirflowArtifactBaselineTest {
                                 && build.contains("verify_wheelhouse_exact_file_set"),
                         "Assembly must reject missing and unexpected wheelhouse artifacts"),
                 () -> assertTrue(scan.contains("scan-archive-image-id.txt")),
+                () -> assertTrue(scan.contains("docker create")
+                                && scan.contains("docker cp \"${ARCHIVE}\"")
+                                && scan.contains("docker start --attach"),
+                        "Windows scans must use container-local archive I/O"),
+                () -> assertFalse(scan.contains("${ARTIFACT_DIR}:/scan"),
+                        "The scanner must not analyse the archive through a Windows bind mount"),
                 () -> assertTrue(scan.contains("trap cleanup EXIT")),
                 () -> assertTrue(scan.contains("trap 'exit 130' INT")),
                 () -> assertTrue(scan.contains("docker rm --force")),

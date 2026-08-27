@@ -77,11 +77,17 @@ PY
   python -m pip check
   java -version
   spark-submit --version
-  test ! -e /opt/spark/jars/derby-10.16.1.1.jar
-  test ! -e /usr/bin/docker
-  test ! -e /home/airflow/.local/bin/uv
-  test ! -e /home/airflow/.local/bin/uvx
-  test -r /opt/stratus/artifact-lock.properties
-  grep -Fx "airflow.version=3.3.1" /opt/stratus/artifact-lock.properties
+  test ! -e /opt/spark/jars/derby-10.16.1.1.jar \
+    || { echo "check=derby_server_jar result=failed" >&2; exit 1; }
+  test ! -e /usr/bin/docker \
+    || { echo "check=docker_client result=failed" >&2; exit 1; }
+  test ! -e /home/airflow/.local/bin/uv \
+    || { echo "check=uv_binary result=failed" >&2; exit 1; }
+  test ! -e /home/airflow/.local/bin/uvx \
+    || { echo "check=uvx_binary result=failed" >&2; exit 1; }
+  test -r /opt/stratus/artifact-lock.properties \
+    || { echo "check=artifact_lock_readable result=failed" >&2; exit 1; }
+  grep -Fx "airflow.version=3.3.1" /opt/stratus/artifact-lock.properties \
+    || { echo "check=artifact_lock_content result=failed" >&2; exit 1; }
 '
 log INFO smoke_completed "image=${IMAGE_TAG} duration_ms=$(( ($(date +%s%N) - START_NS) / 1000000 ))"

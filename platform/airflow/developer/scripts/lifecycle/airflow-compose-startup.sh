@@ -41,5 +41,10 @@ compose run --rm airflow-init bash -c 'airflow db migrate && airflow db check' \
 
 compose up --detach --remove-orphans airflow-api-server airflow-dag-processor \
   airflow-scheduler airflow-triggerer
+# Every Spark DAG writes its event log through the scheduler-mounted Airflow log volume. Create
+# the child directory before any DAG can submit Spark; a new volume contains only its mount root.
+compose exec -T airflow-scheduler mkdir -p /opt/airflow/logs/spark-events
+compose exec -T airflow-scheduler test -w /opt/airflow/logs/spark-events \
+  || fail "Spark event-log directory is not writable by the Airflow scheduler"
 bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
 log "Airflow developer deployment is healthy; migration output: $migration_log"

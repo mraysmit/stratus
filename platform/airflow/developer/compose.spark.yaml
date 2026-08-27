@@ -7,6 +7,7 @@ services:
   # scheduler that executes the resulting task instances.
   airflow-dag-processor:
     environment:
+      STRATUS_DISABLE_DAG_SCHEDULES: ${STRATUS_DISABLE_DAG_SCHEDULES:-false}
       STRATUS_BRONZE_TO_SILVER_RETRIES: ${STRATUS_BRONZE_TO_SILVER_RETRIES:-2}
       STRATUS_SILVER_TO_GOLD_RETRIES: ${STRATUS_SILVER_TO_GOLD_RETRIES:-2}
 
@@ -15,6 +16,14 @@ services:
       SPARK_CONF_DIR: /opt/stratus/spark-conf
       STRATUS_RUN_ID: ${STRATUS_RUN_ID:-unscoped-airflow-spark-run}
       STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-DEBUG}
+      STRATUS_DISABLE_DAG_SCHEDULES: ${STRATUS_DISABLE_DAG_SCHEDULES:-false}
+      # Environment-backed connections avoid storing developer credentials in the metadata
+      # database and avoid repeated Airflow CLI startup during focused live tests.
+      AIRFLOW_CONN_SPARK_DEFAULT: >-
+        {"conn_type":"spark","host":"spark://spark-master.stratus.local","port":7077}
+      AIRFLOW_CONN_STRATUS_LANDING: >-
+        {"conn_type":"aws","login":"${AIRFLOW_LANDING_RGW_ACCESS_KEY:?Airflow landing RGW access key is required}","password":"${AIRFLOW_LANDING_RGW_SECRET_KEY:?Airflow landing RGW secret key is required}","extra":{"endpoint_url":"${CEPH_RGW_ENDPOINT:?Ceph RGW endpoint is required}","verify":"/opt/stratus/certs/stratus-ca.crt","config_kwargs":{"s3":{"addressing_style":"path"}}}}
+      AIRFLOW_VAR_STRATUS_LANDING_BUCKET: stratus-landing
       # The blocked-path harness sets this to zero so a deliberately refused promotion does not
       # wait through normal retry delays. Unset development runs retain the DAG's default of two.
       STRATUS_BRONZE_TO_SILVER_RETRIES: ${STRATUS_BRONZE_TO_SILVER_RETRIES:-2}

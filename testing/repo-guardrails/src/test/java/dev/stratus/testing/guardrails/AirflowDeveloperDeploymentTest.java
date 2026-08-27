@@ -124,9 +124,12 @@ final class AirflowDeveloperDeploymentTest {
     private static final List<String> REQUIRED_STARTUP_MARKERS = List.of(
             "airflow db migrate",
             "compose up --detach",
+            "mkdir -p /opt/airflow/logs/spark-events",
             HEALTH_TEST_PATH.getFileName().toString());
     private static final List<String> REQUIRED_HEALTH_MARKERS = List.of(
             EXPECTED_HEALTH_ENDPOINT,
+            "health_components_healthy",
+            "metadatabase scheduler triggerer dag_processor",
             "airflow jobs check --job-type SchedulerJob",
             "airflow db check",
             "tail -n 1");
@@ -192,6 +195,8 @@ final class AirflowDeveloperDeploymentTest {
                 () -> assertTrue(shutdown.contains("compose_teardown down --remove-orphans")),
                 () -> assertTrue(reset.contains("down --volumes --remove-orphans")),
                 () -> assertContainsAll(health, REQUIRED_HEALTH_MARKERS, "health test"),
+                () -> assertFalse(health.contains("python -c"),
+                        "The host health gate must not require a Python installation"),
                 () -> assertTrue(lifecycle.contains("for cycle in 1 2")),
                 () -> assertTrue(lifecycle.contains(STARTUP_SCRIPT_PATH.getFileName().toString())),
                 () -> assertTrue(lifecycle.contains(SHUTDOWN_SCRIPT_PATH.getFileName().toString())));
