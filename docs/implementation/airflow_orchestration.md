@@ -2,13 +2,14 @@
 
 **Canonical implementation guide**
 
-**Last reviewed:** 2026-08-25
+**Last reviewed:** 2026-08-28
 
 **Current stage:** Development implementation and functional acceptance.
 
 **Later stage:** Production deployment hardening and readiness.
 
-**Developer profile:** V1 accepted on 2026-08-24; revised V2 implementation evidence passed on 2026-08-28 and awaits an immutable source revision
+**Developer profile:** V1 accepted on 2026-08-24; revised V2 implementation evidence passed on
+2026-08-28 and source revision `7dba05e` is recorded; superseding acceptance remains pending
 
 **Production profile:** planned and not yet accepted
 
@@ -26,6 +27,8 @@ The definitive implementation locations are:
 - live tests: [`platform/airflow/developer/scripts/tests/`](../../platform/airflow/developer/scripts/tests/);
 - Java REST verifier: [`verification/orchestration/`](../../verification/orchestration/);
 - accepted point-in-time evidence: [`platform/airflow/developer-gate-20260824.md`](../../platform/airflow/developer-gate-20260824.md);
+- active performance and remediation register:
+  [`stratus_performance_review_20260828.md`](stratus_performance_review_20260828.md);
 - promotion-boundary decision: [`ADR-P1-007`](../decisions/ADR-P1-007-airflow-promotion-gate-boundary.md).
 
 ## 2. Supported profiles
@@ -202,7 +205,7 @@ Current task state:
 | `P1-4.1-D1` Compose lifecycle | Accepted for development | production topology remains separate |
 | `P1-4.2-D1` Airflow-to-Spark submission | Accepted for development | repeat on dependency/runtime change |
 | `P1-4.3-V1` embedded gate evidence | Accepted point-in-time on 2026-08-24 | retained as historical evidence |
-| `P1-4.3-V2` explicit gate task plus writer recheck | Implementation evidence passed 2026-08-28 | record the immutable source revision and dated superseding acceptance |
+| `P1-4.3-V2` explicit gate task plus writer recheck | Implementation evidence passed 2026-08-28; source revision `7dba05e` is recorded | rerun the evidence against that revision and record dated superseding acceptance |
 | `P1-4.G-D` developer gate | Accepted for the V1 state on 2026-08-24 | does not automatically accept V2 |
 | `P1-4.1-P1`, `P1-4.5-R1`, `P1-4.4-V1` | Planned | hardened deployment, recovery, observability, capacity and schedule evidence pass |
 
@@ -227,7 +230,7 @@ to make it appear to describe a later implementation.
 |---|---|---|---|
 | `P1-4.1-D1` | `P1-4.1-S2` local development image | two Compose lifecycle cycles and health | Accepted for development |
 | `P1-4.1-P1` | `P1-4.1-S2`, `P1-0.1` | published digest, hardened topology, restore and continuity | Planned |
-| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | Evidence passed; acceptance record awaits immutable revision |
+| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | Pre-commit evidence passed; committed rerun and acceptance record remain pending |
 
 ## 10. Production acceptance boundary
 
@@ -246,8 +249,9 @@ No developer Compose result may be used as evidence for these controls.
 
 The rebuilt local image passed its smoke and security acceptance on 2026-08-27. The real developer
 deployment parsed the V2 DAGs on 2026-08-28, and the direct catalog gate demonstrated both an
-accepted evidence run and a missing-evidence denial. Superseding V1 still requires the completed
-focused-live and public-API evidence set; partial runs are diagnostic evidence, not acceptance.
+accepted evidence run and a missing-evidence denial. The focused-live and public-API evidence set
+passed before revision `7dba05e` was recorded. Superseding V1 still requires a rerun against that
+committed revision and a dated acceptance record; the existing runs remain diagnostic evidence.
 
 ## 11. Troubleshooting
 
