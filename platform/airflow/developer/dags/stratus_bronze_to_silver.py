@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from airflow import DAG
 
 from stratus_alerts import stratus_failure_alert
-from stratus_common import spark_submit_task
+from stratus_common import catalog_promotion_gate_task, spark_submit_task
 
 DAG_ID = "stratus_bronze_to_silver"
 BRONZE_TABLE = "stratus.bronze.customers"
@@ -25,7 +25,6 @@ QUALITY_RUN_ID = "{{ dag_run.conf.get(\"quality_run_id\", run_id) }}"
 PIPELINE_RUN_ID = "{{ dag_run.conf.get(\"pipeline_run_id\", run_id) }}"
 TRANSFORM_CLASS = "dev.stratus.jobs.spark.TransformJob"
 QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob"
-PROMOTION_GATE_CLASS = "dev.stratus.jobs.spark.PromotionGate"
 BUSINESS_KEY = "customer_id"
 SEQUENCE_COLUMN = "updated_at"
 DEFAULT_RETRIES = 2
@@ -73,13 +72,10 @@ with DAG(
     max_active_runs=1,
     tags=["stratus", "transform", "bronze", "silver"],
 ) as dag:
-    evaluate_bronze_promotion = spark_submit_task(
+    evaluate_bronze_promotion = catalog_promotion_gate_task(
         task_id="evaluate_bronze_promotion",
-        java_class=PROMOTION_GATE_CLASS,
-        application_args=[
-            "--runId", QUALITY_RUN_ID,
-            "--targetTable", SOURCE_TABLE,
-        ],
+        run_id=QUALITY_RUN_ID,
+        target_table=SOURCE_TABLE,
         on_failure_callback=stratus_failure_alert,
     )
 

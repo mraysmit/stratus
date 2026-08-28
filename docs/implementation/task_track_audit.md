@@ -139,6 +139,12 @@ checkpoint updates delivery state only; the detailed gap lists below remain the
 dated 2026-07-11 audit history. See
 [`platform/airflow/development-acceptance-20260822.md`](../../platform/airflow/development-acceptance-20260822.md).
 
+The 2026-08-28 V2 runtime revision separates orchestration assertions from data-processing proof.
+The explicit promotion task uses Iceberg's direct REST-catalog reader, the blocked focused path
+skips all downstream Spark work and checks table absence directly, and the API verifier uses a
+no-op positive DAG plus the real blocked gate. V1 remains the accepted dated baseline until the
+revised offline, parse, focused-live and API evidence set completes.
+
 The canonical pre-live and post-live reactors each passed 12 modules and 294
 tests, in 56.501 and 65.475 seconds respectively, with zero failures, errors, or
 skips.

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from airflow import DAG
 
 from stratus_alerts import stratus_failure_alert
-from stratus_common import spark_submit_task
+from stratus_common import catalog_promotion_gate_task, spark_submit_task
 
 DAG_ID = "stratus_silver_to_gold"
 SILVER_TABLE = "stratus.silver.customers"
@@ -23,7 +23,6 @@ TARGET_TABLE = "{{ dag_run.conf.get(\"gold_table\", \"" + GOLD_TABLE + "\") }}"
 QUALITY_RUN_ID = "{{ dag_run.conf.get(\"quality_run_id\", run_id) }}"
 PIPELINE_RUN_ID = "{{ dag_run.conf.get(\"pipeline_run_id\", run_id) }}"
 QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob"
-PROMOTION_GATE_CLASS = "dev.stratus.jobs.spark.PromotionGate"
 MATERIALISATION_CLASS = "dev.stratus.jobs.spark.MaterialisationJob"
 DEFAULT_RETRIES = 2
 RETRIES_ENVIRONMENT_VARIABLE = "STRATUS_SILVER_TO_GOLD_RETRIES"
@@ -90,13 +89,10 @@ with DAG(
         on_failure_callback=stratus_failure_alert,
     )
 
-    evaluate_silver_promotion = spark_submit_task(
+    evaluate_silver_promotion = catalog_promotion_gate_task(
         task_id="evaluate_silver_promotion",
-        java_class=PROMOTION_GATE_CLASS,
-        application_args=[
-            "--runId", QUALITY_RUN_ID,
-            "--targetTable", SOURCE_TABLE,
-        ],
+        run_id=QUALITY_RUN_ID,
+        target_table=SOURCE_TABLE,
         on_failure_callback=stratus_failure_alert,
     )
 

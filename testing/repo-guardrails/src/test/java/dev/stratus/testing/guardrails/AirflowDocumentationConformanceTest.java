@@ -19,7 +19,7 @@ final class AirflowDocumentationConformanceTest {
     private static final Path GUIDE = Repo.root().resolve(
             Path.of("docs", "implementation", "airflow_orchestration.md"));
     private static final List<String> RETIRED_CONTENT = List.of(
-            "PromotionGateJob",
+            "dev.stratus.jobs.spark.PromotionGateJob",
             "LandingToBronzeJob",
             "BronzeToSilverJob",
             "SilverToGoldJob",
@@ -35,7 +35,8 @@ final class AirflowDocumentationConformanceTest {
         assertAll(
                 () -> assertTrue(guide.contains("platform/airflow/developer/dags/")),
                 () -> assertTrue(guide.contains("SparkSubmitOperator")),
-                () -> assertTrue(guide.contains("dev.stratus.jobs.spark.PromotionGate")),
+                () -> assertTrue(guide.contains(
+                        "dev.stratus.jobs.spark.CatalogPromotionGateJob")),
                 () -> assertTrue(guide.contains("evaluate_bronze_promotion=failed")),
                 () -> assertTrue(guide.contains("manual/API (`None`)")),
                 () -> assertTrue(guide.contains("ADR-P1-007")),

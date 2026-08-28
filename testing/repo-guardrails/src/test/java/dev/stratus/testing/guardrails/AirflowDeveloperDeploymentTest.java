@@ -122,9 +122,9 @@ final class AirflowDeveloperDeploymentTest {
             "airflow-logs:");
 
     private static final List<String> REQUIRED_STARTUP_MARKERS = List.of(
-            "airflow db migrate",
             "compose up --detach",
-            "mkdir -p /opt/airflow/logs/spark-events",
+            "compose wait airflow-init",
+            "compose logs --no-color airflow-init",
             HEALTH_TEST_PATH.getFileName().toString());
     private static final List<String> REQUIRED_HEALTH_MARKERS = List.of(
             EXPECTED_HEALTH_ENDPOINT,
@@ -189,9 +189,17 @@ final class AirflowDeveloperDeploymentTest {
         String reset = read(RESET_SCRIPT_PATH);
         String health = read(HEALTH_TEST_PATH);
         String lifecycle = read(LIFECYCLE_TEST_PATH);
+        String compose = read(COMPOSE_PATH);
 
         assertAll(
                 () -> assertContainsAll(startup, REQUIRED_STARTUP_MARKERS, "startup script"),
+                () -> assertTrue(compose.contains(
+                                "mkdir -p /opt/airflow/logs/spark-events"),
+                        "The init service must create the shared Spark event-log path"),
+                () -> assertFalse(startup.contains("compose run --rm airflow-init"),
+                        "Startup must not run a second, anonymous migration container"),
+                () -> assertTrue(startup.contains("--no-deps --remove-orphans"),
+                        "Service startup must not restart the completed init dependency"),
                 () -> assertTrue(shutdown.contains("compose_teardown down --remove-orphans")),
                 () -> assertTrue(reset.contains("down --volumes --remove-orphans")),
                 () -> assertContainsAll(health, REQUIRED_HEALTH_MARKERS, "health test"),

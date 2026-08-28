@@ -415,7 +415,7 @@ The verification suite validates behavior across Kafka, Flink, Iceberg, Polaris,
 <dependency>
     <groupId>io.trino</groupId>
     <artifactId>trino-jdbc</artifactId>
-    <version>482</version>
+    <version>483</version>
 </dependency>
 <dependency>
     <groupId>org.assertj</groupId>

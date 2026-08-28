@@ -1807,7 +1807,7 @@ Current Phase 1 target baseline as of 2026-08-25:
 | Stratus Java build and verifier baseline | Java 21 LTS, latest approved patch |
 | Java build tool | Apache Maven 3.9.16; Maven 4 remains pre-GA and is not the production build baseline |
 | OCI runtime baseline | Podman 5.8.2 preferred; Docker Engine 29.5.3 permitted where selected and component-supported; exact package and patch pinned per environment |
-| Component runtime exceptions | Spark 4.1 and Airflow's Spark client use the Java 21 baseline; Trino 482 requires Java 25 and remains an explicit component exception; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
+| Component runtime exceptions | Spark 4.1 and Airflow's Spark client use the Java 21 baseline; Trino 483 requires Java 25.0.1 or newer Java 25 and remains an explicit component exception; Atlas/Ranger use their selected release's supported runtime; all exceptions are pinned and recorded |
 | Apache Polaris | 1.5.0 |
 | Apache Iceberg | 1.11.0 |
 | Apache Spark | 4.1.2 with Scala 2.13 |

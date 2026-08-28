@@ -8,7 +8,7 @@
 
 **Later stage:** Production deployment hardening and readiness.
 
-**Developer profile:** accepted on 2026-08-24; post-acceptance promotion-gate remediation is being reverified
+**Developer profile:** V1 accepted on 2026-08-24; revised V2 implementation evidence passed on 2026-08-28 and awaits an immutable source revision
 
 **Production profile:** planned and not yet accepted
 
@@ -110,13 +110,16 @@ Operators should use those scripts instead of issuing ad hoc container commands.
 | `stratus_bronze_to_silver` | manual/API (`None`) | bronze promotion gate → transform → silver quality | fail closed on persisted bronze evidence, upsert the correlated batch and record silver checks |
 | `stratus_silver_to_gold` | manual/API (`None`) | silver quality → silver promotion gate → materialisation → gold quality | persist and expose the silver verdict before rebuilding and checking gold |
 | `stratus_table_maintenance` | `@daily` | maintenance policy job | inspect Iceberg metadata and apply the named policy |
+| `stratus_api_contract_probe` | manual/API (`None`) | empty positive task | test the Airflow REST trigger and task-state protocol without starting Spark |
 
 The two transition DAGs intentionally remain manual/API-triggered in the developer profile. Their
 production cadence and triggering contract must be approved with source-arrival, backfill and
 capacity policy; documentation must not claim they already run hourly or daily.
 
-All Spark work uses the shared `spark_submit_task` helper and `SparkSubmitOperator`. The helper
-selects the protected Airflow Spark connection and packaged Stratus jobs JAR. DAG configuration
+Data-processing work uses the shared `spark_submit_task` helper and `SparkSubmitOperator`. The
+promotion decision uses a direct Iceberg REST-catalog reader because reading a few quality rows
+does not justify a Spark driver and executor allocation. The Spark helper selects the protected
+Airflow connection and packaged Stratus jobs JAR. DAG configuration
 accepts caller-owned correlation IDs and isolated source/target names where the contract permits.
 Normal retries are two attempts separated by five minutes. Expected-failure live tests may set the
 documented retry environment variables to zero so a deliberately blocked proof does not wait
@@ -130,7 +133,8 @@ promotion.
 
 For every governed write boundary:
 
-1. Airflow runs `dev.stratus.jobs.spark.PromotionGate` as a named task.
+1. Airflow runs `dev.stratus.jobs.spark.CatalogPromotionGateJob` as a named Bash task. It uses
+   Iceberg's REST catalog and generic row reader and does not create a `SparkContext`.
 2. A denied verdict fails that task and downstream writers remain `upstream_failed`.
 3. A permitted verdict allows the writer task to start.
 4. `TransformJob` or `MaterialisationJob` rechecks the same evidence immediately before writing.
@@ -166,7 +170,7 @@ Use the narrowest tier that can invalidate the change:
 | Image smoke/security | `platform/airflow/image/scripts/tests/airflow-image-acceptance-test.sh` | candidate image or dependency change |
 | Lifecycle/parse | `airflow-compose-lifecycle-test.sh`, `airflow-pipeline-dag-parse-test.sh` | Compose or DAG-import change |
 | Focused live slice | named landing, bronze/silver, silver/gold, maintenance, retry or deadline script | behavior changed in that slice |
-| API control plane | `airflow-api-orchestration-live-test.sh` | API, task-state or promotion-boundary change |
+| API control plane | `airflow-api-orchestration-live-test.sh` | API, task-state or promotion-boundary change; uses an empty positive DAG, the real blocked gate and a direct catalog no-write check |
 | Canonical suite | `airflow-development-acceptance-suite.sh` | release/gate evidence only, not routine feedback |
 
 The long suite deliberately composes many proofs and is not an acceptable inner development loop.
@@ -177,8 +181,9 @@ initialisation and Airflow scheduling; timing records must keep those phases sep
 execution rather than labelling the whole interval as query latency.
 
 The Java verifier authenticates through Airflow's public REST API, validates health and DAG
-registration, triggers caller-correlated runs, polls with a bound, checks exact DAG/task terminal
-states and independently verifies Iceberg side effects. The blocked API scenario now expects
+registration, triggers caller-correlated runs, polls with a bound and checks exact DAG/task terminal
+states. A separate direct Iceberg catalog check proves the blocked target is absent without starting
+another Spark application. The blocked API scenario expects
 `evaluate_bronze_promotion=failed`, with transform and downstream quality both
 `upstream_failed`.
 
@@ -197,7 +202,7 @@ Current task state:
 | `P1-4.1-D1` Compose lifecycle | Accepted for development | production topology remains separate |
 | `P1-4.2-D1` Airflow-to-Spark submission | Accepted for development | repeat on dependency/runtime change |
 | `P1-4.3-V1` embedded gate evidence | Accepted point-in-time on 2026-08-24 | retained as historical evidence |
-| `P1-4.3-V2` explicit gate task plus writer recheck | In progress | offline, parse, focused live and API proofs pass |
+| `P1-4.3-V2` explicit gate task plus writer recheck | Implementation evidence passed 2026-08-28 | record the immutable source revision and dated superseding acceptance |
 | `P1-4.G-D` developer gate | Accepted for the V1 state on 2026-08-24 | does not automatically accept V2 |
 | `P1-4.1-P1`, `P1-4.5-R1`, `P1-4.4-V1` | Planned | hardened deployment, recovery, observability, capacity and schedule evidence pass |
 
@@ -222,7 +227,7 @@ to make it appear to describe a later implementation.
 |---|---|---|---|
 | `P1-4.1-D1` | `P1-4.1-S2` local development image | two Compose lifecycle cycles and health | Accepted for development |
 | `P1-4.1-P1` | `P1-4.1-S2`, `P1-0.1` | published digest, hardened topology, restore and continuity | Planned |
-| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | In progress |
+| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | Evidence passed; acceptance record awaits immutable revision |
 
 ## 10. Production acceptance boundary
 
@@ -239,14 +244,10 @@ Production acceptance requires, at minimum:
 
 No developer Compose result may be used as evidence for these controls.
 
-The current V2 live gate is also waiting for a rebuilt local Airflow image. The 2026-08-25 build
-proved the corrected 9.93 MB context but the digest-pinned Spark layer pull ended with an external
-short read; this is a missing test prerequisite, not a passed DAG parse or runtime result.
-
-An interim 2026-08-25 parse imported the real DAG modules in the digest-pinned upstream Airflow
-3.3.1 image with the locked Spark and Amazon provider wheels. It constructed the exact bronze and
-gold task graphs documented above. This validates Python, provider and dependency construction but
-does not replace the developer Compose registry, scheduler or live data-side proofs.
+The rebuilt local image passed its smoke and security acceptance on 2026-08-27. The real developer
+deployment parsed the V2 DAGs on 2026-08-28, and the direct catalog gate demonstrated both an
+accepted evidence run and a missing-evidence denial. Superseding V1 still requires the completed
+focused-live and public-API evidence set; partial runs are diagnostic evidence, not acceptance.
 
 ## 11. Troubleshooting
 

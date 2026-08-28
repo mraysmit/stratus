@@ -40,7 +40,7 @@ import org.slf4j.LoggerFactory;
  */
 public final class PromotionGate {
 
-    public static final String STATUS_OVERRIDDEN = "overridden";
+    public static final String STATUS_OVERRIDDEN = PromotionEvidenceEvaluator.STATUS_OVERRIDDEN;
 
     static final Set<String> ARGUMENTS = Set.of(
             "runId", "targetTable", "override-reason", "override-principal", "resultsTable");
@@ -99,27 +99,12 @@ public final class PromotionGate {
                         .select("check_name", "severity", "status")
                         .collectAsList());
 
-        var failing = new ArrayList<String>();
-        var warnings = new ArrayList<String>();
-        boolean overridden = false;
+        var evidence = new ArrayList<PromotionEvidenceEvaluator.Evidence>();
         for (Row row : results) {
-            String status = row.getString(2);
-            // Each recorded verdict at DEBUG: the INFO line says what the gate
-            // decided, and this says which records it decided from.
-            LOGGER.debug("PROMOTION EVIDENCE runId={} resultsTable={} check={} severity={} status={}",
-                    runId, resultsTable, row.getString(0), row.getString(1), status);
-            if (STATUS_OVERRIDDEN.equals(status)) {
-                overridden = true;
-            } else if (QualityCheckJob.STATUS_FAILED.equals(status)) {
-                failing.add(row.getString(0));
-            } else if (QualityCheckJob.STATUS_WARNING.equals(status)) {
-                warnings.add(row.getString(0));
-            }
+            evidence.add(new PromotionEvidenceEvaluator.Evidence(
+                    row.getString(0), row.getString(1), row.getString(2)));
         }
-
-        // No results at all is not a pass. See the class comment.
-        boolean blocked = results.isEmpty() || (!failing.isEmpty() && !overridden);
-        return new PromotionDecision(runId, targetTable, blocked, results.size(), failing, warnings);
+        return PromotionEvidenceEvaluator.evaluate(runId, targetTable, evidence);
     }
 
     /** Records an explicit override without changing the verdict it overrides. */

@@ -36,14 +36,17 @@ compose up --detach --wait --wait-timeout "${AIRFLOW_STARTUP_DEADLINE_SECONDS:-1
 
 migration_log="$HARNESS_DIR/logs/airflow-db-migrate-$(date -u +%Y%m%dT%H%M%SZ).log"
 log "Running idempotent Airflow metadata migration"
-compose run --rm airflow-init bash -c 'airflow db migrate && airflow db check' \
-  2>&1 | tee "$migration_log"
+compose up --detach airflow-init
+if ! compose wait airflow-init >/dev/null; then
+  compose logs --no-color airflow-init 2>&1 | tee "$migration_log"
+  fail "Airflow metadata migration failed; output: $migration_log"
+fi
+compose logs --no-color airflow-init 2>&1 | tee "$migration_log"
 
-compose up --detach --remove-orphans airflow-api-server airflow-dag-processor \
+compose up --detach --no-deps --remove-orphans airflow-api-server airflow-dag-processor \
   airflow-scheduler airflow-triggerer
-# Every Spark DAG writes its event log through the scheduler-mounted Airflow log volume. Create
-# the child directory before any DAG can submit Spark; a new volume contains only its mount root.
-compose exec -T airflow-scheduler mkdir -p /opt/airflow/logs/spark-events
+# The init service creates this shared-volume path before the scheduler starts. Verify the runtime
+# user sees it as writable without attempting a post-start repair that could race a scheduled DAG.
 compose exec -T airflow-scheduler test -w /opt/airflow/logs/spark-events \
   || fail "Spark event-log directory is not writable by the Airflow scheduler"
 bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"

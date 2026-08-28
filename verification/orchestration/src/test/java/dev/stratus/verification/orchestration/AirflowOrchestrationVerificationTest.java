@@ -40,7 +40,8 @@ final class AirflowOrchestrationVerificationTest {
             "stratus_landing_to_bronze",
             "stratus_bronze_to_silver",
             "stratus_silver_to_gold",
-            "stratus_table_maintenance");
+            "stratus_table_maintenance",
+            "stratus_api_contract_probe");
 
     @Test
     void provesHealthyPositiveAndFailClosedOrchestration() throws Exception {
