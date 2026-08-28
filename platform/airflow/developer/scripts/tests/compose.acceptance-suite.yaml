@@ -1,0 +1,29 @@
+# Canonical-suite overlay. The suite starts Airflow once with the platform DAGs, Spark runtime,
+# retry probe, and Deadline Alert probe available together. Focused tests still use their isolated
+# overlays when they own a standalone Airflow lifecycle.
+x-acceptance-probe-volumes: &acceptance-probe-volumes
+  # The target directory exists in the base DAG bind mount. Docker can therefore layer this
+  # read-only directory mount over it without trying to create a mountpoint in a read-only parent.
+  - ./scripts/tests/dags:/opt/airflow/dags/acceptance-probes:ro
+x-acceptance-probe-environment: &acceptance-probe-environment
+  STRATUS_DEADLINE_PROBE_DAG_ID: ${STRATUS_DEADLINE_PROBE_DAG_ID:?STRATUS_DEADLINE_PROBE_DAG_ID is required}
+
+services:
+  airflow-api-server:
+    environment: *acceptance-probe-environment
+    volumes: *acceptance-probe-volumes
+
+  airflow-dag-processor:
+    environment: *acceptance-probe-environment
+    volumes: *acceptance-probe-volumes
+
+  airflow-scheduler:
+    # Keep the normal scheduler heartbeat for the retry probe. Its in-process `dags test`
+    # runner owns the one-second retry; an accelerated scheduler can race that runner and
+    # queue the second attempt externally before it observes recovery.
+    environment: *acceptance-probe-environment
+    volumes: *acceptance-probe-volumes
+
+  airflow-triggerer:
+    environment: *acceptance-probe-environment
+    volumes: *acceptance-probe-volumes

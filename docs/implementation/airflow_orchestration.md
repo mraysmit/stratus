@@ -183,6 +183,12 @@ can be dominated by Spark application startup, dependency distribution, catalog/
 initialisation and Airflow scheduling; timing records must keep those phases separate from query
 execution rather than labelling the whole interval as query latency.
 
+The canonical suite owns one Ceph, OpenBao, Polaris, Spark and Airflow lifecycle. Its Compose model
+loads the platform DAGs, Spark runtime, retry probe and Deadline Alert probe together, and nested
+harnesses verify and reuse the running Airflow deployment. Those harnesses remain self-contained
+when invoked directly. The two-cycle Compose lifecycle test is a separate qualification because
+restarting Airflow is its subject; it is not nested in the performance-sensitive canonical run.
+
 The Java verifier authenticates through Airflow's public REST API, validates health and DAG
 registration, triggers caller-correlated runs, polls with a bound and checks exact DAG/task terminal
 states. A separate direct Iceberg catalog check proves the blocked target is absent without starting

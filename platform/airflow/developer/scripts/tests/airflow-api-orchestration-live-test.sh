@@ -14,6 +14,12 @@ readonly SPARK_DIR="$REPOSITORY_DIR/platform/spark/compose-cluster"
 readonly CATALOG_STATE_CLASS="dev.stratus.jobs.spark.CatalogTableStateJob"
 readonly POSITIVE_DAG_ID="stratus_api_contract_probe"
 readonly BLOCKED_DAG_ID="stratus_bronze_to_silver"
+# shellcheck disable=SC1091
+source "$AIRFLOW_HARNESS_DIR/scripts/lib/airflow-compose-common.sh"
+suite_scoped=false
+if suite_owns_airflow; then
+  suite_scoped=true
+fi
 
 mkdir -p "$AIRFLOW_HARNESS_DIR/evidence"
 suite_run_id="airflow-api-orchestration-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -70,6 +76,11 @@ shutdown_checked_harnesses() {
   set +e
   log_local "event=airflow_api_orchestration_cleanup_started suiteRunId=$suite_run_id originalExitCode=$exit_code"
 
+  if $suite_scoped; then
+    log_local "event=airflow_api_orchestration_cleanup_completed suiteRunId=$suite_run_id lifecycleOwner=suite"
+    exit "$exit_code"
+  fi
+
   shutdown_harness() {
     local name="$1"
     local script="$2"
@@ -118,21 +129,25 @@ shutdown_checked_harnesses() {
 }
 trap shutdown_checked_harnesses EXIT
 
-ceph_attempted=true
-phase ceph_startup bash "$CEPH_DIR/scripts/lifecycle/ceph-compose-startup.sh"
-phase ceph_buckets bash "$CEPH_DIR/scripts/verify/ceph-compose-bootstrap-buckets.sh"
+if $suite_scoped; then
+  phase suite_provider_reuse true
+else
+  ceph_attempted=true
+  phase ceph_startup bash "$CEPH_DIR/scripts/lifecycle/ceph-compose-startup.sh"
+  phase ceph_buckets bash "$CEPH_DIR/scripts/verify/ceph-compose-bootstrap-buckets.sh"
 
-openbao_attempted=true
-phase openbao_startup bash "$OPENBAO_DIR/scripts/lifecycle/openbao-compose-startup.sh"
-phase service_identities bash "$CEPH_DIR/scripts/verify/ceph-compose-provision-service-identities.sh"
+  openbao_attempted=true
+  phase openbao_startup bash "$OPENBAO_DIR/scripts/lifecycle/openbao-compose-startup.sh"
+  phase service_identities bash "$CEPH_DIR/scripts/verify/ceph-compose-provision-service-identities.sh"
 
-polaris_attempted=true
-phase polaris_startup bash "$POLARIS_DIR/scripts/lifecycle/polaris-compose-startup.sh"
-phase polaris_catalog bash "$POLARIS_DIR/scripts/verify/polaris-compose-bootstrap-catalog.sh"
+  polaris_attempted=true
+  phase polaris_startup bash "$POLARIS_DIR/scripts/lifecycle/polaris-compose-startup.sh"
+  phase polaris_catalog bash "$POLARIS_DIR/scripts/verify/polaris-compose-bootstrap-catalog.sh"
 
-spark_attempted=true
-phase spark_startup bash "$SPARK_DIR/scripts/lifecycle/spark-compose-startup.sh"
-phase spark_principal bash "$SPARK_DIR/scripts/verify/spark-compose-bootstrap-principal.sh"
+  spark_attempted=true
+  phase spark_startup bash "$SPARK_DIR/scripts/lifecycle/spark-compose-startup.sh"
+  phase spark_principal bash "$SPARK_DIR/scripts/verify/spark-compose-bootstrap-principal.sh"
+fi
 
 # Provider connection files now exist, so load the Airflow/Spark composition helpers only here.
 # shellcheck disable=SC1091
@@ -169,8 +184,12 @@ verify_blocked_target_absent() {
     --runId "$suite_run_id-blocked-catalog-verifier"
 }
 
-airflow_attempted=true
-phase airflow_startup bash "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if $suite_scoped; then
+  phase airflow_reuse bash "$AIRFLOW_HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+else
+  airflow_attempted=true
+  phase airflow_startup bash "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+fi
 phase airflow_configuration configure_airflow
 
 positive_conf="{\"probe_run_id\":\"$positive_run_id\"}"

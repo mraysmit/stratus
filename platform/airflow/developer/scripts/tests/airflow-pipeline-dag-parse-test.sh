@@ -13,6 +13,7 @@ EXPECTED_DAG_IDS=(
   "stratus_table_maintenance"
 )
 SUITE_STARTED_MS="$(date +%s%3N)"
+airflow_owned=false
 
 mkdir -p "$HARNESS_DIR/evidence"
 evidence_file="$HARNESS_DIR/evidence/${SUITE_RUN_ID}.log"
@@ -26,14 +27,22 @@ elapsed_ms() {
 shutdown_airflow() {
   local exit_code=$?
   trap - EXIT
-  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh" || true
+  if $airflow_owned; then
+    bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh" || true
+  fi
   exit "$exit_code"
 }
 trap shutdown_airflow EXIT
 
 log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=startup status=STARTED"
 phase_started_ms="$(date +%s%3N)"
-bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if suite_owns_airflow; then
+  bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+  log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=startup ownership=suite status=REUSED"
+else
+  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+  airflow_owned=true
+fi
 log "PIPELINE DAG PARSE suiteRunId=$SUITE_RUN_ID phase=startup status=SUCCESS elapsedMs=$(elapsed_ms "$phase_started_ms")"
 
 load_environment

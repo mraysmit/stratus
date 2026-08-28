@@ -237,6 +237,13 @@ The complete regression is reserved for release/gate evidence, not routine feedb
 bash platform/airflow/developer/scripts/tests/airflow-development-acceptance-suite.sh
 ```
 
+This runner starts Ceph, OpenBao, Polaris, Spark and Airflow once and reuses them across registry,
+retry, Deadline Alert, Spark, pipeline, maintenance and API phases. Each nested harness continues to
+own its fixtures and exact cleanup but does not restart shared services. The focused commands above
+remain independently runnable and own their own Airflow lifecycle outside the canonical suite. The
+two-cycle lifecycle qualification is intentionally run separately because its purpose is to test
+restart and retained-state behavior.
+
 Canonical run `airflow-development-acceptance-20260824T103411Z` passed every
 Airflow development phase, repeated 294 offline tests before and after live work,
 and closed the Increment 4 developer gate with zero remaining Stratus containers.

@@ -11,10 +11,12 @@ readonly DEADLINE_NAME="stratus-development-dag-deadline"
 readonly PROBE_OVERLAY="$HARNESS_DIR/scripts/tests/compose.deadline-alert.yaml"
 readonly RUN_STATE_DEADLINE_SECONDS=90
 readonly SCHEDULER_HEARTBEAT_SECONDS=2
-export AIRFLOW_COMPOSE_OVERLAY="$PROBE_OVERLAY"
+if ! suite_owns_airflow; then
+  export AIRFLOW_COMPOSE_OVERLAY="$PROBE_OVERLAY"
+fi
 
 suite_run_id="airflow-deadline-alert-$(date -u +%Y%m%dT%H%M%SZ)"
-DAG_ID="${DAG_ID_PREFIX}_${suite_run_id#airflow-deadline-alert-}_$$"
+DAG_ID="${STRATUS_DEADLINE_PROBE_DAG_ID:-${DAG_ID_PREFIX}_${suite_run_id#airflow-deadline-alert-}_$$}"
 export STRATUS_DEADLINE_PROBE_DAG_ID="$DAG_ID"
 on_time_run_id="$suite_run_id-on-time"
 missed_run_id="$suite_run_id-missed"
@@ -22,6 +24,7 @@ on_time_correlation="$on_time_run_id-correlation"
 missed_correlation="$missed_run_id-correlation"
 started_ms="$(date +%s%3N)"
 airflow_started=false
+airflow_owned=false
 current_run_id=""
 
 mkdir -p "$HARNESS_DIR/evidence"
@@ -61,7 +64,9 @@ cleanup() {
     # metadata row belongs to an older serialized DAG version. Delete only this test-owned
     # identity so repeated proofs remain isolated without resetting the development database.
     compose exec -T airflow-scheduler airflow dags delete "$DAG_ID" -y >/dev/null 2>&1 || true
-    bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
+    if $airflow_owned; then
+      bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
+    fi
   fi
   exit "$exit_code"
 }
@@ -110,7 +115,13 @@ trigger_probe() {
 log "event=airflow_deadline_alert_suite_started suiteRunId=$suite_run_id dagId=$DAG_ID taskId=$TASK_ID schedulerHeartbeatSeconds=$SCHEDULER_HEARTBEAT_SECONDS"
 
 phase_started_ms="$(date +%s%3N)"
-bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if suite_owns_airflow; then
+  bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+  log "event=airflow_deadline_alert_suite_airflow_reused suiteRunId=$suite_run_id"
+else
+  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+  airflow_owned=true
+fi
 airflow_started=true
 wait_for_probe_dag
 phase_complete "airflow_startup_and_probe_registration" "$phase_started_ms"

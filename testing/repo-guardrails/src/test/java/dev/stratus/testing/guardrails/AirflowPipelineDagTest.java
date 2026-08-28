@@ -401,9 +401,15 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
                 () -> assertTrue(script.contains("readonly DAG_ID=\""
                         + RETRY_ALERT_PROBE_DAG_ID + "\"")),
-                () -> assertTrue(script.contains("airflow dags test \"$DAG_ID\"")),
-                () -> assertTrue(script.contains("\\\"mode\\\":\\\"transient\\\"")),
-                () -> assertTrue(script.contains("\\\"mode\\\":\\\"permanent\\\"")),
+                () -> assertTrue(script.contains("airflow dags trigger \"$DAG_ID\"")),
+                () -> assertTrue(script.contains("airflow dags list-runs \"$DAG_ID\"")),
+                () -> assertTrue(script.contains("capture_run_logs")),
+                () -> assertFalse(script.contains("airflow dags test \"$DAG_ID\""),
+                        "the in-process DAG runner races a live Airflow scheduler"),
+                () -> assertTrue(script.contains(
+                        "trigger_probe \"$transient_run_id\" \"$transient_correlation\" transient success")),
+                () -> assertTrue(script.contains(
+                        "trigger_probe \"$permanent_run_id\" \"$permanent_correlation\" permanent failed")),
                 () -> assertTrue(script.contains("tryNumber=1")),
                 () -> assertTrue(script.contains("tryNumber=2")),
                 () -> assertTrue(script.contains("event=airflow_task_retry")),
@@ -483,7 +489,8 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
                 () -> assertTrue(script.contains("readonly DAG_ID_PREFIX=\""
                         + DEADLINE_ALERT_PROBE_DAG_ID + "\"")),
-                () -> assertTrue(script.contains("DAG_ID=\"${DAG_ID_PREFIX}_")),
+                () -> assertTrue(script.contains(
+                        "DAG_ID=\"${STRATUS_DEADLINE_PROBE_DAG_ID:-${DAG_ID_PREFIX}_")),
                 () -> assertTrue(script.contains("export STRATUS_DEADLINE_PROBE_DAG_ID=\"$DAG_ID\"")),
                 () -> assertTrue(script.contains("airflow dags trigger \"$DAG_ID\"")),
                 () -> assertTrue(script.contains(
@@ -513,8 +520,8 @@ final class AirflowPipelineDagTest {
         String script = Repo.read(DAG_PARSE_TEST_PATH);
         assertAll(
                 () -> assertTrue(script.contains("airflow-compose-startup.sh")),
-                () -> assertFalse(script.contains("airflow-compose-verify-health.sh"),
-                        "startup already performs the full health gate"),
+                () -> assertTrue(script.contains("airflow-compose-verify-health.sh"),
+                        "suite-scoped reuse must verify the shared deployment before parsing"),
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
                 () -> assertTrue(script.contains("airflow dags list-import-errors")),
                 () -> assertTrue(script.contains("airflow dags list")),
