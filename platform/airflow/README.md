@@ -102,7 +102,10 @@ lock, image, provider, landing-sensor, Spark-submission and REST regression pass
 
 The full Java orchestration verifier and its DAG execution scenarios were the
 scope of `P1-4.3-V1`. `P1-4.3-V2` exposes promotion as a named Airflow task while
-retaining writer-side evidence enforcement. The image smoke test is the provider/import evidence for
+retaining writer-side evidence enforcement. The task reads the small quality-result set directly
+through Iceberg's REST catalog instead of starting a Spark application. The API acceptance path
+uses a no-op positive DAG and this real fail-closed gate, so API state is not confused with Spark
+pipeline performance. The image smoke test is the provider/import evidence for
 the shared `P1-4.1-S2` artifact baseline, and the submission probe is its
 cross-component compatibility evidence; neither substitutes for that verifier.
 

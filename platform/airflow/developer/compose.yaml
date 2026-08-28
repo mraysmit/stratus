@@ -51,7 +51,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["bash", "-c", "airflow db migrate && airflow db check"]
+    command:
+      - bash
+      - -c
+      - >-
+        mkdir -p /opt/airflow/logs/spark-events &&
+        test -w /opt/airflow/logs/spark-events &&
+        airflow db migrate &&
+        airflow db check
     restart: "no"
 
   airflow-api-server:

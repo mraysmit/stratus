@@ -24,7 +24,7 @@ logical_epoch="$(date +%s)"
 airflow_started=false
 fixture_seeded=false
 export STRATUS_RUN_ID="$suite_run_id"
-export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 exec > >(tee "$evidence_file") 2>&1
 
 phase_complete() {

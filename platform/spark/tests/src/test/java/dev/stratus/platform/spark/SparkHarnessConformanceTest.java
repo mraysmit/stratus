@@ -402,6 +402,7 @@ final class SparkHarnessConformanceTest {
         assertTrue(compose.contains("STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-INFO}"),
                 "master and worker daemons must receive the selected Stratus log level");
         assertTrue(log4j.contains("${env:STRATUS_LOG_LEVEL:-INFO}")
+                        && log4j.contains("rootLogger.level = warn")
                         && log4j.contains("%X{suiteRunId}")
                         && log4j.contains("%X{jobRunId}")
                         && log4j.contains("%X{operationId}"),

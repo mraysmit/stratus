@@ -33,7 +33,7 @@ The one-coordinator/two-worker Podman layout and HTTP examples are the developer
 
 - Linux hosts only (RHEL 9 / Rocky 9 / Ubuntu 22.04 or later)
 - Podman 5.8.2 installed on each Trino node, or a newer approved stable patch after regression testing
-- JDK 21 and Maven 3.9.16 are the Stratus build and verifier baseline. Trino 482 is an explicit component-runtime exception: it requires Java 25 and uses the latest approved Java 25 patch image. The exception must be retested and removed or re-approved when the Trino version changes.
+- JDK 21 and Maven 3.9.16 are the Stratus build and verifier baseline. Trino 483 is an explicit component-runtime exception: it requires Java 25.0.1 or newer Java 25 and uses the latest approved Java 25 patch image. The exception must be retested and removed or re-approved when the Trino version changes.
 - DNS resolution:
   - `trino-coordinator.stratus.local`
   - `trino-worker1.stratus.local`
@@ -125,21 +125,21 @@ For Increment 5, Trino may run with internal lab access only. OIDC client authen
 
 Use the official Trino image. Pin the version rather than using `latest`.
 
-This plan uses `trinodb/trino:482`, matching the current Trino documentation referenced in §15. If the platform standardizes on a different approved Trino version, use that version consistently across all coordinator and worker nodes and update the JDBC dependency in §10.
+This plan uses Trino 483 as its 2026-08-28 planning baseline, matching the current Trino documentation referenced in §15. Before implementation, resolve and record the immutable image digest and repeat the Polaris REST, Ceph S3, JDBC and security-property qualification. Use the accepted version consistently across all coordinator and worker nodes and in the JDBC dependency in §10.
 
 ```bash
-podman pull docker.io/trinodb/trino:482
+podman pull docker.io/trinodb/trino:483
 ```
 
 For an air-gapped lab, save and distribute the image:
 
 ```bash
-podman save docker.io/trinodb/trino:482 | gzip > trino-482.tar.gz
-scp trino-482.tar.gz trino-worker1.stratus.local:~
-scp trino-482.tar.gz trino-worker2.stratus.local:~
+podman save docker.io/trinodb/trino:483 | gzip > trino-483.tar.gz
+scp trino-483.tar.gz trino-worker1.stratus.local:~
+scp trino-483.tar.gz trino-worker2.stratus.local:~
 
 # On each worker
-podman load < ~/trino-482.tar.gz
+podman load < ~/trino-483.tar.gz
 ```
 
 ---
@@ -289,7 +289,7 @@ iceberg.metadata-cache.enabled=true
 
 If Polaris uses a self-signed CA from Increment 1, the CA must be trusted by the JVM inside the Trino container. For a lab-only shortcut, a temporary truststore can be added to the image or mounted and referenced through JVM options. The target state is to replace lab certificates with FreeIPA Dogtag-issued certificates in Increment 7.
 
-Reference audit note: Trino 482 documentation confirms the REST catalog, OAuth2 credential, native S3, and Ranger access-control properties used by this design. The Iceberg connector security mode is written as the documented `READ_ONLY` enum value here. If a selected Trino release accepts only lowercase values in a specific catalog example, record that release-specific behavior in the implementation runbook and keep the verification suite as the deciding contract.
+Reference audit note: Trino 483 documentation confirms the REST catalog, OAuth2 credential, native S3, and Ranger access-control properties used by this design. The Iceberg connector security mode is written as the documented `READ_ONLY` enum value here. If the selected release accepts only lowercase values in a specific catalog example, record that release-specific behavior in the implementation runbook and keep the verification suite as the deciding contract.
 
 `s3.region`, `s3.aws-access-key`, and `s3.aws-secret-key` are Trino's official native S3 property names. They are not renamed because doing so would invent unsupported Trino configuration. `CEPH_RGW_TRINO_SIGNING_SCOPE` is the request-signing value established by the Ceph/Trino compatibility test; it has no default and is not a Stratus region or infrastructure location. The two credential variables hold a scoped Ceph RGW user, never cloud credentials.
 
@@ -323,7 +323,7 @@ podman run -d \
   -v /data/trino:/data/trino:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  docker.io/trinodb/trino:482
+  docker.io/trinodb/trino:483
 ```
 
 ### Start worker 1
@@ -339,7 +339,7 @@ podman run -d \
   -v /data/trino:/data/trino:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  docker.io/trinodb/trino:482
+  docker.io/trinodb/trino:483
 ```
 
 ### Start worker 2
@@ -355,7 +355,7 @@ podman run -d \
   -v /data/trino:/data/trino:z \
   -v /etc/stratus/certs:/etc/stratus/certs:ro,z \
   --restart unless-stopped \
-  docker.io/trinodb/trino:482
+  docker.io/trinodb/trino:483
 ```
 
 ### Verify the cluster
@@ -501,7 +501,7 @@ Add to `pom.xml`:
 <dependency>
     <groupId>io.trino</groupId>
     <artifactId>trino-jdbc</artifactId>
-    <version>482</version>
+  <version>483</version>
     <scope>test</scope>
 </dependency>
 ```

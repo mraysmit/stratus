@@ -9,7 +9,7 @@ suite_run_id="airflow-spark-$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_file="$HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
 export STRATUS_RUN_ID="$suite_run_id"
-export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 exec > >(tee "$evidence_file") 2>&1
 
 phase_complete() {

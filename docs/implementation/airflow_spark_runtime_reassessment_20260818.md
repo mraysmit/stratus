@@ -119,6 +119,7 @@ Build, deployment, integration, and release evidence are separate gates:
 | Image smoke | imports, versions, Java, `spark-submit`, removed surfaces | once per candidate image | under 2 minutes after required image layers are cached |
 | Developer lifecycle | PostgreSQL migration, Airflow health, two start/stop cycles | consume the already-built local development image; never build | under 3 minutes on the reference developer host |
 | Spark submission integration | one shared live stack, one real packaged JAR, positive and negative outcomes | no repeated cluster recreation per assertion | under 5 minutes with the data plane already ready |
+| Airflow API state contract | empty positive DAG, real fail-closed gate, exact task states and direct catalog no-write proof | no ingestion fixture and no Spark application | under 2 minutes after Airflow is healthy |
 | Security and provenance | SBOM, archive scan, waiver/reachability review, publication | release/image pipeline, not ordinary developer startup | measured separately; no developer-loop budget |
 
 These are objectives to be measured on the reference host, not reasons to hide
@@ -156,6 +157,49 @@ every trivial assertion.
   exact cleanup, secret, and zero-remaining-container checks.
 - `P1-4.3-V2`: in progress from 2026-08-25. Promotion becomes an explicit Airflow
   task while each writer rechecks the same evidence; fresh live task-state proof is required.
+
+### 2026-08-28 execution-model revision
+
+Profiling showed that the long suites repeatedly paid Spark driver startup, executor allocation,
+catalog initialization and cleanup costs to assert tiny control-plane facts. The revised contract
+keeps one real accepted pipeline path, but evaluates the explicit Airflow promotion task through
+Iceberg's REST catalog and generic reader without creating a `SparkContext`. The governed Spark
+writer still rechecks the same evidence immediately before writing.
+
+The blocked focused path now uses a deliberately unknown quality run, expects the gate task to fail
+closed, skips all downstream Spark tasks, and proves the target is absent with a direct catalog
+lookup. The public-API suite uses `stratus_api_contract_probe` for its positive trigger/state case
+and the real bronze-to-silver gate for its negative case. It no longer seeds ingestion, quality or
+maintenance fixtures and no longer starts independent Spark verifiers merely to re-prove API state.
+
+Airflow live scripts default to `INFO`. The Spark runtime root logger defaults to `WARN`, while
+`dev.stratus` remains at `INFO` unless `STRATUS_LOG_LEVEL=DEBUG` is requested for diagnosis. Spark
+submission verbosity is disabled for routine DAG work so Airflow does not repeat the complete
+rendered Spark configuration for every tiny job. Spark
+event-log storage is created and write-checked by the single declared `airflow-init` service before
+the long-running Airflow services start; startup no longer launches a second anonymous init
+container.
+
+The first revised focused run measured 75,496 ms for Airflow startup, 103,774 ms for landing plus
+bronze quality, 106,165 ms for the accepted bronze-to-silver DAG, 50,674 ms for accepted verification
+and cleanup, and 20,704 ms for the complete expected blocked DAG failure. The direct gate itself
+returned the accepted verdict in about 8.5 seconds and the blocked verdict in about 7.3 seconds.
+That run exposed only a missing direct-Java stdout marker in the final no-write assertion; the
+catalog result and fail-closed task state were correct. A stable stdout contract replaced the
+inactive logging-binding dependency before the formal rerun.
+
+The formal rerun `airflow-bronze-to-silver-20260828T052459Z` passed in 410,717 ms.
+Its accepted DAG took 101,985 ms, accepted verification and cleanup took 50,758 ms, the expected
+blocked DAG failure took 22,243 ms, and the direct no-write catalog check took 4,578 ms. Airflow
+startup took 125,430 ms while an offline Maven test was also running on the same workstation; that
+contention-affected startup is retained as observed evidence and is not labelled as query latency.
+
+The redesigned API run `airflow-api-orchestration-20260828T053205Z` passed in 212,751 ms, compared
+with 420,772 ms for the historical V1 full-stack run. Airflow startup took 71,725 ms and the Java
+API phase took 33,972 ms. Within that phase, the positive no-op scenario completed in 2,332 ms and
+the real fail-closed scenario in 24,393 ms; the direct target-absence check took 3,916 ms. No Spark
+application was submitted, exact downstream `upstream_failed` states passed, secret checks passed,
+and checked reverse-order shutdown reported zero remaining Stratus containers.
 
 The 2026-08-25 provider audit found Spark provider 6.3.2 and Amazon provider 9.35.0,
 both released on 2026-08-23. Airflow 3.3.1's official Python 3.14 constraints still
@@ -204,18 +248,18 @@ requirements; and full PySpark, LiteLLM, Ray, the Google provider, Derby server 
 and unused package-manager commands remained absent.
 
 The earlier candidate attempt did not complete because Docker's first pull of the digest-pinned Spark OCI
-layer ended in an external short read after 541 seconds at 420,930,690 of 463,020,878 bytes. No
-candidate image or new live acceptance claim was produced. Image smoke, DAG registry and V2 live
-proofs remain pending until that immutable layer can be fetched successfully.
+layer ended in an external short read after 541 seconds at 420,930,690 of 463,020,878 bytes. The
+later rebuilt image and smoke proof supersede this prerequisite failure; the event remains useful
+only as build-history evidence.
 
 After a later registry DNS failure and a pinned pull that made no terminal progress, an ephemeral
 read-only Airflow 3.3.1 container imported both changed DAGs using the verified local provider
 wheels. The resulting task IDs and edges matched the explicit-gate design. This is useful parse
 evidence only; it is not a successful candidate-image build or deployed Airflow registry result.
 
-The Java policy remains Java 21 for Stratus-owned builds and Spark/Airflow
-runtimes. Component-mandated exceptions, including the selected Trino release's
-Java requirement, remain explicit and independently recorded.
+The Java policy remains Java 21 for Stratus-owned builds and Spark/Airflow runtimes.
+Component-mandated exceptions remain explicit and independently recorded in their owning plans;
+the workstation runtime does not change a component's supported runtime contract.
 
 ## 7. Sources
 

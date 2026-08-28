@@ -10,8 +10,8 @@ readonly LANDING_BUCKET_VARIABLE="stratus_landing_bucket"
 readonly LANDING_BUCKET="stratus-landing"
 readonly LANDING_DAG_ID="stratus_landing_to_bronze"
 readonly DAG_ID="stratus_bronze_to_silver"
-readonly QUALITY_CLASS="dev.stratus.jobs.spark.QualityCheckJob"
 readonly VERIFIER_CLASS="dev.stratus.jobs.spark.AirflowBronzeToSilverVerifierJob"
+readonly CATALOG_STATE_CLASS="dev.stratus.jobs.spark.CatalogTableStateJob"
 readonly FIXTURE_SCRIPT="/opt/stratus/airflow-tests/airflow-pipeline-s3-fixture.py"
 readonly EXPECTED_ROWS="3"
 readonly SPARK_EVENT_LOG_DIRECTORY="/opt/airflow/logs/spark-events"
@@ -33,7 +33,7 @@ current_pipeline_run_id=""
 current_expected_outcome="blocked"
 verification_attempted=false
 export STRATUS_RUN_ID="$suite_run_id"
-export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 export STRATUS_BRONZE_TO_SILVER_RETRIES=0
 exec > >(tee "$evidence_file") 2>&1
 
@@ -87,7 +87,8 @@ run_verifier() {
 cleanup() {
   local exit_code="$?"
   set +e
-  if $airflow_started && [[ -n "$current_source_table" ]] && ! $verification_attempted; then
+  if $airflow_started && [[ "$current_expected_outcome" == "accepted" ]] \
+      && [[ -n "$current_source_table" ]] && ! $verification_attempted; then
     run_verifier "$current_expected_outcome" "$suite_run_id-emergency-cleanup" >/dev/null 2>&1
   fi
   if $airflow_started && $fixture_staged; then
@@ -98,6 +99,17 @@ cleanup() {
     bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
   fi
   exit "$exit_code"
+}
+
+verify_catalog_table_absent() {
+  compose exec -T airflow-scheduler java \
+    -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks \
+    -cp '/opt/stratus/jobs/stratus-spark-jobs.jar:/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar:/opt/spark/jars/*' \
+    "$CATALOG_STATE_CLASS" \
+    --table "$current_target_table" \
+    --expectedState absent \
+    --catalogProperties /opt/stratus/spark-conf/spark-defaults.conf \
+    --runId "$suite_run_id-blocked-catalog-verifier"
 }
 trap cleanup EXIT
 
@@ -167,25 +179,16 @@ phase_complete "accepted_output_verification_and_cleanup" "$phase_started_ms" "a
 delete_fixture "accepted"
 current_source_table=""
 
-# Blocked path: append a real failing bronze result to the otherwise valid seed run. The Airflow
-# transform must fail and the verifier must prove that no silver table exists after that failure.
-current_source_table="stratus.bronze.airflow_pipeline_probe_${suite_token}_blocked"
+# Blocked path: an unknown evidence run must fail closed before any Spark writer starts. This
+# isolates the V2 Airflow boundary without repeating ingestion and quality work already covered by
+# the accepted path and the suite-scoped Spark integration tests.
+current_source_table="stratus.bronze.airflow_pipeline_probe_${suite_token}_missing"
 current_target_table="stratus.silver.airflow_pipeline_probe_${suite_token}_blocked"
-current_source_batch="$suite_run_id-blocked-source"
-current_source_quality_run_id="$current_source_batch"
+current_source_batch="$suite_run_id-blocked-missing-source"
+current_source_quality_run_id="$suite_run_id-blocked-no-evidence"
 current_pipeline_run_id="$suite_run_id-blocked-promotion"
 current_expected_outcome="blocked"
 verification_attempted=false
-stage_bronze "blocked" 2
-
-phase_started_ms="$(date +%s%3N)"
-blocking_checks_base64="$(printf '%s' '[{"name":"requires_four_rows","type":"row_count_min","severity":"blocking","minRows":4}]' | base64 | tr -d '\r\n')"
-run_spark_job "$QUALITY_CLASS" \
-  --targetTable "$current_source_table" \
-  --runId "$current_source_quality_run_id" \
-  --pipelineRunId "$current_source_quality_run_id" \
-  --checksBase64 "$blocking_checks_base64"
-phase_complete "record_blocking_quality" "$phase_started_ms" "blocked"
 
 phase_started_ms="$(date +%s%3N)"
 blocked_conf="{\"bronze_table\":\"$current_source_table\",\"silver_table\":\"$current_target_table\",\"source_batch\":\"$current_source_batch\",\"quality_run_id\":\"$current_source_quality_run_id\",\"pipeline_run_id\":\"$current_pipeline_run_id\"}"
@@ -199,11 +202,10 @@ fi
 
 phase_started_ms="$(date +%s%3N)"
 verification_attempted=true
-run_verifier blocked "$suite_run_id-blocked-verifier"
-grep -Fq "AIRFLOW BRONZE TO SILVER BLOCK VERIFIED" "$evidence_file" \
-  || fail "The blocked bronze-to-silver verification marker is absent"
-phase_complete "blocked_no_write_verification_and_cleanup" "$phase_started_ms" "blocked"
-delete_fixture "blocked"
+verify_catalog_table_absent
+grep -Fq "CATALOG TABLE STATE VERIFIED" "$evidence_file" \
+  || fail "The blocked bronze-to-silver catalog verification marker is absent"
+phase_complete "blocked_no_write_verification" "$phase_started_ms" "blocked"
 current_source_table=""
 
 load_environment_file

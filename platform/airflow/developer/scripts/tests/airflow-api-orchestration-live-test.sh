@@ -2,7 +2,7 @@
 set -euo pipefail
 # Author: Mark Raysmith <raysmith.subs@gmail.com>
 # Date: 2026-08-24
-# Purpose: prove Airflow's REST API, a successful maintenance run, and a fail-closed promotion.
+# Purpose: prove Airflow's REST API task-state contract and a fail-closed promotion.
 
 readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly AIRFLOW_HARNESS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -11,26 +11,20 @@ readonly CEPH_DIR="$REPOSITORY_DIR/platform/ceph/compose-cluster"
 readonly OPENBAO_DIR="$REPOSITORY_DIR/platform/openbao/compose-service"
 readonly POLARIS_DIR="$REPOSITORY_DIR/platform/polaris/compose-service"
 readonly SPARK_DIR="$REPOSITORY_DIR/platform/spark/compose-cluster"
-readonly LANDING_BUCKET="stratus-landing"
-readonly FIXTURE_SCRIPT="/opt/stratus/airflow-tests/airflow-pipeline-s3-fixture.py"
-readonly INGESTION_CLASS="dev.stratus.jobs.spark.IngestionJob"
-readonly QUALITY_CLASS="dev.stratus.jobs.spark.QualityCheckJob"
-readonly MAINTENANCE_VERIFIER_CLASS="dev.stratus.jobs.spark.AirflowTableMaintenanceVerifierJob"
-readonly BRONZE_VERIFIER_CLASS="dev.stratus.jobs.spark.AirflowBronzeToSilverVerifierJob"
-readonly SPARK_EVENT_LOG_DIRECTORY="/opt/airflow/logs/spark-events"
+readonly CATALOG_STATE_CLASS="dev.stratus.jobs.spark.CatalogTableStateJob"
+readonly POSITIVE_DAG_ID="stratus_api_contract_probe"
+readonly BLOCKED_DAG_ID="stratus_bronze_to_silver"
 
 mkdir -p "$AIRFLOW_HARNESS_DIR/evidence"
 suite_run_id="airflow-api-orchestration-$(date -u +%Y%m%dT%H%M%SZ)"
 suite_token="$(printf '%s' "$suite_run_id" | tr '[:upper:]-' '[:lower:]_')"
-maintenance_table="stratus.bronze.airflow_maintenance_probe_${suite_token}"
 source_table="stratus.bronze.airflow_pipeline_probe_${suite_token}_blocked"
 target_table="stratus.silver.airflow_pipeline_probe_${suite_token}_blocked"
 source_batch="$suite_run_id-blocked-source"
-source_quality_run_id="$source_batch"
+source_quality_run_id="$suite_run_id-blocked-no-evidence"
 blocked_pipeline_run_id="$suite_run_id-blocked-promotion"
-positive_run_id="$suite_run_id-maintenance"
+positive_run_id="$suite_run_id-api-contract"
 blocked_run_id="$suite_run_id-quality-block"
-landing_key="verification/$suite_run_id/customers.csv"
 evidence_file="$AIRFLOW_HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
 
@@ -39,12 +33,9 @@ openbao_attempted=false
 polaris_attempted=false
 spark_attempted=false
 airflow_attempted=false
-maintenance_seeded=false
-bronze_seeded=false
-fixture_staged=false
 
 export STRATUS_RUN_ID="$suite_run_id"
-export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 export STRATUS_BRONZE_TO_SILVER_RETRIES=0
 exec > >(tee "$evidence_file") 2>&1
 
@@ -91,21 +82,6 @@ shutdown_checked_harnesses() {
       cleanup_failed=true
     fi
   }
-
-  if $airflow_attempted && [[ -f "$AIRFLOW_HARNESS_DIR/.env" ]]; then
-    if $bronze_seeded; then
-      run_bronze_verifier >/dev/null 2>&1
-    fi
-    if $maintenance_seeded; then
-      run_spark_job "$MAINTENANCE_VERIFIER_CLASS" \
-        --mode cleanup --targetTable "$maintenance_table" \
-        --runId "$suite_run_id-emergency-maintenance-cleanup" >/dev/null 2>&1
-    fi
-    if $fixture_staged; then
-      compose exec -T airflow-scheduler python "$FIXTURE_SCRIPT" delete \
-        --bucket "$LANDING_BUCKET" --key "$landing_key" >/dev/null 2>&1
-    fi
-  fi
 
   if $airflow_attempted; then
     shutdown_harness airflow \
@@ -163,35 +139,6 @@ phase spark_principal bash "$SPARK_DIR/scripts/verify/spark-compose-bootstrap-pr
 source "$AIRFLOW_HARNESS_DIR/scripts/lib/airflow-spark-common.sh"
 require_spark_cluster
 
-run_spark_job() {
-  local java_class="$1"
-  shift
-  compose exec -T airflow-scheduler mkdir -p "$SPARK_EVENT_LOG_DIRECTORY"
-  compose exec -T airflow-scheduler spark-submit \
-    --master spark://spark-master.stratus.local:7077 \
-    --class "$java_class" \
-    --conf spark.driver.host=airflow-scheduler.stratus.local \
-    --conf spark.driver.bindAddress=0.0.0.0 \
-    --conf spark.driver.extraClassPath=/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar:/opt/stratus/runtime/hadoop-aws.jar:/opt/stratus/runtime/aws-sdk-bundle.jar:/opt/stratus/runtime/analyticsaccelerator-s3.jar:/opt/stratus/runtime/log4j-slf4j-impl.jar \
-    --conf spark.eventLog.dir=file://$SPARK_EVENT_LOG_DIRECTORY \
-    --conf spark.cores.max=2 \
-    --conf spark.executor.cores=1 \
-    /opt/stratus/jobs/stratus-spark-jobs.jar "$@"
-}
-
-run_bronze_verifier() {
-  run_spark_job "$BRONZE_VERIFIER_CLASS" \
-    --sourceTable "$source_table" \
-    --targetTable "$target_table" \
-    --sourceBatch "$source_batch" \
-    --sourceQualityRunId "$source_quality_run_id" \
-    --pipelineRunId "$blocked_pipeline_run_id" \
-    --expectedRows 3 \
-    --expectedOutcome blocked \
-    --runId "$suite_run_id-blocked-side-effect-verifier" \
-    --cleanup true
-}
-
 configure_airflow() {
   verify_protected_connections
 
@@ -200,7 +147,7 @@ configure_airflow() {
     listing="$(compose exec -T airflow-scheduler airflow dags list 2>/dev/null || true)"
     complete=true
     for dag_id in stratus_landing_to_bronze stratus_bronze_to_silver \
-        stratus_silver_to_gold stratus_table_maintenance; do
+        stratus_silver_to_gold stratus_table_maintenance stratus_api_contract_probe; do
       if ! grep -Fq "$dag_id" <<<"$listing"; then
         complete=false
       fi
@@ -208,41 +155,29 @@ configure_airflow() {
     $complete && return 0
     sleep 2
   done
-  fail_local "Airflow did not register all four Stratus DAGs within 60 seconds"
+  fail_local "Airflow did not register all five required Stratus DAGs within 60 seconds"
+}
+
+verify_blocked_target_absent() {
+  compose exec -T airflow-scheduler java \
+    -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks \
+    -cp '/opt/stratus/jobs/stratus-spark-jobs.jar:/opt/stratus/runtime/stratus-iceberg-aws-runtime.jar:/opt/spark/jars/*' \
+    "$CATALOG_STATE_CLASS" \
+    --table "$target_table" \
+    --expectedState absent \
+    --catalogProperties /opt/stratus/spark-conf/spark-defaults.conf \
+    --runId "$suite_run_id-blocked-catalog-verifier"
 }
 
 airflow_attempted=true
 phase airflow_startup bash "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
 phase airflow_configuration configure_airflow
 
-phase maintenance_fixture_seed run_spark_job "$MAINTENANCE_VERIFIER_CLASS" \
-  --mode seed --targetTable "$maintenance_table" --runId "$suite_run_id-maintenance-seed"
-maintenance_seeded=true
-
-phase landing_fixture_stage compose exec -T airflow-scheduler python "$FIXTURE_SCRIPT" put \
-  --bucket "$LANDING_BUCKET" --key "$landing_key"
-fixture_staged=true
-
-phase bronze_ingestion run_spark_job "$INGESTION_CLASS" \
-  --sourceFile "s3a://$LANDING_BUCKET/$landing_key" \
-  --targetTable "$source_table" \
-  --sourceSystem airflow-api-verifier \
-  --batchId "$source_batch" \
-  --runId "$suite_run_id-bronze-ingestion"
-bronze_seeded=true
-
-blocking_checks_base64="$(printf '%s' '[{"name":"requires_four_rows","type":"row_count_min","severity":"blocking","minRows":4}]' | base64 | tr -d '\r\n')"
-phase blocking_quality_result run_spark_job "$QUALITY_CLASS" \
-  --targetTable "$source_table" \
-  --runId "$source_quality_run_id" \
-  --pipelineRunId "$source_quality_run_id" \
-  --checksBase64 "$blocking_checks_base64"
-
-positive_conf="{\"target_table\":\"$maintenance_table\",\"policy\":\"development-run-v1\",\"run_id\":\"$positive_run_id\"}"
+positive_conf="{\"probe_run_id\":\"$positive_run_id\"}"
 blocked_conf="{\"bronze_table\":\"$source_table\",\"silver_table\":\"$target_table\",\"source_batch\":\"$source_batch\",\"quality_run_id\":\"$source_quality_run_id\",\"pipeline_run_id\":\"$blocked_pipeline_run_id\"}"
 positive_conf_base64="$(printf '%s' "$positive_conf" | base64 | tr -d '\r\n')"
 blocked_conf_base64="$(printf '%s' "$blocked_conf" | base64 | tr -d '\r\n')"
-positive_tasks_base64="$(printf '%s' '{"apply_table_maintenance_policy":"success"}' | base64 | tr -d '\r\n')"
+positive_tasks_base64="$(printf '%s' '{"complete_api_contract_probe":"success"}' | base64 | tr -d '\r\n')"
 blocked_tasks_base64="$(printf '%s' '{"evaluate_bronze_promotion":"failed","run_silver_transform":"upstream_failed","run_silver_quality":"upstream_failed"}' | base64 | tr -d '\r\n')"
 
 phase java_api_verification run_repository_maven -o test \
@@ -254,38 +189,23 @@ phase java_api_verification run_repository_maven -o test \
   -DSTRATUS_AIRFLOW_PASSWORD=unused-development-value \
   -DSTRATUS_AIRFLOW_POLL_INTERVAL_MS=2000 \
   -DSTRATUS_AIRFLOW_RUN_TIMEOUT_MS=900000 \
-  -DSTRATUS_AIRFLOW_POSITIVE_DAG_ID=stratus_table_maintenance \
+  -DSTRATUS_AIRFLOW_POSITIVE_DAG_ID="$POSITIVE_DAG_ID" \
   -DSTRATUS_AIRFLOW_POSITIVE_RUN_ID="$positive_run_id" \
   -DSTRATUS_AIRFLOW_POSITIVE_EXPECTED_RUN_STATE=success \
   -DSTRATUS_AIRFLOW_POSITIVE_CONF_BASE64="$positive_conf_base64" \
   -DSTRATUS_AIRFLOW_POSITIVE_TASK_STATES_BASE64="$positive_tasks_base64" \
-  -DSTRATUS_AIRFLOW_BLOCKED_DAG_ID=stratus_bronze_to_silver \
+  -DSTRATUS_AIRFLOW_BLOCKED_DAG_ID="$BLOCKED_DAG_ID" \
   -DSTRATUS_AIRFLOW_BLOCKED_RUN_ID="$blocked_run_id" \
   -DSTRATUS_AIRFLOW_BLOCKED_EXPECTED_RUN_STATE=failed \
   -DSTRATUS_AIRFLOW_BLOCKED_CONF_BASE64="$blocked_conf_base64" \
   -DSTRATUS_AIRFLOW_BLOCKED_TASK_STATES_BASE64="$blocked_tasks_base64"
 
-phase maintenance_side_effect_verification run_spark_job "$MAINTENANCE_VERIFIER_CLASS" \
-  --mode verify-run --targetTable "$maintenance_table" \
-  --expectedRows 3 --expectedFiles 1 --runId "$suite_run_id-maintenance-side-effect-verifier"
-
-phase blocked_side_effect_verification run_bronze_verifier
-bronze_seeded=false
-
-phase maintenance_cleanup run_spark_job "$MAINTENANCE_VERIFIER_CLASS" \
-  --mode cleanup --targetTable "$maintenance_table" --runId "$suite_run_id-maintenance-cleanup"
-maintenance_seeded=false
-
-phase landing_cleanup compose exec -T airflow-scheduler python "$FIXTURE_SCRIPT" delete \
-  --bucket "$LANDING_BUCKET" --key "$landing_key"
-fixture_staged=false
+phase blocked_no_write_verification verify_blocked_target_absent
 
 grep -Fq "event=airflow_orchestration_verification_completed status=SUCCESS" "$evidence_file" \
   || fail_local "The Java API verification completion marker is absent"
-grep -Fq "AIRFLOW TABLE MAINTENANCE RUN VERIFIED" "$evidence_file" \
-  || fail_local "The independent maintenance side-effect marker is absent"
-grep -Fq "AIRFLOW BRONZE TO SILVER BLOCK VERIFIED" "$evidence_file" \
-  || fail_local "The independent blocked-promotion marker is absent"
+grep -Fq "CATALOG TABLE STATE VERIFIED" "$evidence_file" \
+  || fail_local "The blocked-promotion catalog-state marker is absent"
 
 load_environment_file
 for secret_name in AIRFLOW_DB_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET \

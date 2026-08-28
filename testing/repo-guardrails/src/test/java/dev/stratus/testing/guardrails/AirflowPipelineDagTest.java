@@ -24,7 +24,8 @@ import org.junit.jupiter.api.Test;
  * be dangerously wrong when any one of those details drifts.
  *
  * <p>This first P1-4.3 slice therefore fixes the landing-to-bronze boundary before live execution:
- * one shared SparkSubmitOperator factory, one structured failure callback, one rescheduling S3
+ * one shared SparkSubmitOperator factory, one lightweight catalog-gate factory, one structured
+ * failure callback, one rescheduling S3
  * sensor, the real packaged {@code IngestionJob} and {@code QualityCheckJob} classes, an immutable
  * task chain, bounded retries, and no embedded endpoint or credential material. Runtime acceptance
  * must later prove the same files through Airflow's API and the real Spark/Polaris/Ceph stack.
@@ -54,6 +55,8 @@ final class AirflowPipelineDagTest {
             Path.of("stratus_silver_to_gold.py");
     private static final Path TABLE_MAINTENANCE_DAG_PATH =
             Path.of("stratus_table_maintenance.py");
+    private static final Path API_CONTRACT_PROBE_DAG_PATH =
+            Path.of("stratus_api_contract_probe.py");
     private static final Path DAG_PARSE_TEST_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests",
             "airflow-pipeline-dag-parse-test.sh"));
@@ -112,10 +115,11 @@ final class AirflowPipelineDagTest {
     private static final String BRONZE_TO_SILVER_DAG_ID = "stratus_bronze_to_silver";
     private static final String SILVER_TO_GOLD_DAG_ID = "stratus_silver_to_gold";
     private static final String TABLE_MAINTENANCE_DAG_ID = "stratus_table_maintenance";
+    private static final String API_CONTRACT_PROBE_DAG_ID = "stratus_api_contract_probe";
     private static final String INGESTION_CLASS = "dev.stratus.jobs.spark.IngestionJob";
     private static final String QUALITY_CLASS = "dev.stratus.jobs.spark.QualityCheckJob";
     private static final String PROMOTION_GATE_CLASS =
-            "dev.stratus.jobs.spark.PromotionGate";
+            "dev.stratus.jobs.spark.CatalogPromotionGateJob";
     private static final String TRANSFORM_CLASS = "dev.stratus.jobs.spark.TransformJob";
     private static final String MATERIALISATION_CLASS =
             "dev.stratus.jobs.spark.MaterialisationJob";
@@ -123,6 +127,8 @@ final class AirflowPipelineDagTest {
             "dev.stratus.jobs.spark.TableMaintenanceJob";
     private static final String BRONZE_TO_SILVER_VERIFIER_CLASS =
             "dev.stratus.jobs.spark.AirflowBronzeToSilverVerifierJob";
+    private static final String CATALOG_TABLE_STATE_CLASS =
+            "dev.stratus.jobs.spark.CatalogTableStateJob";
     private static final String SILVER_TO_GOLD_VERIFIER_CLASS =
             "dev.stratus.jobs.spark.AirflowSilverToGoldVerifierJob";
     private static final String TABLE_MAINTENANCE_VERIFIER_CLASS =
@@ -180,6 +186,11 @@ final class AirflowPipelineDagTest {
         String common = read(COMMON_DAG_PATH);
         assertAll(
                 () -> assertTrue(common.contains("SparkSubmitOperator")),
+                () -> assertTrue(common.contains("BashOperator")),
+                () -> assertTrue(common.contains("catalog_promotion_gate_task")),
+                () -> assertTrue(common.contains(PROMOTION_GATE_CLASS)),
+                () -> assertTrue(common.contains("--catalogProperties")),
+                () -> assertTrue(common.contains("/opt/spark/jars/*")),
                 () -> assertTrue(common.contains("conn_id=SPARK_CONNECTION_ID")),
                 () -> assertTrue(common.contains("SPARK_CONNECTION_ID = \""
                         + SPARK_CONNECTION_ID + "\"")),
@@ -194,6 +205,8 @@ final class AirflowPipelineDagTest {
                         "the AWS bundle's legacy SLF4J contract must route into Log4j2"),
                 () -> assertTrue(common.contains("spark.driver.extraClassPath")),
                 () -> assertTrue(common.contains("spark.eventLog.dir")),
+                () -> assertTrue(common.contains("verbose=False"),
+                        "routine DAG submissions must not emit spark-submit's verbose configuration dump"),
                 () -> assertTrue(common.contains("STRATUS_DISABLE_DAG_SCHEDULES")),
                 () -> assertTrue(common.contains("test_isolated_schedule")),
                 () -> assertFalse(common.contains("STRATUS_POLARIS_CLIENT_SECRET")),
@@ -237,7 +250,7 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains("max_active_runs=1")),
                 () -> assertTrue(dag.contains(TRANSFORM_CLASS)),
                 () -> assertTrue(dag.contains(QUALITY_CLASS)),
-                () -> assertTrue(dag.contains(PROMOTION_GATE_CLASS)),
+                () -> assertTrue(dag.contains("catalog_promotion_gate_task")),
                 () -> assertTrue(dag.contains(BRONZE_TABLE)),
                 () -> assertTrue(dag.contains(SILVER_TABLE)),
                 () -> assertTrue(dag.contains("bronze_table")),
@@ -249,8 +262,8 @@ final class AirflowPipelineDagTest {
                         "TransformJob must enforce the recorded bronze verdict before writing"),
                 () -> assertTrue(dag.contains("task_id=\"evaluate_bronze_promotion\""),
                         "Airflow must expose the bronze promotion decision as its own task"),
-                () -> assertTrue(dag.contains("\"--runId\", QUALITY_RUN_ID")),
-                () -> assertTrue(dag.contains("\"--targetTable\", SOURCE_TABLE")),
+                () -> assertTrue(dag.contains("run_id=QUALITY_RUN_ID")),
+                () -> assertTrue(dag.contains("target_table=SOURCE_TABLE")),
                 () -> assertTrue(dag.contains("--sourceBatch"),
                         "Each run must transform only the correlated bronze delivery"),
                 () -> assertTrue(dag.contains("--businessKey")),
@@ -271,7 +284,7 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains(SILVER_TO_GOLD_RETRIES_ENV)),
                 () -> assertTrue(dag.contains("max_active_runs=1")),
                 () -> assertTrue(dag.contains(QUALITY_CLASS)),
-                () -> assertTrue(dag.contains(PROMOTION_GATE_CLASS)),
+                () -> assertTrue(dag.contains("catalog_promotion_gate_task")),
                 () -> assertTrue(dag.contains(MATERIALISATION_CLASS)),
                 () -> assertTrue(dag.contains(SILVER_TABLE)),
                 () -> assertTrue(dag.contains(GOLD_TABLE)),
@@ -283,8 +296,8 @@ final class AirflowPipelineDagTest {
                         "MaterialisationJob must enforce silver quality before writing gold"),
                 () -> assertTrue(dag.contains("task_id=\"evaluate_silver_promotion\""),
                         "Airflow must expose the silver promotion decision as its own task"),
-                () -> assertTrue(dag.contains("\"--runId\", QUALITY_RUN_ID")),
-                () -> assertTrue(dag.contains("\"--targetTable\", SOURCE_TABLE")),
+                () -> assertTrue(dag.contains("run_id=QUALITY_RUN_ID")),
+                () -> assertTrue(dag.contains("target_table=SOURCE_TABLE")),
                 () -> assertTrue(dag.contains("--sourceTables")),
                 () -> assertTrue(dag.contains("--sql")),
                 () -> assertTrue(dag.contains("customer_count")),
@@ -528,6 +541,7 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(overlay.contains("AIRFLOW_CONN_STRATUS_LANDING")),
                 () -> assertTrue(overlay.contains("AIRFLOW_VAR_STRATUS_LANDING_BUCKET")),
                 () -> assertTrue(overlay.contains("STRATUS_DISABLE_DAG_SCHEDULES")),
+                () -> assertTrue(overlay.contains("STRATUS_LOG_LEVEL: ${STRATUS_LOG_LEVEL:-INFO}")),
                 () -> assertTrue(overlay.contains("stratus-ca.crt:ro")),
                 () -> assertTrue(overlay.contains("hadoop-aws.jar:ro")),
                 () -> assertTrue(overlay.contains("aws-sdk-bundle.jar:ro")),
@@ -572,13 +586,18 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains(BRONZE_TO_SILVER_VERIFIER_CLASS)),
                 () -> assertTrue(script.contains("--expectedOutcome")),
                 () -> assertTrue(script.contains("run_verifier accepted")),
-                () -> assertTrue(script.contains("run_verifier blocked")),
+                () -> assertFalse(script.contains("run_verifier blocked"),
+                        "The blocked path must not start a redundant Spark verifier"),
+                () -> assertFalse(script.contains("stage_bronze \"blocked\""),
+                        "Fail-closed orchestration does not require a second ingestion run"),
+                () -> assertTrue(script.contains(CATALOG_TABLE_STATE_CLASS)),
+                () -> assertTrue(script.contains("--expectedState absent")),
                 () -> assertTrue(script.contains("export " + BRONZE_TO_SILVER_RETRIES_ENV
                         + "=0"),
                         "The expected-failure proof must not idle through normal retry delays"),
                 () -> assertTrue(overlay.contains(BRONZE_TO_SILVER_RETRIES_ENV)),
                 () -> assertTrue(script.contains("AIRFLOW BRONZE TO SILVER VERIFIED")),
-                () -> assertTrue(script.contains("AIRFLOW BRONZE TO SILVER BLOCK VERIFIED")),
+                () -> assertTrue(script.contains("CATALOG TABLE STATE VERIFIED")),
                 () -> assertTrue(script.contains("event=airflow_bronze_to_silver_phase_completed")),
                 () -> assertTrue(script.contains("elapsedMs=")),
                 () -> assertTrue(script.contains("assert_not_logged")),
@@ -641,7 +660,18 @@ final class AirflowPipelineDagTest {
     @Test
     void apiOrchestrationLiveTestRetriesShutdownAndReportsTheObservedContainerCount() {
         String script = Repo.read(API_ORCHESTRATION_LIVE_TEST_PATH);
+        String probe = read(API_CONTRACT_PROBE_DAG_PATH);
         assertAll(
+                () -> assertTrue(probe.contains(
+                        "dag_id=\"" + API_CONTRACT_PROBE_DAG_ID + "\"")),
+                () -> assertTrue(probe.contains("EmptyOperator")),
+                () -> assertTrue(script.contains(API_CONTRACT_PROBE_DAG_ID)),
+                () -> assertTrue(script.contains(CATALOG_TABLE_STATE_CLASS)),
+                () -> assertTrue(script.contains("--expectedState absent")),
+                () -> assertFalse(script.contains("spark-submit"),
+                        "the API state-contract suite must not start Spark applications"),
+                () -> assertFalse(script.contains("airflow-pipeline-s3-fixture.py"),
+                        "the API state-contract suite does not need data fixtures"),
                 () -> assertTrue(script.contains("shutdown_harness"),
                         "provider teardown must retry a transient lifecycle-script failure"),
                 () -> assertTrue(script.contains("shutdown_harness airflow")),

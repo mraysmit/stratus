@@ -346,9 +346,10 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(scan.contains("aquasec/trivy:" + TRIVY_VERSION + "@sha256:")),
                 () -> assertTrue(scan.contains("docker save")),
                 () -> assertTrue(scan.contains("--input")),
-                () -> assertTrue(scan.contains("index.json")
-                                && scan.contains("manifest.json"),
-                        "Archive identity checks must support OCI indexes and legacy manifests"),
+                () -> assertTrue(scan.contains("index.json"),
+                        "Archive identity checks must support OCI indexes"),
+                () -> assertTrue(scan.contains("manifest.json"),
+                        "Archive identity checks must support legacy manifests"),
                 () -> assertTrue(scan.contains("tar -xOf \"${ARCHIVE}\" manifest.json")),
                 () -> assertTrue(scan.contains("]] " + SHELL_CONJUNCTION
                         + " archive_matches_image; then")),
@@ -356,18 +357,18 @@ final class AirflowArtifactBaselineTest {
                 () -> assertTrue(scan.contains(
                         "docker save --output \"${ARCHIVE_NAME}\" \"${IMAGE_TAG}\"")),
                 () -> assertTrue(build.contains("development-image-id.txt")),
-                () -> assertTrue(build.contains("--dry-run")
-                                && build.contains("--no-index")
-                                && build.contains("--no-build-isolation")
-                                && build.contains("--require-hashes")
-                                && build.contains("requirements.lock")
-                                && build.contains("pip_report_selected_artifacts")
-                                && build.contains("verify_wheelhouse_exact_file_set"),
+                () -> assertTrue(build.contains("--dry-run")),
+                () -> assertTrue(build.contains("--no-index")),
+                () -> assertTrue(build.contains("--no-build-isolation")),
+                () -> assertTrue(build.contains("--require-hashes")),
+                () -> assertTrue(build.contains("requirements.lock")),
+                () -> assertTrue(build.contains("pip_report_selected_artifacts")),
+                () -> assertTrue(build.contains("verify_wheelhouse_exact_file_set"),
                         "Assembly must reject missing and unexpected wheelhouse artifacts"),
                 () -> assertTrue(scan.contains("scan-archive-image-id.txt")),
-                () -> assertTrue(scan.contains("docker create")
-                                && scan.contains("docker cp \"${ARCHIVE}\"")
-                                && scan.contains("docker start --attach"),
+                () -> assertTrue(scan.contains("docker create")),
+                () -> assertTrue(scan.contains("docker cp \"${ARCHIVE}\"")),
+                () -> assertTrue(scan.contains("docker start --attach"),
                         "Windows scans must use container-local archive I/O"),
                 () -> assertFalse(scan.contains("${ARTIFACT_DIR}:/scan"),
                         "The scanner must not analyse the archive through a Windows bind mount"),

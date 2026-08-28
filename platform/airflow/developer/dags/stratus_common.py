@@ -10,6 +10,7 @@ import os
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
 SPARK_CONNECTION_ID = "spark_default"
@@ -30,6 +31,11 @@ SPARK_DRIVER_EXTRA_CLASSPATH = ":".join(
 )
 SPARK_EVENT_LOG_DIRECTORY = "file:///opt/airflow/logs/spark-events"
 SPARK_DRIVER_HOST = "airflow-scheduler.stratus.local"
+CATALOG_PROPERTIES_FILE = "/opt/stratus/spark-conf/spark-defaults.conf"
+CATALOG_PROMOTION_GATE_CLASS = "dev.stratus.jobs.spark.CatalogPromotionGateJob"
+CATALOG_PROMOTION_GATE_CLASSPATH = ":".join(
+    [SPARK_JOBS_JAR, SPARK_RUNTIME_JAR, "/opt/spark/jars/*"]
+)
 
 
 def test_isolated_schedule(schedule: str) -> str | None:
@@ -64,5 +70,38 @@ def spark_submit_task(
         application_args=list(application_args),
         conf=dict(SPARK_SUBMISSION_CONF),
         on_failure_callback=on_failure_callback,
-        verbose=True,
+        verbose=False,
+    )
+
+
+def catalog_promotion_gate_task(
+    *,
+    task_id: str,
+    run_id: str,
+    target_table: str,
+    on_failure_callback: Callable[[dict[str, Any]], None],
+) -> BashOperator:
+    """Evaluate quality evidence without starting a Spark application."""
+    return BashOperator(
+        task_id=task_id,
+        bash_command="""
+set -euo pipefail
+exec java \
+  -Djavax.net.ssl.trustStore=/opt/stratus/certs/stratus-truststore.jks \
+  -cp "$STRATUS_GATE_CLASSPATH" \
+  "$STRATUS_GATE_CLASS" \
+  --runId "$STRATUS_GATE_RUN_ID" \
+  --targetTable "$STRATUS_GATE_TARGET_TABLE" \
+  --catalogProperties "$STRATUS_GATE_CATALOG_PROPERTIES"
+""".strip(),
+        env={
+            "STRATUS_GATE_CLASS": CATALOG_PROMOTION_GATE_CLASS,
+            "STRATUS_GATE_CLASSPATH": CATALOG_PROMOTION_GATE_CLASSPATH,
+            "STRATUS_GATE_RUN_ID": run_id,
+            "STRATUS_GATE_TARGET_TABLE": target_table,
+            "STRATUS_GATE_CATALOG_PROPERTIES": CATALOG_PROPERTIES_FILE,
+        },
+        append_env=True,
+        do_xcom_push=False,
+        on_failure_callback=on_failure_callback,
     )

@@ -38,7 +38,7 @@ current_silver_pipeline_run_id=""
 current_source_quality_run_id=""
 current_pipeline_run_id=""
 export STRATUS_RUN_ID="$suite_run_id"
-export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-DEBUG}"
+export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 export STRATUS_BRONZE_TO_SILVER_RETRIES=0
 export STRATUS_SILVER_TO_GOLD_RETRIES=0
 exec > >(tee "$evidence_file") 2>&1

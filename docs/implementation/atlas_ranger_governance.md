@@ -652,7 +652,7 @@ Add to `pom.xml` if they are not already present:
 <dependency>
     <groupId>io.trino</groupId>
     <artifactId>trino-jdbc</artifactId>
-    <version>482</version>
+    <version>483</version>
     <scope>test</scope>
 </dependency>
 <dependency>

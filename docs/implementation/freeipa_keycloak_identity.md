@@ -64,7 +64,7 @@ accepted, the later production-hardening stage activates those controls and reru
 
 Reference baseline: 2026-07-10.
 
-The current FreeIPA documentation page points users toward Red Hat Enterprise Linux Identity Management documentation for maintained operational guidance. Keycloak's current documentation line is 26.6.4 and its supported-configuration matrix includes PostgreSQL 18.x. Stratus pins PostgreSQL 18.4 for Keycloak, uses an optimized Keycloak image, enables HTTPS in production mode, and exposes health/metrics only on the management network. Trino 482 documentation confirms that OAuth2 client authentication is configured on the coordinator, requires TLS and a shared secret, and does not require the same client-auth changes on workers.
+The current FreeIPA documentation page points users toward Red Hat Enterprise Linux Identity Management documentation for maintained operational guidance. Keycloak's current documentation line is 26.6.4 and its supported-configuration matrix includes PostgreSQL 18.x. Stratus pins PostgreSQL 18.4 for Keycloak, uses an optimized Keycloak image, enables HTTPS in production mode, and exposes health/metrics only on the management network. Trino 483 documentation confirms that OAuth2 client authentication is configured on the coordinator, requires TLS and a shared secret, and does not require the same client-auth changes on workers.
 
 Airflow is standardized on Airflow 3.3.1 in Increment 4. Increment 7 hardens that Airflow 3.x topology using the Airflow 3 public API and auth-manager model rather than the retired Airflow 2.x webserver/Flask AppBuilder assumption.
 
@@ -755,7 +755,7 @@ Add to `pom.xml` if they are not already present:
 <dependency>
     <groupId>io.trino</groupId>
     <artifactId>trino-jdbc</artifactId>
-    <version>482</version>
+    <version>483</version>
     <scope>test</scope>
 </dependency>
 ```

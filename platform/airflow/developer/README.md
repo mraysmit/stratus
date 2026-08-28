@@ -103,13 +103,14 @@ harness in the same test directory:
 bash platform/airflow/developer/scripts/tests/airflow-bronze-to-silver-live-test.sh
 ```
 
-The harness first proves the accepted path from an isolated landing object
-through bronze quality, an explicit promotion task, a defence-in-depth gated deterministic transform, two passing silver
-checks and an independently verified three-row Iceberg snapshot. It then adds
-a genuine blocking quality failure, requires the Airflow promotion task to fail,
-leaves transform and downstream quality `upstream_failed`, and independently proves that no silver target was created. Both paths
-clean their exact tables, quality rows and landing objects. Run
-`airflow-bronze-to-silver-20260823T084502Z` passed in 356,572 ms.
+The harness proves one accepted path from an isolated landing object through bronze quality, the
+lightweight direct-catalog promotion task, a defence-in-depth gated deterministic transform, two
+passing silver checks and an independently verified three-row Iceberg snapshot. Its blocked path
+uses a deliberately unknown quality run, requires the gate to fail closed in seconds, leaves
+transform and downstream quality unstarted, and proves the target is absent with a direct catalog
+lookup. It does not repeat ingestion, quality or a standalone Spark verifier for the blocked case.
+The historical V1 run `airflow-bronze-to-silver-20260823T084502Z` passed in 356,572 ms; V2 evidence
+is recorded separately and does not rewrite that result.
 
 Normal executions use two retries with a five-minute delay. The live harness
 sets `STRATUS_BRONZE_TO_SILVER_RETRIES=0` only for its deliberately blocked
@@ -186,15 +187,14 @@ bash platform/airflow/developer/scripts/tests/airflow-api-orchestration-live-tes
 
 The harness starts Ceph, OpenBao, Polaris, Spark, and Airflow with their checked-in
 lifecycle scripts. Its Java verifier authenticates to Airflow 3.3.1, validates
-scheduler and metadata health, requires all four Stratus DAGs to be registered
-and unpaused, supplies caller-owned run IDs, and records bounded poll, DAG, and
-task timings. It requires a metadata-policy maintenance run to succeed and a
-bronze-to-silver run with a persisted blocking quality result to fail at
-`evaluate_bronze_promotion`, leaving transform and downstream quality tasks
-`upstream_failed`. Independent Spark verifiers prove three maintenance files
-were compacted to one without losing rows and that the blocked silver target was
-never created. Exact fixtures are purged, generated secrets are scanned, and all
-five provider stacks are stopped in reverse order on every exit path.
+scheduler and metadata health, requires the platform DAGs and the API contract probe to be
+registered and unpaused, supplies caller-owned run IDs, and records bounded poll, DAG, and task
+timings. A no-op DAG proves the positive API trigger/state contract. The real bronze-to-silver DAG
+uses an unknown quality run and must fail at `evaluate_bronze_promotion`, leaving transform and
+downstream quality `upstream_failed`. A direct Iceberg catalog lookup proves the target was never
+created. This V2 API proof creates no data fixture and starts no Spark application; pipeline data
+behavior remains covered by its focused live suites. Generated secrets are scanned, and all five
+provider stacks are stopped in reverse order on every exit path.
 
 The V1 accepted run `airflow-api-orchestration-20260824T073836Z` completed in 420,772
 ms. The positive DAG used 34,657 ms of Airflow time; the deliberately blocked DAG
@@ -205,7 +205,11 @@ independent side-effect checks passed, and cleanup reported
 
 Those task-state details are historical V1 evidence. `P1-4.3-V2` now exposes
 promotion as its own Airflow task and retains the writer check as defence in depth;
-fresh parse, focused-live and API evidence is required before V2 is accepted.
+the revised run `airflow-api-orchestration-20260828T053205Z` passed in 212,751 ms. Its Java API
+phase took 33,972 ms, including a 2,332 ms positive probe and a 24,393 ms real fail-closed scenario;
+the direct no-write check took 3,916 ms and cleanup reported zero remaining containers. The focused
+bronze-to-silver V2 run `airflow-bronze-to-silver-20260828T052459Z` also passed. A superseding V2
+acceptance record still requires the immutable source revision produced by the eventual commit.
 
 Expected-failure retry overrides must reach both `airflow-dag-processor` and
 `airflow-scheduler`: Airflow 3 serializes DAG defaults in the DAG processor, while
