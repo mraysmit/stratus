@@ -8,6 +8,7 @@ mkdir -p "$HARNESS_DIR/evidence"
 suite_run_id="airflow-spark-$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_file="$HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
+airflow_owned=false
 export STRATUS_RUN_ID="$suite_run_id"
 export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
 exec > >(tee "$evidence_file") 2>&1
@@ -24,13 +25,28 @@ assert_not_logged() {
     || fail "Secret-redaction check failed for $label"
 }
 
+cleanup() {
+  local exit_code="$?"
+  set +e
+  if $airflow_owned; then
+    bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
+  fi
+  exit "$exit_code"
+}
+trap cleanup EXIT
+
 log "event=airflow_spark_suite_started suiteRunId=$suite_run_id logLevel=$STRATUS_LOG_LEVEL"
 require_spark_cluster
 
 phase_started_ms="$(date +%s%3N)"
-bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if suite_owns_airflow; then
+  bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+  log "event=airflow_spark_suite_airflow_reused suiteRunId=$suite_run_id"
+else
+  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+  airflow_owned=true
+fi
 phase_complete "airflow_startup" "$phase_started_ms"
-trap 'bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"' EXIT
 
 phase_started_ms="$(date +%s%3N)"
 compose exec -T airflow-scheduler airflow connections delete spark_default >/dev/null 2>&1 || true

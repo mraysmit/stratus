@@ -12,11 +12,21 @@ readonly CEPH_DIR="$REPOSITORY_DIR/platform/ceph/compose-cluster"
 readonly OPENBAO_DIR="$REPOSITORY_DIR/platform/openbao/compose-service"
 readonly POLARIS_DIR="$REPOSITORY_DIR/platform/polaris/compose-service"
 readonly SPARK_DIR="$REPOSITORY_DIR/platform/spark/compose-cluster"
+readonly ACCEPTANCE_OVERLAY="$AIRFLOW_HARNESS_DIR/scripts/tests/compose.acceptance-suite.yaml"
 
 readonly SUITE_RUN_ID="airflow-development-acceptance-$(date -u +%Y%m%dT%H%M%SZ)"
 readonly EVIDENCE_DIR="$AIRFLOW_HARNESS_DIR/evidence"
 readonly EVIDENCE_FILE="$EVIDENCE_DIR/${SUITE_RUN_ID}.log"
 readonly SUITE_STARTED_MS="$(date +%s%3N)"
+services_stopped=false
+
+# The canonical runner owns one Airflow lifecycle. Every nested harness sees the same provider,
+# metadata, scheduler and DAG-processor state and remains responsible only for its own fixtures.
+export STRATUS_AIRFLOW_SUITE_SCOPED=true
+export STRATUS_DISABLE_DAG_SCHEDULES=true
+export STRATUS_BRONZE_TO_SILVER_RETRIES=0
+export STRATUS_SILVER_TO_GOLD_RETRIES=0
+export STRATUS_DEADLINE_PROBE_DAG_ID="stratus_deadline_alert_probe_${SUITE_RUN_ID#airflow-development-acceptance-}_$$"
 
 mkdir -p "$EVIDENCE_DIR"
 exec > >(tee "$EVIDENCE_FILE") 2>&1
@@ -71,6 +81,24 @@ shutdown_harness() {
   bash "$script"
 }
 
+stop_shared_services() {
+  local stop_failed=false
+  shutdown_harness airflow \
+    "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh" || stop_failed=true
+  shutdown_harness spark \
+    "$SPARK_DIR/scripts/lifecycle/spark-compose-shutdown.sh" || stop_failed=true
+  shutdown_harness polaris \
+    "$POLARIS_DIR/scripts/lifecycle/polaris-compose-shutdown.sh" || stop_failed=true
+  shutdown_harness openbao \
+    "$OPENBAO_DIR/scripts/lifecycle/openbao-compose-shutdown.sh" || stop_failed=true
+  shutdown_harness ceph \
+    "$CEPH_DIR/scripts/lifecycle/ceph-compose-shutdown.sh" || stop_failed=true
+  if $stop_failed; then
+    return 1
+  fi
+  services_stopped=true
+}
+
 cleanup() {
   local original_exit_code="$?"
   local final_exit_code="$original_exit_code"
@@ -80,16 +108,9 @@ cleanup() {
   set +e
 
   log_suite cleanup_started "originalExitCode=$original_exit_code"
-  shutdown_harness airflow \
-    "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh" || cleanup_failed=true
-  shutdown_harness spark \
-    "$SPARK_DIR/scripts/lifecycle/spark-compose-shutdown.sh" || cleanup_failed=true
-  shutdown_harness polaris \
-    "$POLARIS_DIR/scripts/lifecycle/polaris-compose-shutdown.sh" || cleanup_failed=true
-  shutdown_harness openbao \
-    "$OPENBAO_DIR/scripts/lifecycle/openbao-compose-shutdown.sh" || cleanup_failed=true
-  shutdown_harness ceph \
-    "$CEPH_DIR/scripts/lifecycle/ceph-compose-shutdown.sh" || cleanup_failed=true
+  if ! $services_stopped; then
+    stop_shared_services || cleanup_failed=true
+  fi
 
   remaining="$(docker ps --format '{{.Names}}' \
     --filter 'name=stratus-airflow' --filter 'name=stratus-spark' \
@@ -121,10 +142,6 @@ log_suite development_acceptance_started "evidence=$EVIDENCE_FILE"
 
 run_phase offline_reactor_before_live run_repository_maven -o verify
 run_phase image_acceptance bash "$IMAGE_TEST_DIR/airflow-image-acceptance-test.sh"
-run_phase lifecycle_two_cycles bash "$SCRIPT_DIR/airflow-compose-lifecycle-test.sh"
-run_phase dag_parse_and_registry bash "$SCRIPT_DIR/airflow-pipeline-dag-parse-test.sh"
-run_phase retry_and_terminal_alert bash "$SCRIPT_DIR/airflow-retry-alert-live-test.sh"
-run_phase deadline_alert bash "$SCRIPT_DIR/airflow-deadline-alert-live-test.sh"
 
 run_phase ceph_startup bash "$CEPH_DIR/scripts/lifecycle/ceph-compose-startup.sh"
 run_phase ceph_buckets bash "$CEPH_DIR/scripts/verify/ceph-compose-bootstrap-buckets.sh"
@@ -135,16 +152,24 @@ run_phase polaris_catalog bash "$POLARIS_DIR/scripts/verify/polaris-compose-boot
 run_phase spark_startup bash "$SPARK_DIR/scripts/lifecycle/spark-compose-startup.sh"
 run_phase spark_principal bash "$SPARK_DIR/scripts/verify/spark-compose-bootstrap-principal.sh"
 
+# Load the accepted Spark/Airflow mount and credential contract only after the provider-owned
+# connection files exist. The additional overlay makes both control-plane probes available in the
+# same Airflow deployment as the platform DAGs.
+# shellcheck disable=SC1091
+source "$AIRFLOW_HARNESS_DIR/scripts/lib/airflow-spark-common.sh"
+require_spark_cluster
+append_airflow_compose_overlay "$ACCEPTANCE_OVERLAY"
+run_phase airflow_startup bash "$AIRFLOW_HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+
+run_phase dag_parse_and_registry bash "$SCRIPT_DIR/airflow-pipeline-dag-parse-test.sh"
+run_phase retry_and_terminal_alert bash "$SCRIPT_DIR/airflow-retry-alert-live-test.sh"
+run_phase deadline_alert bash "$SCRIPT_DIR/airflow-deadline-alert-live-test.sh"
+
 run_phase spark_submission bash "$SCRIPT_DIR/airflow-spark-submission-test.sh"
 run_phase landing_to_bronze bash "$SCRIPT_DIR/airflow-landing-to-bronze-live-test.sh"
 run_phase bronze_to_silver bash "$SCRIPT_DIR/airflow-bronze-to-silver-live-test.sh"
 run_phase silver_to_gold bash "$SCRIPT_DIR/airflow-silver-to-gold-live-test.sh"
 run_phase table_maintenance bash "$SCRIPT_DIR/airflow-table-maintenance-live-test.sh"
-
-run_phase shared_spark_shutdown bash "$SPARK_DIR/scripts/lifecycle/spark-compose-shutdown.sh"
-run_phase shared_polaris_shutdown bash "$POLARIS_DIR/scripts/lifecycle/polaris-compose-shutdown.sh"
-run_phase shared_openbao_shutdown bash "$OPENBAO_DIR/scripts/lifecycle/openbao-compose-shutdown.sh"
-run_phase shared_ceph_shutdown bash "$CEPH_DIR/scripts/lifecycle/ceph-compose-shutdown.sh"
-
 run_phase public_api_orchestration bash "$SCRIPT_DIR/airflow-api-orchestration-live-test.sh"
+run_phase shared_service_shutdown stop_shared_services
 run_phase offline_reactor_after_live run_repository_maven -o verify

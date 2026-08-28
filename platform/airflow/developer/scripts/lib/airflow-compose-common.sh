@@ -47,31 +47,59 @@ compose_runtime() {
 
 compose() {
   local runtime project_dir env_file compose_file overlay_file
-  local -a compose_files
+  local -a compose_files overlay_files
   runtime="$(compose_runtime)"
   project_dir="$HARNESS_DIR"
   env_file="$HARNESS_DIR/.env"
   compose_file="$HARNESS_DIR/compose.yaml"
   compose_files=(-f "$compose_file")
+  overlay_files=()
   if [[ -n "${AIRFLOW_COMPOSE_OVERLAY:-}" ]]; then
-    overlay_file="$AIRFLOW_COMPOSE_OVERLAY"
-    compose_files+=(-f "$overlay_file")
+    overlay_files+=("$AIRFLOW_COMPOSE_OVERLAY")
   fi
+  if [[ -n "${AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS:-}" ]]; then
+    while IFS= read -r overlay_file; do
+      [[ -z "$overlay_file" ]] || overlay_files+=("$overlay_file")
+    done <<<"$AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS"
+  fi
+  for overlay_file in "${overlay_files[@]}"; do
+    [[ -f "$overlay_file" ]] || fail "Airflow Compose overlay is absent: $overlay_file"
+    compose_files+=(-f "$overlay_file")
+  done
   if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
     project_dir="$(cygpath -w "$project_dir")"
     env_file="$(cygpath -w "$env_file")"
     compose_file="$(cygpath -w "$compose_file")"
     compose_files=(-f "$compose_file")
-    if [[ -n "${AIRFLOW_COMPOSE_OVERLAY:-}" ]]; then
-      overlay_file="$(cygpath -w "$AIRFLOW_COMPOSE_OVERLAY")"
+    for overlay_file in "${overlay_files[@]}"; do
+      overlay_file="$(cygpath -w "$overlay_file")"
       compose_files+=(-f "$overlay_file")
-    fi
+    done
     MSYS_NO_PATHCONV=1 "$runtime" compose --project-directory "$project_dir" \
       --env-file "$env_file" "${compose_files[@]}" "$@"
   else
     "$runtime" compose --project-directory "$project_dir" --env-file "$env_file" \
       "${compose_files[@]}" "$@"
   fi
+}
+
+append_airflow_compose_overlay() {
+  local overlay_file="$1"
+  [[ -f "$overlay_file" ]] || fail "Airflow Compose overlay is absent: $overlay_file"
+  if [[ -z "${AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS:-}" ]]; then
+    AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS="$overlay_file"
+  else
+    AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS+=$'\n'"$overlay_file"
+  fi
+  export AIRFLOW_COMPOSE_ADDITIONAL_OVERLAYS
+}
+
+suite_owns_airflow() {
+  case "${STRATUS_AIRFLOW_SUITE_SCOPED:-false}" in
+    true) return 0 ;;
+    false) return 1 ;;
+    *) fail "STRATUS_AIRFLOW_SUITE_SCOPED must be true or false" ;;
+  esac
 }
 
 # Teardown deliberately does not load .env or interpolate compose.yaml.

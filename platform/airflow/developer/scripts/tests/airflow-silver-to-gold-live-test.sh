@@ -25,6 +25,7 @@ evidence_file="$HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
 logical_epoch="$(date +%s)"
 airflow_started=false
+airflow_owned=false
 fixture_staged=false
 verification_attempted=false
 current_expected_outcome="blocked"
@@ -108,7 +109,7 @@ cleanup() {
     compose exec -T airflow-scheduler python "$FIXTURE_SCRIPT" delete \
       --bucket "$LANDING_BUCKET" --key "$current_landing_key" >/dev/null 2>&1
   fi
-  if $airflow_started; then
+  if $airflow_owned; then
     bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
   fi
   exit "$exit_code"
@@ -162,7 +163,13 @@ log "event=airflow_silver_to_gold_suite_started suiteRunId=$suite_run_id dagId=$
 require_spark_cluster
 
 phase_started_ms="$(date +%s%3N)"
-bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if suite_owns_airflow; then
+  bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+  log "event=airflow_silver_to_gold_suite_airflow_reused suiteRunId=$suite_run_id"
+else
+  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+  airflow_owned=true
+fi
 airflow_started=true
 phase_complete "airflow_startup" "$phase_started_ms"
 

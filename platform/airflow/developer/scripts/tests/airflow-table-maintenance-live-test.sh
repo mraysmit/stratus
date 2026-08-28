@@ -22,6 +22,7 @@ evidence_file="$HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
 logical_epoch="$(date +%s)"
 airflow_started=false
+airflow_owned=false
 fixture_seeded=false
 export STRATUS_RUN_ID="$suite_run_id"
 export STRATUS_LOG_LEVEL="${STRATUS_LOG_LEVEL:-INFO}"
@@ -74,7 +75,7 @@ cleanup() {
   if $airflow_started && $fixture_seeded; then
     run_verifier cleanup >/dev/null 2>&1
   fi
-  if $airflow_started; then
+  if $airflow_owned; then
     bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-shutdown.sh"
   fi
   exit "$exit_code"
@@ -89,7 +90,13 @@ log "event=airflow_table_maintenance_suite_started suiteRunId=$suite_run_id dagI
 require_spark_cluster
 
 phase_started_ms="$(date +%s%3N)"
-bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+if suite_owns_airflow; then
+  bash "$HARNESS_DIR/scripts/tests/airflow-compose-verify-health.sh"
+  log "event=airflow_table_maintenance_suite_airflow_reused suiteRunId=$suite_run_id"
+else
+  bash "$HARNESS_DIR/scripts/lifecycle/airflow-compose-startup.sh"
+  airflow_owned=true
+fi
 airflow_started=true
 phase_complete "airflow_startup" "$phase_started_ms"
 
