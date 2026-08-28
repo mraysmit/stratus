@@ -8,6 +8,9 @@
 the measured trigger evidence is historical, while the runtime assembly and validation-tier rules
 remain current.
 
+Current performance findings, remediation status and remaining priorities are maintained in
+[`stratus_performance_review_20260828.md`](stratus_performance_review_20260828.md).
+
 ## 1. Status and decision
 
 Status: **implemented and accepted for development on 2026-08-22**.
