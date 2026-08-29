@@ -19,7 +19,7 @@ landing_key="verification/$suite_run_id/customers.csv"
 target_table="stratus.bronze.airflow_pipeline_probe_$run_token"
 pipeline_run_id="$suite_run_id"
 verifier_run_id="$suite_run_id-verifier"
-logical_date="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+airflow_run_id="$suite_run_id-dag"
 evidence_file="$HARNESS_DIR/evidence/${suite_run_id}.log"
 started_ms="$(date +%s%3N)"
 airflow_started=false
@@ -60,6 +60,35 @@ run_verifier() {
     --expectedRows "$EXPECTED_ROWS" \
     --runId "$verifier_run_id" \
     --cleanup true
+}
+
+run_repository_maven() {
+  if [[ -n "${MSYSTEM:-}" ]]; then
+    (cd "$REPO_DIR" && MSYS_NO_PATHCONV=1 cmd.exe /d /c mvnw.cmd "$@")
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    (cd "$REPO_DIR" && ./mvnw "$@")
+  elif [[ "${OS:-}" == "Windows_NT" ]]; then
+    (cd "$REPO_DIR" && ./mvnw.cmd "$@")
+  else
+    (cd "$REPO_DIR" && ./mvnw "$@")
+  fi
+}
+
+run_scheduler_scenario() {
+  local dag_conf scenarios_json scenarios_base64
+  dag_conf="{\"landing_bucket\":\"$LANDING_BUCKET\",\"landing_object_key\":\"$landing_key\",\"bronze_table\":\"$target_table\",\"pipeline_run_id\":\"$pipeline_run_id\"}"
+  scenarios_json="[{\"name\":\"accepted-landing-to-bronze\",\"dagId\":\"$DAG_ID\",\"runId\":\"$airflow_run_id\",\"expectedRunState\":\"success\",\"configuration\":$dag_conf,\"expectedTaskStates\":{\"wait_for_source_file\":\"success\",\"run_ingestion\":\"success\",\"run_bronze_quality\":\"success\"},\"expectedSparkApplications\":2}]"
+  scenarios_base64="$(printf '%s' "$scenarios_json" | base64 | tr -d '\r\n')"
+  run_repository_maven -o test \
+    -Porchestration-integration-tests -pl :stratus-orchestration-verifier -am \
+    -DSTRATUS_AIRFLOW_BASE_URL=http://127.0.0.1:8088 \
+    -DSTRATUS_AIRFLOW_ALLOW_HTTP=true \
+    -DSTRATUS_AIRFLOW_ANONYMOUS_ADMIN=true \
+    -DSTRATUS_AIRFLOW_USERNAME=anonymous \
+    -DSTRATUS_AIRFLOW_PASSWORD=unused-development-value \
+    -DSTRATUS_AIRFLOW_POLL_INTERVAL_MS=2000 \
+    -DSTRATUS_AIRFLOW_RUN_TIMEOUT_MS=900000 \
+    -DSTRATUS_AIRFLOW_SCENARIOS_BASE64="$scenarios_base64"
 }
 
 cleanup() {
@@ -104,8 +133,9 @@ fixture_staged=true
 phase_complete "isolated_input" "$phase_started_ms"
 
 phase_started_ms="$(date +%s%3N)"
-dag_conf="{\"landing_bucket\":\"$LANDING_BUCKET\",\"landing_object_key\":\"$landing_key\",\"bronze_table\":\"$target_table\",\"pipeline_run_id\":\"$pipeline_run_id\"}"
-compose exec -T airflow-scheduler airflow dags test "$DAG_ID" "$logical_date" --conf "$dag_conf"
+run_scheduler_scenario
+grep -Fq "event=airflow_orchestration_verification_completed status=SUCCESS" "$evidence_file" \
+  || fail "The landing scheduler scenario completion marker is absent"
 phase_complete "dag_execution" "$phase_started_ms"
 
 phase_started_ms="$(date +%s%3N)"

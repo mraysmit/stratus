@@ -129,8 +129,10 @@ final class AirflowPipelineDagTest {
             "dev.stratus.jobs.spark.AirflowBronzeToSilverVerifierJob";
     private static final String CATALOG_TABLE_STATE_CLASS =
             "dev.stratus.jobs.spark.CatalogTableStateJob";
-    private static final String SILVER_TO_GOLD_VERIFIER_CLASS =
-            "dev.stratus.jobs.spark.AirflowSilverToGoldVerifierJob";
+    private static final String SILVER_TO_GOLD_FIXTURE_CLASS =
+            "dev.stratus.jobs.spark.AirflowSilverToGoldFixtureJob";
+    private static final String SILVER_TO_GOLD_CATALOG_VERIFIER_CLASS =
+            "dev.stratus.jobs.spark.CatalogSilverToGoldVerifierJob";
     private static final String TABLE_MAINTENANCE_VERIFIER_CLASS =
             "dev.stratus.jobs.spark.AirflowTableMaintenanceVerifierJob";
     private static final String BRONZE_TABLE = "stratus.bronze.customers";
@@ -230,6 +232,10 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(dag.contains(BRONZE_TABLE)),
                 () -> assertTrue(dag.contains("dag_run.conf.get")),
                 () -> assertTrue(dag.contains("landing_object_key")),
+                () -> assertFalse(dag.contains("conf.get(\\\"landing_object_key\\\","),
+                        "Jinja eagerly evaluates get() defaults, so an API run with no ds would retry"),
+                () -> assertTrue(dag.contains("conf.get(\\\"landing_object_key\\\") or"),
+                        "The configured object must short-circuit the scheduled-run fallback"),
                 () -> assertTrue(dag.contains("bronze_table")),
                 () -> assertTrue(dag.contains("pipeline_run_id")),
                 () -> assertTrue(dag.contains("--batchId")),
@@ -562,7 +568,16 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("readonly LANDING_BUCKET_VARIABLE=\""
                         + LANDING_BUCKET_VARIABLE + "\"")),
                 () -> assertTrue(script.contains("readonly DAG_ID=\"" + LANDING_DAG_ID + "\"")),
-                () -> assertTrue(script.contains("airflow dags test \"$DAG_ID\"")),
+                () -> assertFalse(script.contains("airflow dags test"),
+                        "Canonical live data paths must execute through the real scheduler"),
+                () -> assertTrue(script.contains("STRATUS_AIRFLOW_SCENARIOS_BASE64")),
+                () -> assertTrue(script.contains(
+                        "\\\"wait_for_source_file\\\":\\\"success\\\"")),
+                () -> assertTrue(script.contains(
+                        "\\\"run_ingestion\\\":\\\"success\\\"")),
+                () -> assertTrue(script.contains(
+                        "\\\"run_bronze_quality\\\":\\\"success\\\"")),
+                () -> assertTrue(script.contains("\\\"expectedSparkApplications\\\":2")),
                 () -> assertTrue(script.contains("dev.stratus.jobs.spark.AirflowPipelineVerifierJob")),
                 () -> assertTrue(script.contains(
                         "mkdir -p " + AIRFLOW_SPARK_EVENT_LOG_DIRECTORY),
@@ -614,7 +629,7 @@ final class AirflowPipelineDagTest {
     }
 
     @Test
-    void liveSilverToGoldTestProvesAcceptedAndBlockedOutcomesWithCleanupAndTiming() {
+    void liveSilverToGoldTestUsesBoundaryFixturesRealSchedulingAndBoundedSparkWork() {
         String script = Repo.read(SILVER_TO_GOLD_LIVE_TEST_PATH);
         String overlay = Repo.read(AIRFLOW_SPARK_OVERLAY_PATH);
         assertAll(
@@ -622,15 +637,37 @@ final class AirflowPipelineDagTest {
                 () -> assertTrue(script.contains("airflow-compose-shutdown.sh")),
                 () -> assertTrue(script.contains("readonly DAG_ID=\""
                         + SILVER_TO_GOLD_DAG_ID + "\"")),
-                () -> assertTrue(script.contains("airflow dags test \"$DAG_ID\"")),
-                () -> assertTrue(script.contains(SILVER_TO_GOLD_VERIFIER_CLASS)),
-                () -> assertTrue(script.contains("--expectedOutcome")),
-                () -> assertTrue(script.contains("run_verifier accepted")),
-                () -> assertTrue(script.contains("run_verifier blocked")),
+                () -> assertFalse(script.contains("airflow dags test"),
+                        "Canonical live data paths must execute through the real scheduler"),
+                () -> assertFalse(script.contains(LANDING_DAG_ID),
+                        "Focused silver acceptance must not rebuild landing fixtures"),
+                () -> assertFalse(script.contains(BRONZE_TO_SILVER_DAG_ID),
+                        "Focused silver acceptance must not rebuild bronze fixtures"),
+                () -> assertFalse(script.contains(QUALITY_CLASS),
+                        "The blocked result must come from the DAG's own uniqueness rule"),
+                () -> assertTrue(script.contains(SILVER_TO_GOLD_FIXTURE_CLASS)),
+                () -> assertTrue(script.contains(SILVER_TO_GOLD_CATALOG_VERIFIER_CLASS)),
+                () -> assertTrue(script.contains("run_fixture prepare")),
+                () -> assertTrue(script.contains("run_fixture cleanup")),
+                () -> assertTrue(script.contains("STRATUS_AIRFLOW_SCENARIOS_BASE64")),
+                () -> assertTrue(script.contains(
+                        "\\\"run_silver_quality_for_gold\\\":\\\"success\\\"")),
+                () -> assertTrue(script.contains(
+                        "\\\"evaluate_silver_promotion\\\":\\\"failed\\\"")),
+                () -> assertTrue(script.contains(
+                        "\\\"run_gold_materialisation\\\":\\\"upstream_failed\\\"")),
+                () -> assertTrue(script.contains("\\\"expectedSparkApplications\\\":3")),
+                () -> assertTrue(script.contains("\\\"expectedSparkApplications\\\":1")),
+                () -> assertTrue(script.contains("spark_application_count"),
+                        "The application budget must be measured from the Spark master"),
+                () -> assertTrue(script.contains("observedSparkApplications"),
+                        "The measured application count must be emitted as evidence"),
+                () -> assertTrue(script.contains("-ne \"$EXPECTED_SPARK_APPLICATIONS\""),
+                        "A budget mismatch must fail the focused suite"),
                 () -> assertTrue(script.contains("export " + SILVER_TO_GOLD_RETRIES_ENV + "=0")),
                 () -> assertTrue(overlay.contains(SILVER_TO_GOLD_RETRIES_ENV)),
-                () -> assertTrue(script.contains("AIRFLOW SILVER TO GOLD VERIFIED")),
-                () -> assertTrue(script.contains("AIRFLOW SILVER TO GOLD BLOCK VERIFIED")),
+                () -> assertTrue(script.contains("CATALOG SILVER TO GOLD VERIFIED")),
+                () -> assertTrue(script.contains("CATALOG SILVER TO GOLD BLOCK VERIFIED")),
                 () -> assertTrue(script.contains("event=airflow_silver_to_gold_phase_completed")),
                 () -> assertTrue(script.contains("elapsedMs=")),
                 () -> assertTrue(script.contains("assert_not_logged")),

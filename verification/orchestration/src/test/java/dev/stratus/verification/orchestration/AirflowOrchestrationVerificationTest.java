@@ -47,14 +47,16 @@ final class AirflowOrchestrationVerificationTest {
     void provesHealthyPositiveAndFailClosedOrchestration() throws Exception {
         Map<String, String> environment = runtimeSettings();
         var config = AirflowVerifierConfig.from(environment);
-        Scenario positive = scenario(environment, "POSITIVE");
-        Scenario blocked = scenario(environment, "BLOCKED");
+        List<AirflowScenario> scenarios = scenarios(environment);
+        int expectedSparkApplications = scenarios.stream()
+                .mapToInt(AirflowScenario::expectedSparkApplications)
+                .sum();
         long suiteStarted = System.nanoTime();
 
-        LOG.info("event=airflow_orchestration_verification_started positiveDagId={} "
-                        + "positiveRunId={} blockedDagId={} blockedRunId={} timeoutMs={} pollMs={}",
-                positive.dagId(), positive.runId(), blocked.dagId(), blocked.runId(),
-                config.runTimeout().toMillis(), config.pollInterval().toMillis());
+        LOG.info("event=airflow_orchestration_verification_started scenarioCount={} "
+                        + "expectedSparkApplications={} timeoutMs={} pollMs={}",
+                scenarios.size(), expectedSparkApplications, config.runTimeout().toMillis(),
+                config.pollInterval().toMillis());
 
         try (var airflow = AirflowApiClient.connect(config)) {
             long phaseStarted = System.nanoTime();
@@ -77,17 +79,18 @@ final class AirflowOrchestrationVerificationTest {
                     + "status=SUCCESS dagCount={} requiredDagCount={} elapsedMs={}",
                     dags.size(), REQUIRED_DAGS.size(), elapsedMs(phaseStarted));
 
-            verifyScenario(airflow, config, positive);
-            verifyScenario(airflow, config, blocked);
+            for (AirflowScenario scenario : scenarios) {
+                verifyScenario(airflow, config, scenario);
+            }
         }
 
         LOG.info("event=airflow_orchestration_verification_completed status=SUCCESS "
-                        + "positiveRunId={} blockedRunId={} elapsedMs={}",
-                positive.runId(), blocked.runId(), elapsedMs(suiteStarted));
+                        + "scenarioCount={} expectedSparkApplications={} elapsedMs={}",
+                scenarios.size(), expectedSparkApplications, elapsedMs(suiteStarted));
     }
 
     private static void verifyScenario(
-            AirflowApiClient airflow, AirflowVerifierConfig config, Scenario scenario) {
+            AirflowApiClient airflow, AirflowVerifierConfig config, AirflowScenario scenario) {
         long scenarioStarted = System.nanoTime();
         AirflowDagRun accepted = airflow.triggerDag(
                 scenario.dagId(), scenario.runId(), scenario.configuration());
@@ -102,6 +105,8 @@ final class AirflowOrchestrationVerificationTest {
 
         Map<String, AirflowTaskInstance> tasks = airflow.taskInstances(
                 scenario.dagId(), scenario.runId());
+        assertEquals(scenario.expectedTaskStates().keySet(), tasks.keySet(),
+                "The scenario must declare every observed Airflow task");
         for (Map.Entry<String, String> expected : scenario.expectedTaskStates().entrySet()) {
             AirflowTaskInstance task = tasks.get(expected.getKey());
             assertNotNull(task, "Expected task is absent: " + expected.getKey());
@@ -113,12 +118,24 @@ final class AirflowOrchestrationVerificationTest {
                     task.state(), task.tryNumber(), task.duration().toMillis());
         }
         LOG.info("event=airflow_orchestration_scenario_completed scenario={} dagId={} runId={} "
-                        + "state={} observedTasks={} airflowDurationMs={} elapsedMs={}",
+                        + "state={} observedTasks={} expectedSparkApplications={} "
+                        + "airflowDurationMs={} elapsedMs={}",
                 scenario.name(), scenario.dagId(), scenario.runId(), terminal.state(), tasks.size(),
-                terminal.duration().toMillis(), elapsedMs(scenarioStarted));
+                scenario.expectedSparkApplications(), terminal.duration().toMillis(),
+                elapsedMs(scenarioStarted));
     }
 
-    private static Scenario scenario(Map<String, String> environment, String prefix) throws Exception {
+    private static List<AirflowScenario> scenarios(Map<String, String> environment) throws Exception {
+        String encodedManifest = environment.get("STRATUS_AIRFLOW_SCENARIOS_BASE64");
+        if (encodedManifest != null && !encodedManifest.isBlank()) {
+            return AirflowScenarioManifest.decode(encodedManifest);
+        }
+        return List.of(legacyScenario(environment, "POSITIVE"),
+                legacyScenario(environment, "BLOCKED"));
+    }
+
+    private static AirflowScenario legacyScenario(
+            Map<String, String> environment, String prefix) throws Exception {
         String name = prefix.toLowerCase();
         String dagId = required(environment, "STRATUS_AIRFLOW_" + prefix + "_DAG_ID");
         String runId = required(environment, "STRATUS_AIRFLOW_" + prefix + "_RUN_ID");
@@ -128,7 +145,7 @@ final class AirflowOrchestrationVerificationTest {
                 "STRATUS_AIRFLOW_" + prefix + "_CONF_BASE64", new TypeReference<>() { });
         Map<String, String> taskStates = decode(environment,
                 "STRATUS_AIRFLOW_" + prefix + "_TASK_STATES_BASE64", new TypeReference<>() { });
-        return new Scenario(name, dagId, runId, runState, configuration, taskStates);
+        return new AirflowScenario(name, dagId, runId, runState, configuration, taskStates, 0);
     }
 
     private static <T> T decode(
@@ -166,6 +183,7 @@ final class AirflowOrchestrationVerificationTest {
                 "STRATUS_AIRFLOW_PASSWORD",
                 "STRATUS_AIRFLOW_POLL_INTERVAL_MS",
                 "STRATUS_AIRFLOW_RUN_TIMEOUT_MS",
+                "STRATUS_AIRFLOW_SCENARIOS_BASE64",
                 "STRATUS_AIRFLOW_POSITIVE_DAG_ID",
                 "STRATUS_AIRFLOW_POSITIVE_RUN_ID",
                 "STRATUS_AIRFLOW_POSITIVE_EXPECTED_RUN_STATE",
@@ -188,12 +206,4 @@ final class AirflowOrchestrationVerificationTest {
         return Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
     }
 
-    private record Scenario(
-            String name,
-            String dagId,
-            String runId,
-            String expectedRunState,
-            Map<String, Object> configuration,
-            Map<String, String> expectedTaskStates) {
-    }
 }

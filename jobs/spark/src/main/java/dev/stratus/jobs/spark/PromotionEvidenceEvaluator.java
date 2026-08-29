@@ -21,12 +21,25 @@ final class PromotionEvidenceEvaluator {
     }
 
     static PromotionDecision evaluate(String runId, String targetTable,
-                                      List<Evidence> evidence) {
+                                       List<Evidence> evidence) {
+        String[] targetIdentifier = QualityCheckJob.splitIdentifier(targetTable);
+        String targetNamespace = targetIdentifier[1];
+        String targetName = targetIdentifier[2];
         var failing = new ArrayList<String>();
         var warnings = new ArrayList<String>();
         boolean overridden = false;
+        int checksExamined = 0;
 
         for (Evidence result : evidence) {
+            if (!targetNamespace.equals(result.datasetNamespace())
+                    || !targetName.equals(result.datasetName())) {
+                LOGGER.debug("PROMOTION EVIDENCE IGNORED runId={} targetTable={} "
+                                + "evidenceNamespace={} evidenceDataset={} check={}",
+                        runId, targetTable, result.datasetNamespace(), result.datasetName(),
+                        result.checkName());
+                continue;
+            }
+            checksExamined++;
             LOGGER.debug("PROMOTION EVIDENCE runId={} check={} severity={} status={}",
                     runId, result.checkName(), result.severity(), result.status());
             if (STATUS_OVERRIDDEN.equals(result.status())) {
@@ -38,11 +51,12 @@ final class PromotionEvidenceEvaluator {
             }
         }
 
-        boolean blocked = evidence.isEmpty() || (!failing.isEmpty() && !overridden);
-        return new PromotionDecision(runId, targetTable, blocked, evidence.size(),
+        boolean blocked = checksExamined == 0 || (!failing.isEmpty() && !overridden);
+        return new PromotionDecision(runId, targetTable, blocked, checksExamined,
                 failing, warnings);
     }
 
-    record Evidence(String checkName, String severity, String status) {
+    record Evidence(String datasetNamespace, String datasetName, String checkName,
+                    String severity, String status) {
     }
 }

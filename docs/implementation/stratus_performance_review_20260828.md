@@ -2,8 +2,8 @@
 
 **Status:** Active.
 
-**Last reviewed source revision:** `7dba05e` (`feat(airflow): replace Spark-backed promotion
-checks with lightweight catalog gates`).
+**Last reviewed source revision:** base revision `f4794a9` plus the explicitly recorded working-tree
+candidate validated on 2026-08-29. Immutable post-commit acceptance remains pending.
 
 **Scope:** Developer build, Spark, Airflow, Iceberg REST catalog and live acceptance paths. The
 figures in this document describe the reference development workstation and small deterministic
@@ -50,9 +50,14 @@ The most important completed changes are:
 The canonical suite now starts Ceph, OpenBao, Polaris, Spark and Airflow once, then passes that
 suite-scoped environment to every compatible focused harness. The separate two-cycle lifecycle
 qualification is no longer nested inside the canonical live run because service restart is the
-behavior that test exists to prove. A committed live run is still required to measure the saving.
-Repeated end-to-end pipelines remain, and the current silver-to-gold harness is now the largest
-obvious concentration of avoidable Spark application startups.
+behavior that test exists to prove. The complete 2026-08-29 working-tree run proved that shared
+lifecycle and reduced elapsed time from 2,975.509 seconds to 1,961.505 seconds (a directional
+34.1% reduction). A committed live rerun is still required for immutable acceptance.
+The focused silver-to-gold harness no longer reconstructs landing, bronze and silver state for
+both outcomes. It prepares the accepted and naturally invalid silver boundaries in one Spark
+application, schedules both scenarios through Airflow's public API, verifies them with direct
+Iceberg readers, and cleans them in one Spark application. The remaining pipeline-suite cost is
+now the lack of shared accepted-path state across the three separately runnable focused harnesses.
 
 ## 3. Measurement baseline
 
@@ -67,6 +72,9 @@ contention conditions match.
 | 2026-08-24 | API V1 full-stack proof | 420.772 seconds | Repeated data fixtures, Spark jobs and side-effect proofs obscured the API contract cost |
 | 2026-08-28 | Bronze-to-silver V2 focused proof | 410.717 seconds | Passed; 125.430 seconds was Airflow startup under concurrent Maven load, 101.985 seconds the accepted DAG, 50.758 seconds verification/cleanup and 22.243 seconds the blocked DAG |
 | 2026-08-28 | API V2 proof | 212.751 seconds | Passed; API behavior took 33.972 seconds, while provider and Airflow setup consumed most of the total |
+| 2026-08-29 | Shared-lifecycle canonical working-tree proof | 1,961.505 seconds | Passed both 312-test reactors, zero-Critical image scan, retry/deadline, Spark submission, three data flows, maintenance and public-API cases; one Airflow start and zero remaining Stratus containers. Base revision `f4794a9`; candidate changes were not yet committed. |
+| 2026-08-29 | Silver-to-gold boundary-fixture working-tree proof | 233.770 seconds | Run `airflow-silver-to-gold-20260829T143008Z` passed one accepted and one naturally invalid scenario through the real scheduler/API with exact task states, direct Iceberg assertions and exact cleanup. The Spark master proved exactly six new applications, from baseline count 6 to final count 12. |
+| 2026-08-29 | Landing real-scheduler working-tree proof | 44.393 seconds Airflow duration | Run `airflow-pipeline-20260829T144452Z` passed exact sensor, ingestion and quality states. Do not use its 309.206-second harness wall time as a baseline: an intentionally interrupted pre-fix run remained in preserved metadata and held `max_active_runs=1` until explicitly failed. |
 
 The API V2 change reduced its full-suite elapsed time by 208.021 seconds, or 49.4%, relative to the
 V1 record. This comparison shows the benefit of narrowing the scenario, but it is not a controlled
@@ -86,34 +94,38 @@ took milliseconds. The tiny dataset therefore does not explain the complete runt
 | PERF-003 | Resolved | A stale, internally consistent wheelhouse retained the superseded 455.5 MB PySpark archive and produced a 458.59 MB build context. | Resolution now uses temporary staging, locked hashes, exact selected-file comparison, rollback and interrupted-promotion recovery. The bad cache failed in 6.7 seconds; refreshed resolution took 33.2 seconds and all 13 artifact tests passed. | Keep the exact-set and recovery tests in the offline gate. |
 | PERF-004 | Improved | The first promotion-task design started a Spark driver and executors to read a handful of quality rows. | Commit `7dba05e` replaced the Airflow-side gate with a direct Iceberg REST catalog and generic Java reader. Accepted and blocked decisions were observed in seconds and blocked downstream Spark tasks did not start. | The direct gate still opens a JVM and catalog client for each decision. Measure connection/catalog setup separately before considering further design changes. |
 | PERF-005 | Improved | The V1 public-API suite mixed API state validation with ingestion, quality, maintenance, Spark verification and cleanup, taking 420.772 seconds. | V2 uses a one-task positive probe and a real missing-evidence denial. It creates no data fixture and submits no Spark application. The run fell to 212.751 seconds; the Java API phase was 33.972 seconds. | Remove Spark cluster startup and principal bootstrap from this suite if a clean run proves the direct catalog check and mounted runtime inputs do not require a running Spark cluster. Preserve Ceph, Polaris and trust validation. |
-| PERF-006 | Open | The V1 canonical acceptance script caused about 11 Airflow starts: two lifecycle cycles plus registry, retry, deadline, Spark submission, three pipeline suites, maintenance and API proofs. | The current runner exports an explicit suite-ownership contract, combines the Spark, retry and Deadline Alert inputs in one Compose deployment, starts each provider and Airflow once, and makes every nested harness verify and reuse that deployment. Focused commands still own startup and shutdown when run alone. The two-cycle lifecycle qualification remains separately runnable. Offline guardrails and the merged Compose model pass. | Run the complete committed suite and record service-start counts, isolated run IDs, exact cleanup, failure-safe shutdown and before/after elapsed time. Keep this issue open until that live proof passes. |
-| PERF-007 | Open | The silver-to-gold harness builds accepted and blocked silver inputs by running landing-to-bronze and bronze-to-silver twice. Its current paths account for about 15 Spark applications: eight in the accepted scenario and seven in the blocked scenario, including two Spark verifiers. The V1 run took 716.033 seconds. | Retry delays are disabled for expected failures and promotion itself now uses the direct catalog gate, but upstream fixture construction and verification remain duplicated. | Keep one full landing-to-gold end-to-end proof. Give the focused blocked case a deterministic prepared silver table and persisted failing quality evidence, and replace Spark verifiers with direct Iceberg readers where distributed execution is not the behavior under test. Record application count and before/after phase timings. |
+| PERF-006 | Improved | The V1 canonical acceptance script caused about 11 Airflow starts: two lifecycle cycles plus registry, retry, deadline, Spark submission, three pipeline suites, maintenance and API proofs. | The runner exports an explicit suite-ownership contract, combines the Spark, retry and Deadline Alert inputs in one Compose deployment, starts each provider and Airflow once, and makes every nested harness verify and reuse that deployment. The complete 2026-08-29 working-tree run passed in 1,961.505 seconds versus the 2,975.509-second V1 record, used one Airflow start, retained isolated run IDs, shut down the shared services successfully and reported zero remaining Stratus containers. | Repeat after commit and record the immutable revision before marking this resolved. Retain the separately runnable two-cycle lifecycle qualification and failure-path cleanup tests. |
+| PERF-007 | Improved | The old silver-to-gold harness rebuilt landing, bronze and silver state for both outcomes and used about 15 Spark applications: eight accepted and seven blocked, including separate Spark verifiers. Its V1 run took 716.033 seconds. | The focused harness now uses one combined boundary-fixture application, three accepted DAG applications, one blocked quality application, direct Iceberg verification and one exact-cleanup application. The naturally duplicated silver data causes the DAG's own uniqueness check to fail; no external failing evidence is injected. Live run `airflow-silver-to-gold-20260829T143008Z` passed in 233.770 seconds and the Spark master measured exactly six new applications, a directional 67.4% elapsed-time reduction from V1. | Reuse one accepted landing-to-gold state across the canonical landing, bronze and silver phases rather than rebuilding independent accepted datasets, then rerun the complete canonical suite. |
 | PERF-008 | Open | The API V2 suite starts Ceph, OpenBao, Polaris and Spark, then Airflow, even though it submits no Spark application. In the 212.751-second run, Spark startup/principal took 9.713 seconds; all provider bootstrap before Airflow took 94.803 seconds. | Scenario work was narrowed, but provider lifecycle was not. | Establish the minimum dependency set experimentally. A candidate passes only if it retains real catalog no-write proof, trust/credential behavior, deterministic cleanup and the exact Airflow task-state contract. |
 | PERF-009 | Open | The DAG operators do not currently set `execution_timeout`. A hung Spark submission or catalog call can therefore consume the harness's outer polling allowance and hide the failing phase. Normal promotion tasks also inherit two retries with five-minute delays unless a test overlay sets retries to zero. | Focused expected-failure suites set their retry variables to zero. API polling is bounded. | Add evidence-based task timeouts for Spark submissions and direct gates, test timeout behavior, and keep normal transient retries distinct from deterministic policy denial. A policy denial must not spend ten minutes retrying. |
 | PERF-010 | Measure | `IngestionJob` enables CSV `inferSchema` when no schema is supplied. Spark documents that inference requires an extra pass over the data. Current tiny fixtures do not pass an explicit schema. | The implementation already prefers an explicit `--schema`; no current harness supplies one. | Add the governed source schema to deterministic fixtures and measure `plan_batch` before and after. Do not attribute the full 15.089-second phase to inference until isolated timing proves it. Define how production source schemas are owned and versioned before removing the fallback. |
-| PERF-011 | Open | The direct and writer-side promotion readers filter quality evidence by `run_id` only. The requested source table is reported in the decision but is not part of the Iceberg predicate. This is primarily a correctness/isolation concern, and it also prevents a safe physical layout targeted at the full lookup key. | Run IDs are unique in current live harnesses and cleanup is exact. | Filter by run ID and dataset identity, add collision tests, then assess partitioning or clustering only with representative result-table volume. The gate must remain fail-closed for missing or mismatched evidence. |
+| PERF-011 | Resolved | The direct and writer-side promotion readers filtered quality evidence by `run_id` only, so evidence for another dataset could contaminate a decision. | Both Iceberg readers now predicate on run ID, dataset namespace and dataset name. The evaluator defensively applies the same exact target filter. Real Iceberg expression-evaluation tests prove unrelated failures are ignored and unrelated passing evidence cannot authorize promotion. The 2026-08-29 accepted and blocked live scenarios passed with the scoped reader. | Retain the collision tests. Assess partitioning or clustering only with representative result-table volume; do not weaken fail-closed behavior for missing or mismatched evidence. |
 | PERF-012 | Measure | The writer-side defence-in-depth evidence read took 16.592 seconds in the formal bronze-to-silver run. The independent Airflow gate and the writer both read the same small quality result set, by design. | The duplicate decision is required by the accepted governance boundary; only the Airflow-side read was moved out of Spark. | Break the 16.592 seconds into catalog open, planning, file read and evaluation. Optimize the result-table lookup and metadata layout without removing the writer recheck. |
 | PERF-013 | Open | The warm offline reactor took 65.475 seconds against an under-60-second objective. The canonical suite repeats the reactor before and after all live work. | Prepared-artifact focused execution provides a faster safe development path. | Profile module and plugin time, retain the two full reactors only in the release gate, and keep ordinary change-specific feedback below the existing warm budget. |
 | PERF-014 | Open | V2 live evidence was produced before its immutable source revision was recorded. It proves behavior of the tested working tree, while the dated V1 gate remains the last formally accepted revision. | Source revision `7dba05e` now contains the V2 implementation. | Run the superseding V2 acceptance against the committed revision and record its phase timings. Do not label pre-commit evidence as immutable acceptance. |
+| PERF-015 | Open | The successful 2026-08-29 canonical run emitted misleading error-level noise: one successful `dag.test()` quality task reported a terminal-state supervisor `Task Instance not found` response after the task result was persisted, and Iceberg's asynchronous REST metrics reporter repeatedly logged 404s while newly created tables were becoming visible. The DAGs and independent data checks still passed. | The shared lifecycle makes these intermittent messages visible in one correlated evidence file rather than hiding them across restarts. They are not classified as accepted failure signals. | Reproduce each message with the narrowest focused harness, determine whether it is an Airflow SDK test-runner race or Stratus lifecycle error, and either remove the cause or downgrade only a proven-benign condition. Add a regression assertion so genuine terminal-state and catalog failures remain error-level and fail the appropriate test. |
 
 ## 5. Remediation order
 
-1. Correct promotion evidence scoping by run ID and dataset identity before changing its storage
-   layout or caching behavior.
+1. Reuse one accepted landing-to-gold state across the canonical pipeline phases and enforce their
+   Spark application budgets from observed scheduler events.
 2. Add task-level timeouts and make deterministic policy denial non-retriable while preserving
    retries for transient infrastructure failures.
 3. Remove Spark cluster startup from the API suite if the reduced-dependency proof retains every
    current assertion.
-4. Refactor the silver-to-gold focused scenarios so only one path rebuilds the entire upstream
-   pipeline.
+4. Retain the completed silver-to-gold boundary-fixture design and its direct Iceberg verifier as
+   the focused regression; do not reintroduce upstream DAG construction into that harness.
 5. Run and measure the implemented suite-scoped service lifecycle, including failure cleanup and
-   standalone focused-harness regression.
+   standalone focused-harness regression. The working-tree proof passed on 2026-08-29; only the
+   immutable post-commit rerun remains.
 6. Supply an explicit governed schema to the CSV ingestion fixtures and measure the isolated
    change.
 7. Profile the writer-side promotion read and the warm Maven reactor using their existing phase
    markers.
 8. Run and record a committed V2 acceptance baseline, then set a realistic end-to-end gate budget
    from the new phase data.
+9. Remove or precisely classify the false error-level signals recorded as PERF-015 so a green
+   acceptance log does not train operators to ignore `ERROR` records.
 
 This order protects correctness first, removes whole service and application boundaries next, and
 leaves engine-level tuning until the larger fixed costs have been removed.
@@ -124,12 +136,12 @@ The accepted tier objectives remain:
 
 | Tier | Objective | Current reading |
 |---|---:|---|
-| Warm offline repository guardrails | under 60 seconds | Breached at 65.475 seconds in the dated V1 gate |
+| Warm offline repository guardrails | under 60 seconds | Post-live reactor was 63.792 seconds on 2026-08-29; still above objective |
 | Image smoke after cached layers | under 2 minutes | Met; 17.951 seconds in the corrected 2026-08-25 proof |
 | Two-cycle developer lifecycle | under 3 minutes | Met in V1; canonical phase was 136.432 seconds |
 | One Spark submission with ready data plane | under 5 minutes | Met; canonical V1 phase was 119.896 seconds |
-| API state contract after healthy Airflow | under 2 minutes | Met by the 33.972-second V2 Java API phase; the 212.751-second full-stack setup is tracked separately |
-| Canonical release/gate suite | No approved budget yet | Historical V1 baseline is 2,975.509 seconds |
+| API state contract after healthy Airflow | under 2 minutes | Met; 15.555-second Java API verification and 38.373-second canonical phase on 2026-08-29 |
+| Canonical release/gate suite | No approved budget yet | Working-tree candidate passed in 1,961.505 seconds; immutable V1 baseline was 2,975.509 seconds |
 
 A performance result is acceptable only when it:
 

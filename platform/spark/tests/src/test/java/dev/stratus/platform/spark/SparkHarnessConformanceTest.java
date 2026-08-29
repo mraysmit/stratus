@@ -181,6 +181,18 @@ final class SparkHarnessConformanceTest {
     }
 
     @Test
+    void shadedAwsRuntimeOmitsVolatileGeneratedMavenMetadata() {
+        String awsRuntimePom = read(AWS_RUNTIME_POM_PATH);
+        int globalFilterStart = awsRuntimePom.indexOf("<artifact>*:*</artifact>");
+
+        assertTrue(globalFilterStart >= 0
+                        && awsRuntimePom.substring(globalFilterStart)
+                                .contains("<exclude>META-INF/maven/**</exclude>"),
+                "the global shade filter must omit generated pom.properties timestamps so "
+                        + "unchanged runtime builds have one stable SHA-256");
+    }
+
+    @Test
     void focusedLiveRunsRequireExactPreparedSnapshots() {
         String artifacts = read("scripts/lib/spark-compose-focused-test-artifacts.sh");
         String runner = read("scripts/tests/spark-compose-run-focused-tests.sh");

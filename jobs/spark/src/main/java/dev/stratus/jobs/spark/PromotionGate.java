@@ -93,16 +93,23 @@ public final class PromotionGate {
     public static PromotionDecision evaluate(SparkSession spark, String runId, String targetTable,
                                              String resultsTable) {
         QualityCheckJob.requireFullyQualifiedTable(resultsTable);
+        String[] targetIdentifier = QualityCheckJob.splitIdentifier(targetTable);
+        String targetNamespace = targetIdentifier[1];
+        String targetName = targetIdentifier[2];
         List<Row> results = JobTelemetry.measure("PROMOTION", "read_evidence", runId, targetTable,
                 () -> spark.table(resultsTable)
                         .filter(functions.col("run_id").equalTo(runId))
-                        .select("check_name", "severity", "status")
+                        .filter(functions.col("dataset_namespace").equalTo(targetNamespace))
+                        .filter(functions.col("dataset_name").equalTo(targetName))
+                        .select("dataset_namespace", "dataset_name", "check_name", "severity",
+                                "status")
                         .collectAsList());
 
         var evidence = new ArrayList<PromotionEvidenceEvaluator.Evidence>();
         for (Row row : results) {
             evidence.add(new PromotionEvidenceEvaluator.Evidence(
-                    row.getString(0), row.getString(1), row.getString(2)));
+                    row.getString(0), row.getString(1), row.getString(2), row.getString(3),
+                    row.getString(4)));
         }
         return PromotionEvidenceEvaluator.evaluate(runId, targetTable, evidence);
     }

@@ -19,8 +19,8 @@ DAG_ID = "stratus_landing_to_bronze"
 LANDING_CONNECTION_ID = "stratus_landing"
 LANDING_BUCKET_VARIABLE = "stratus_landing_bucket"
 LANDING_OBJECT_KEY = (
-    "{{ dag_run.conf.get(\"landing_object_key\", "
-    "\"customers/\" ~ ds ~ \"/customers.csv\") }}"
+    "{{ dag_run.conf.get(\"landing_object_key\") or "
+    "(\"customers/\" ~ ds ~ \"/customers.csv\") }}"
 )
 LANDING_BUCKET = (
     "{{ dag_run.conf.get(\"landing_bucket\", "
@@ -29,8 +29,8 @@ LANDING_BUCKET = (
 LANDING_OBJECT_URI = (
     "s3a://{{ dag_run.conf.get(\"landing_bucket\", "
     "var.value.stratus_landing_bucket) }}/"
-    "{{ dag_run.conf.get(\"landing_object_key\", "
-    "\"customers/\" ~ ds ~ \"/customers.csv\") }}"
+    "{{ dag_run.conf.get(\"landing_object_key\") or "
+    "(\"customers/\" ~ ds ~ \"/customers.csv\") }}"
 )
 BRONZE_TABLE = "stratus.bronze.customers"
 TARGET_TABLE = "{{ dag_run.conf.get(\"bronze_table\", \"" + BRONZE_TABLE + "\") }}"
