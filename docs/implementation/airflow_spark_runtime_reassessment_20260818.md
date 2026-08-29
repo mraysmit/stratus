@@ -131,8 +131,9 @@ the slow phase separately from functional acceptance.
 
 The later warm offline run of 65.475 seconds exceeded the under-60-second objective. Functional
 acceptance remains valid, but the budget is not marked met; profiling and narrower routine feedback
-remain required. The roughly 49-minute canonical Airflow suite is release/gate evidence and must
-not be used as the inner development loop.
+remain required. The historical roughly 49-minute canonical Airflow suite and its current roughly
+33-minute shared-lifecycle successor are release/gate evidence and must not be used as the inner
+development loop.
 
 The lifecycle and Spark-submission tiers must emit phase timings. Tests should
 share a suite-scoped environment where isolation permits it and use unique run
@@ -158,8 +159,28 @@ every trivial assertion.
   retry/alert, Deadline Alert, and public-API positive/fail-closed scenarios pass;
   the final 420.772-second full-stack run also passed independent side-effect,
   exact cleanup, secret, and zero-remaining-container checks.
-- `P1-4.3-V2`: in progress from 2026-08-25. Promotion becomes an explicit Airflow
-  task while each writer rechecks the same evidence; fresh live task-state proof is required.
+- `P1-4.3-V2`: the complete working-tree candidate passed on 2026-08-29. Promotion is an explicit
+  Airflow task while each writer rechecks the same evidence; immutable post-commit acceptance is
+  still required.
+
+### 2026-08-29 shared-lifecycle and artifact-integrity proof
+
+Canonical run `airflow-development-acceptance-20260829T110726Z` passed in 1,961,505 ms from base
+revision `f4794a9` plus the recorded working-tree candidate. It ran the 312-test reactor before and
+after live work, scanned the Airflow image with zero Critical occurrences, started the shared
+Ceph/OpenBao/Polaris/Spark/Airflow environment once, passed every retry, Deadline Alert, Spark,
+pipeline, maintenance and public-API scenario, and shut down with zero remaining Stratus
+containers. The Deadline callback logged `expected_interval_ms=12000`,
+`observed_elapsed_ms=13341` and `breach_ms=1341` from the triggerer.
+
+The same work introduced a seconds-scale Spark artifact gate before the expensive reactor and live
+startup. It verifies the exact eight-JAR set and all tracked hashes, and is reused by standalone
+Spark submission. Investigation of a changing AWS runtime hash found a generated
+`META-INF/maven/.../pom.properties` timestamp in the shaded JAR. Excluding generated Maven metadata
+made two consecutive resolutions produce the identical
+`e83e7f6b1f12ebbe832c04ca878fb33e25ddba88e23404523d961e38b2e3ae73` SHA-256. The full proof is
+working-tree implementation evidence; it must be repeated after commit before becoming the dated
+immutable V2 acceptance record.
 
 ### 2026-08-28 execution-model revision
 

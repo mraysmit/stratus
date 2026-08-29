@@ -189,6 +189,19 @@ harnesses verify and reuse the running Airflow deployment. Those harnesses remai
 when invoked directly. The two-cycle Compose lifecycle test is a separate qualification because
 restarting Airflow is its subject; it is not nested in the performance-sensitive canonical run.
 
+Before any live service starts, the canonical suite runs
+`airflow-spark-artifact-lock-test.sh`. The fast preflight requires exactly the eight tracked Spark
+runtime JARs and verifies every SHA-256 against `platform/spark/image/artifact-lock.txt`. The Spark
+submission harness invokes the same test, so a standalone run retains the boundary check. A stale
+or extra artifact therefore fails in seconds with regeneration instructions instead of surfacing
+after Airflow and the data plane have started. The shaded AWS runtime excludes generated Maven
+metadata whose timestamp previously made identical resolutions produce different hashes.
+
+The Deadline Alert callback executes in the triggerer rather than during ordinary DAG parsing.
+The acceptance overlay therefore exposes `/opt/airflow/dags` through `PYTHONPATH` as well as the
+normal DAG mount, allowing the triggerer to import the shared `stratus_alerts` callback module.
+The live test verifies the emitted expected interval, observed elapsed time and breach duration.
+
 The Java verifier authenticates through Airflow's public REST API, validates health and DAG
 registration, triggers caller-correlated runs, polls with a bound and checks exact DAG/task terminal
 states. A separate direct Iceberg catalog check proves the blocked target is absent without starting
@@ -196,12 +209,42 @@ another Spark application. The blocked API scenario expects
 `evaluate_bronze_promotion=failed`, with transform and downstream quality both
 `upstream_failed`.
 
+Focused data scenarios are supplied to that verifier as a Base64-encoded JSON manifest. Each entry
+owns a unique name, DAG/run tuple, run configuration, expected DAG state, exact task-state map and
+expected Spark-application count. Duplicate identities, empty task contracts and negative budgets
+fail before any live trigger. This keeps scheduler behavior under test while allowing a focused
+harness to prepare the correct boundary once instead of invoking unrelated upstream DAGs.
+
+The silver-to-gold focused harness applies this model at the silver boundary. One Spark application
+prepares both accepted and naturally invalid tables, the scheduler executes three Spark tasks for
+the accepted case and one for the blocked case, a direct Iceberg verifier checks data and scoped
+quality evidence, and one Spark application performs exact cleanup. Promotion evidence is filtered
+by run ID, dataset namespace and dataset name in both direct and writer-side readers. Run
+`airflow-silver-to-gold-20260829T143008Z` passed the exact task contracts in 233,770 ms. A
+before/after query of the Spark master measured exactly six new applications and fails the harness
+if that budget regresses.
+
+Landing-to-bronze now uses the same public scheduler/API path and asserts the exact sensor,
+ingestion and quality task states. That conversion exposed a defect hidden by `airflow dags test`:
+Jinja eagerly evaluated the `dict.get` fallback containing `ds` even when an API caller supplied a
+landing object key, while a manually triggered Airflow 3 run has no `ds`. The template now uses a
+short-circuiting `or`, and a repository guard prevents reintroducing the eager default. Corrected
+run `airflow-pipeline-20260829T144452Z` completed its Airflow DAG in 44,393 ms with all three tasks
+successful. Its harness wall time is not a performance baseline because a deliberately interrupted
+pre-fix run remained in preserved Airflow metadata and temporarily occupied `max_active_runs=1`.
+
 ## 9. Evidence status
 
 The 2026-08-24 developer gate is point-in-time evidence for the V1 implementation; it is not a
 claim that every later commit is accepted. `P1-4.3-V2` changes the observable promotion boundary
 and therefore requires fresh offline, DAG-parse, focused live and API task-state evidence before it
 can supersede V1. Historical run durations and task states remain unchanged in their dated records.
+A complete working-tree candidate based on `f4794a9` passed on 2026-08-29 as run
+`airflow-development-acceptance-20260829T110726Z` in 1,961,505 ms. It passed the fast eight-JAR
+artifact gate, both 312-test offline reactors, a zero-Critical image scan, all live positive and
+fail-closed cases, shared shutdown and the zero-container cleanup assertion. Because the candidate
+changes were not committed when it ran, this is implementation evidence rather than immutable
+superseding acceptance.
 
 Current task state:
 
@@ -211,7 +254,7 @@ Current task state:
 | `P1-4.1-D1` Compose lifecycle | Accepted for development | production topology remains separate |
 | `P1-4.2-D1` Airflow-to-Spark submission | Accepted for development | repeat on dependency/runtime change |
 | `P1-4.3-V1` embedded gate evidence | Accepted point-in-time on 2026-08-24 | retained as historical evidence |
-| `P1-4.3-V2` explicit gate task plus writer recheck | Implementation evidence passed 2026-08-28; source revision `7dba05e` is recorded | rerun the evidence against that revision and record dated superseding acceptance |
+| `P1-4.3-V2` explicit gate task plus writer recheck | Complete working-tree canonical evidence passed 2026-08-29 from base `f4794a9` | commit the candidate, rerun from that immutable revision and record dated superseding acceptance |
 | `P1-4.G-D` developer gate | Accepted for the V1 state on 2026-08-24 | does not automatically accept V2 |
 | `P1-4.1-P1`, `P1-4.5-R1`, `P1-4.4-V1` | Planned | hardened deployment, recovery, observability, capacity and schedule evidence pass |
 
@@ -236,7 +279,7 @@ to make it appear to describe a later implementation.
 |---|---|---|---|
 | `P1-4.1-D1` | `P1-4.1-S2` local development image | two Compose lifecycle cycles and health | Accepted for development |
 | `P1-4.1-P1` | `P1-4.1-S2`, `P1-0.1` | published digest, hardened topology, restore and continuity | Planned |
-| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | Pre-commit evidence passed; committed rerun and acceptance record remain pending |
+| `P1-4.3-V2` | `P1-4.2-D1`, ADR-P1-007 | offline, parse, focused live, API states and no-write proof | Complete pre-commit canonical evidence passed 2026-08-29; committed rerun and acceptance record remain pending |
 
 ## 10. Production acceptance boundary
 

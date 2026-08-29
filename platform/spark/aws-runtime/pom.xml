@@ -113,6 +113,11 @@
                                     <artifact>*:*</artifact>
                                     <excludes>
                                         <exclude>META-INF/MANIFEST.MF</exclude>
+                                        <!-- Maven generates pom.properties on every build and
+                                             stamps it with the current minute. It is not needed at
+                                             runtime and would make this otherwise identical shaded
+                                             JAR acquire a different SHA-256 on every resolution. -->
+                                        <exclude>META-INF/maven/**</exclude>
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>

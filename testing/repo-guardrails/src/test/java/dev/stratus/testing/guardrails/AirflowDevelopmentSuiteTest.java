@@ -60,9 +60,13 @@ final class AirflowDevelopmentSuiteTest {
     private static final Path LIFECYCLE_TEST_PATH = Repo.root().resolve(Path.of(
             "platform", "airflow", "developer", "scripts", "tests",
             "airflow-compose-lifecycle-test.sh"));
+    private static final Path SPARK_SUBMISSION_TEST_PATH = Repo.root().resolve(Path.of(
+            "platform", "airflow", "developer", "scripts", "tests",
+            "airflow-spark-submission-test.sh"));
 
     private static final List<String> REQUIRED_TEST_SCRIPTS = List.of(
             "airflow-image-acceptance-test.sh",
+            "airflow-spark-artifact-lock-test.sh",
             "airflow-pipeline-dag-parse-test.sh",
             "airflow-spark-submission-test.sh",
             "airflow-landing-to-bronze-live-test.sh",
@@ -97,7 +101,11 @@ final class AirflowDevelopmentSuiteTest {
                 () -> assertTrue(suite.contains("java.io.tmpdir")),
                 () -> assertTrue(suite.contains("phase_started")),
                 () -> assertTrue(suite.contains("phase_completed")),
-                () -> assertTrue(suite.contains("durationMs")));
+                () -> assertTrue(suite.contains("durationMs")),
+                () -> assertTrue(
+                        suite.indexOf("spark_artifact_lock_preflight")
+                                < suite.indexOf("offline_reactor_before_live"),
+                        "generated Spark submission inputs must fail before the reactor or services start"));
     }
 
     @Test
@@ -117,6 +125,7 @@ final class AirflowDevelopmentSuiteTest {
         String suite = Repo.read(SUITE_PATH);
         String common = Repo.read(COMPOSE_COMMON_PATH);
         String overlay = Repo.read(SUITE_OVERLAY_PATH);
+        String sparkSubmission = Repo.read(SPARK_SUBMISSION_TEST_PATH);
 
         assertAll(
                 () -> assertTrue(Files.isRegularFile(LIFECYCLE_TEST_PATH),
@@ -139,6 +148,13 @@ final class AirflowDevelopmentSuiteTest {
                         "the nested bind-mount target must exist inside the read-only DAG tree"),
                 () -> assertTrue(overlay.contains(
                         "./scripts/tests/dags:/opt/airflow/dags/acceptance-probes:ro")),
+                () -> assertTrue(overlay.contains("PYTHONPATH: /opt/airflow/dags"),
+                        "the triggerer must be able to import platform callback modules when "
+                                + "acceptance probes are mounted below the platform DAG tree"),
+                () -> assertTrue(sparkSubmission.contains(
+                                "bash \"$(dirname \"$0\")/airflow-spark-artifact-lock-test.sh\""),
+                        "the focused Spark harness must resolve the sibling preflight without "
+                                + "depending on an undeclared shell variable"),
                 () -> assertFalse(overlay.contains("SCHEDULER_HEARTBEAT_SEC"),
                         "the shared scheduler must not race the retry probe's in-process runner"));
     }

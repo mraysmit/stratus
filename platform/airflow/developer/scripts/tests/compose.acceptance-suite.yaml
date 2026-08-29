@@ -6,6 +6,9 @@ x-acceptance-probe-volumes: &acceptance-probe-volumes
   # read-only directory mount over it without trying to create a mountpoint in a read-only parent.
   - ./scripts/tests/dags:/opt/airflow/dags/acceptance-probes:ro
 x-acceptance-probe-environment: &acceptance-probe-environment
+  # Deadline callbacks are imported by the triggerer outside DAG parsing. Make the platform
+  # callback module importable while retaining the platform DAG tree as the active DAG mount.
+  PYTHONPATH: /opt/airflow/dags
   STRATUS_DEADLINE_PROBE_DAG_ID: ${STRATUS_DEADLINE_PROBE_DAG_ID:?STRATUS_DEADLINE_PROBE_DAG_ID is required}
 
 services:

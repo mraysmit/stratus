@@ -16,6 +16,7 @@ import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
+import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 
 /**
@@ -73,11 +74,14 @@ public final class CatalogPromotionGateJob {
                     var records = new ArrayList<PromotionEvidenceEvaluator.Evidence>();
                     var table = catalog.loadTable(identifier);
                     try (var rows = IcebergGenerics.read(table)
-                            .where(Expressions.equal("run_id", runId))
-                            .select("check_name", "severity", "status")
+                            .where(evidenceFilter(runId, targetTable))
+                            .select("dataset_namespace", "dataset_name", "check_name", "severity",
+                                    "status")
                             .build()) {
                         for (var row : rows) {
                             records.add(new PromotionEvidenceEvaluator.Evidence(
+                                    value(row.getField("dataset_namespace")),
+                                    value(row.getField("dataset_name")),
                                     value(row.getField("check_name")),
                                     value(row.getField("severity")),
                                     value(row.getField("status"))));
@@ -90,6 +94,15 @@ public final class CatalogPromotionGateJob {
                     return records;
                 });
         return PromotionEvidenceEvaluator.evaluate(runId, targetTable, evidence);
+    }
+
+    static Expression evidenceFilter(String runId, String targetTable) {
+        String[] targetIdentifier = QualityCheckJob.splitIdentifier(targetTable);
+        return Expressions.and(
+                Expressions.equal("run_id", runId),
+                Expressions.and(
+                        Expressions.equal("dataset_namespace", targetIdentifier[1]),
+                        Expressions.equal("dataset_name", targetIdentifier[2])));
     }
 
     static TableIdentifier tableIdentifier(String catalogName, String table) {

@@ -116,20 +116,28 @@ Normal executions use two retries with a five-minute delay. The live harness
 sets `STRATUS_BRONZE_TO_SILVER_RETRIES=0` only for its deliberately blocked
 scenario so the expected failure does not wait through retry intervals.
 
-The checked-in silver-to-gold harness continues through the real upstream DAGs:
+The checked-in focused silver-to-gold harness starts at its silver input boundary:
 
 ```bash
 bash platform/airflow/developer/scripts/tests/airflow-silver-to-gold-live-test.sh
 ```
 
-Its accepted V1 path proved the silver quality gate, governed country aggregation,
-gold quality results and independent aggregate/snapshot verification. Its
-blocked path persists a real failing silver check, requires the explicit gate to
-fail before materialisation, and independently proves the target is absent. Both
-paths remove only their exact bronze/silver/gold probe tables, quality rows and
-landing objects. Run `airflow-silver-to-gold-20260823T093453Z` passed in 716,033
-ms. Normal silver-to-gold executions use two retries; the harness sets
-`STRATUS_SILVER_TO_GOLD_RETRIES=0` only for expected-failure evidence.
+One Spark application prepares an accepted three-customer table and a naturally invalid
+three-row/two-customer table. A manifest-driven Java verifier triggers both real DAG runs through
+Airflow's public API and requires their exact task-state maps. The accepted run executes silver
+quality, the direct-catalog gate, materialisation and gold quality. The blocked run executes its own
+silver uniqueness check, fails the gate, leaves materialisation and gold quality
+`upstream_failed`, and never creates the target. No failing quality result is pre-seeded.
+
+The independent verifier reads Iceberg directly, checking exact rows, countries, aggregates,
+snapshots, scoped quality evidence and blocked-target absence without starting Spark. One final
+Spark application removes only the four isolated tables and four exact quality-run IDs. The hard
+budget is six Spark applications: prepare, three accepted tasks, one blocked quality task and
+cleanup. Run `airflow-silver-to-gold-20260829T143008Z` passed in 233,770 ms and the Spark master
+proved exactly six new applications, from baseline count 6 to final count 12. Its two scheduler
+scenarios took 125,625 ms, including accepted Airflow duration 93,712 ms and blocked duration
+29,626 ms. The historical V1 run took 716,033 ms with about 15 applications. Normal executions use
+two retries; the harness sets `STRATUS_SILVER_TO_GOLD_RETRIES=0` only for expected-failure evidence.
 
 The checked-in maintenance harness proves both sides of the metadata-policy
 decision against an exact isolated table:

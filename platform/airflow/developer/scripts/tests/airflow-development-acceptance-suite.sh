@@ -140,6 +140,7 @@ trap cleanup EXIT
 
 log_suite development_acceptance_started "evidence=$EVIDENCE_FILE"
 
+run_phase spark_artifact_lock_preflight bash "$SCRIPT_DIR/airflow-spark-artifact-lock-test.sh"
 run_phase offline_reactor_before_live run_repository_maven -o verify
 run_phase image_acceptance bash "$IMAGE_TEST_DIR/airflow-image-acceptance-test.sh"
 
