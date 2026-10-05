@@ -39,7 +39,6 @@ confused when reviewing or committing.
 
 | Path | Note |
 |---|---|
-| `CLAUDE.md` | untouched this session |
 | `docs/implementation/flink_streaming_iceberg.md` | untouched this session |
 | `testing/repo-guardrails/.../NamingConventionTest.java` | untouched this session |
 | `docs/README.md` (deleted, staged) | untouched this session |

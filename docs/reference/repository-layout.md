@@ -18,7 +18,7 @@ The repository is organized by stable capability, not implementation sequence. P
 | `evidence/` | verification and acceptance evidence output | Kept in git as an empty anchor; generated evidence is not committed |
 | `logs/` | local command logs (for example Maven `Tee-Object` captures) | Git-ignored; created per workstation |
 
-Dot-directories (`.mvn`, `.idea`, `.claude`, and similar) are build- and tooling-internal and are not part of the repository layout.
+Dot-directories (`.mvn`, `.idea`, and similar) are build- and tooling-internal and are not part of the repository layout.
 
 The table above is the closed allowlist of top-level directories. `RepositoryLayoutTest` in `testing/repo-guardrails` fails the build when a tracked top-level directory is missing from the table or a documented directory disappears, so a new top-level directory requires a row here — and a deliberate decision that the content fits no existing directory.
 

@@ -297,9 +297,9 @@ any Polaris restart — the 1.5.0 in-memory metastore loses all catalog state.
 reached the remote. Separately, a local branch appeared on `origin` without any
 `git push` being run.
 
-Neither `.claude/settings.local.json` nor `~/.claude/settings.json` contains a
-git rule, `.git/hooks` holds no non-sample hooks, and `push.autoSetupRemote` is
-unset. The mechanism was not identified.
+No local assistant configuration contains a git rule, `.git/hooks` holds no
+non-sample hooks, and `push.autoSetupRemote` is unset. The mechanism was not
+identified.
 
 **Assume local commits in this repository can reach `origin` without an explicit
 push.** Treat every commit as immediately published.
